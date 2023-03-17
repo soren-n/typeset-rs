@@ -63,7 +63,7 @@ enum Syntax {
 #[doc(hidden)]
 pub fn _parse(
   input: &str,
-  args: &Vec<&Box<Layout>>
+  args: &Vec<Box<Layout>>
 ) -> Result<Box<Layout>, String> {
   fn _parse_syntax(tokens: Pairs<Rule>) -> Result<Box<Syntax>, String> {
     PRATT_PARSER
@@ -108,7 +108,7 @@ pub fn _parse(
   }
   fn _interp_syntax(
     syntax: Box<Syntax>,
-    args: &Vec<&Box<Layout>>
+    args: &Vec<Box<Layout>>
   ) -> Result<Box<Layout>, String> {
     match syntax {
       box Syntax::Null =>
@@ -186,7 +186,7 @@ pub fn _parse(
 #[doc(hidden)]
 macro_rules! _args {
   ($($value:expr),+ $(,)?) => {
-    &[ $(&$value),+ ].into()
+    &[ $($value),+ ].into()
   }
 }
 
