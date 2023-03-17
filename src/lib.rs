@@ -20,8 +20,6 @@ pub use self::compiler::{
   pack,
   line,
   comp,
-  print_layout,
-  print_doc,
   compile,
   render
 };

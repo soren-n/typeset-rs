@@ -1,7 +1,8 @@
 use std::{
   cell::Cell,
   option::Option,
-  cmp::max
+  cmp::max,
+  fmt
 };
 use bumpalo::Bump;
 
@@ -32,53 +33,49 @@ pub enum Layout {
   Comp(Box<Layout>, Box<Layout>, Attr)
 }
 
-/// A function for debugging documents, takes a `Box<Layout>` and gives a rendered AST representation as a `String`.
-///
-/// # Examples
-/// ```
-/// use typeset::{text, comp, compile, print_layout};
-///
-/// let layout = comp(text("foo"), text("bar"), false, false);
-/// println!(print_layout(layout));
-/// ```
-pub fn print_layout(
-  layout: Box<Layout>
-) -> String {
-  match layout {
-    box Layout::Null =>
-      "Null".to_string(),
-    box Layout::Text(data) =>
-      format!("(Text \"{}\"", data),
-    box Layout::Fix(layout1) => {
-      let layout_s = print_layout(layout1);
-      format!("(Fix {})", layout_s)
+impl fmt::Display for Layout {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn _visit(
+      layout: Box<Layout>
+    ) -> String {
+      match layout {
+        box Layout::Null =>
+          "Null".to_string(),
+        box Layout::Text(data) =>
+          format!("(Text \"{}\"", data),
+        box Layout::Fix(layout1) => {
+          let layout_s = _visit(layout1);
+          format!("(Fix {})", layout_s)
+        }
+        box Layout::Grp(layout1) => {
+          let layout_s = _visit(layout1);
+          format!("(Grp {})", layout_s)
+        }
+        box Layout::Seq(layout1) => {
+          let layout_s = _visit(layout1);
+          format!("(Seq {})", layout_s)
+        }
+        box Layout::Nest(layout1) => {
+          let layout_s = _visit(layout1);
+          format!("(Nest {})", layout_s)
+        }
+        box Layout::Pack(layout1) => {
+          let layout_s = _visit(layout1);
+          format!("(Pack {})", layout_s)
+        }
+        box Layout::Line(left, right) => {
+          let left_s = _visit(left);
+          let right_s = _visit(right);
+          format!("(Line {} {})", left_s, right_s)
+        }
+        box Layout::Comp(left, right, attr) => {
+          let left_s = _visit(left);
+          let right_s = _visit(right);
+          format!("(Comp {} {} {} {})", left_s, right_s, attr.pad, attr.fix)
+        }
+      }
     }
-    box Layout::Grp(layout1) => {
-      let layout_s = print_layout(layout1);
-      format!("(Grp {})", layout_s)
-    }
-    box Layout::Seq(layout1) => {
-      let layout_s = print_layout(layout1);
-      format!("(Seq {})", layout_s)
-    }
-    box Layout::Nest(layout1) => {
-      let layout_s = print_layout(layout1);
-      format!("(Nest {})", layout_s)
-    }
-    box Layout::Pack(layout1) => {
-      let layout_s = print_layout(layout1);
-      format!("(Pack {})", layout_s)
-    }
-    box Layout::Line(left, right) => {
-      let left_s = print_layout(left);
-      let right_s = print_layout(right);
-      format!("(Line {} {})", left_s, right_s)
-    }
-    box Layout::Comp(left, right, attr) => {
-      let left_s = print_layout(left);
-      let right_s = print_layout(right);
-      format!("(Comp {} {} {} {})", left_s, right_s, attr.pad, attr.fix)
-    }
+    write!(f, "{}", _visit(Box::new(self.clone())))
   }
 }
 
@@ -3235,86 +3232,76 @@ pub enum DocObjFix {
   Comp(Box<DocObjFix>, Box<DocObjFix>, bool)
 }
 
-/// A function for debugging documents, takes a `Box<Doc>` and gives a rendered AST representation as a `String`.
-///
-/// # Examples
-/// ```
-/// use typeset::{text, comp, compile, print_doc};
-///
-/// let layout = comp(text("foo"), text("bar"), false, false);
-/// let document = compile(layout);
-/// println!(print_doc(document));
-/// ```
-pub fn print_doc(
-  doc: Box<Doc>
-) -> String {
-  fn _print_doc(
-    doc: Box<Doc>
-  ) -> String {
-    match doc {
-      box Doc::EOD => "EOD".to_string(),
-      box Doc::Empty(doc1) => {
-        let doc_s = _print_doc(doc1);
-        format!("Empty\n{}", doc_s)
-      }
-      box Doc::Break(obj, doc1) => {
-        let obj_s = _print_obj(obj);
-        let doc1_s = _print_doc(doc1);
-        format!("Break {}\n{}", obj_s, doc1_s)
-      }
-      box Doc::Line(obj) => {
-        let obj_s = _print_obj(obj);
-        format!("Line {}", obj_s)
+impl fmt::Display for Doc {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn _print_doc(
+      doc: Box<Doc>
+    ) -> String {
+      match doc {
+        box Doc::EOD => "EOD".to_string(),
+        box Doc::Empty(doc1) => {
+          let doc_s = _print_doc(doc1);
+          format!("Empty\n{}", doc_s)
+        }
+        box Doc::Break(obj, doc1) => {
+          let obj_s = _print_obj(obj);
+          let doc1_s = _print_doc(doc1);
+          format!("Break {}\n{}", obj_s, doc1_s)
+        }
+        box Doc::Line(obj) => {
+          let obj_s = _print_obj(obj);
+          format!("Line {}", obj_s)
+        }
       }
     }
-  }
-  fn _print_obj(
-    obj: Box<DocObj>
-  ) -> String {
-    match obj {
-      box DocObj::Text(data) =>
-        format!("(Text \"{}\")", data),
-      box DocObj::Fix(obj1) => {
-        let obj_s = _print_fix(obj1);
-        format!("(Fix {})", obj_s)
-      }
-      box DocObj::Grp(obj1) => {
-        let obj_s = _print_obj(obj1);
-        format!("(Grp {})", obj_s)
-      }
-      box DocObj::Seq(obj1) => {
-        let obj_s = _print_obj(obj1);
-        format!("(Seq {})", obj_s)
-      }
-      box DocObj::Nest(obj1) => {
-        let obj_s = _print_obj(obj1);
-        format!("(Nest {})", obj_s)
-      }
-      box DocObj::Pack(index, obj1) => {
-        let obj_s = _print_obj(obj1);
-        format!("(Pack {} {})", index, obj_s)
-      }
-      box DocObj::Comp(left, right, pad) => {
-        let left_s = _print_obj(left);
-        let right_s = _print_obj(right);
-        format!("(Comp {} {} {})", left_s, right_s, pad)
-      }
-    }
-  }
-  fn _print_fix(
-    obj: Box<DocObjFix>
-  ) -> String {
-    match obj {
-      box DocObjFix::Text(data) =>
-        format!("(Text \"{}\")", data),
-      box DocObjFix::Comp(left, right, pad) => {
-        let left_s = _print_fix(left);
-        let right_s = _print_fix(right);
-        format!("(Comp {} {} {})", left_s, right_s, pad)
+    fn _print_obj(
+      obj: Box<DocObj>
+    ) -> String {
+      match obj {
+        box DocObj::Text(data) =>
+          format!("(Text \"{}\")", data),
+        box DocObj::Fix(obj1) => {
+          let obj_s = _print_fix(obj1);
+          format!("(Fix {})", obj_s)
+        }
+        box DocObj::Grp(obj1) => {
+          let obj_s = _print_obj(obj1);
+          format!("(Grp {})", obj_s)
+        }
+        box DocObj::Seq(obj1) => {
+          let obj_s = _print_obj(obj1);
+          format!("(Seq {})", obj_s)
+        }
+        box DocObj::Nest(obj1) => {
+          let obj_s = _print_obj(obj1);
+          format!("(Nest {})", obj_s)
+        }
+        box DocObj::Pack(index, obj1) => {
+          let obj_s = _print_obj(obj1);
+          format!("(Pack {} {})", index, obj_s)
+        }
+        box DocObj::Comp(left, right, pad) => {
+          let left_s = _print_obj(left);
+          let right_s = _print_obj(right);
+          format!("(Comp {} {} {})", left_s, right_s, pad)
+        }
       }
     }
+    fn _print_fix(
+      obj: Box<DocObjFix>
+    ) -> String {
+      match obj {
+        box DocObjFix::Text(data) =>
+          format!("(Text \"{}\")", data),
+        box DocObjFix::Comp(left, right, pad) => {
+          let left_s = _print_fix(left);
+          let right_s = _print_fix(right);
+          format!("(Comp {} {} {})", left_s, right_s, pad)
+        }
+      }
+    }
+    write!(f, "{}", _print_doc(Box::new(self.clone())))
   }
-  _print_doc(doc)
 }
 
 fn _move_to_heap<'a>(
