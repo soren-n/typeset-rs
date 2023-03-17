@@ -185,7 +185,7 @@ In this case _bar_ and _baz_ will overflow the layout buffer because of the give
 ## Pack constructor
 The `pack` constructor defines an indentation level, but implicitly sets the indentation width to the index of the first literal in the layout it annotates. This is e.g. useful if you are pretty printing terms in a lisp-like language, where all other arguments to an application is often "indented" to the same buffer index as the first argument.
 
-```OCaml
+```Rust
 let foobarbaz = comp(text("foo"), pack(comp(text("bar"), text("baz"), false, false)), false, false);
 ```
 
@@ -253,7 +253,7 @@ foobar  |
 ## Padded composition
 The padded composition will compose two layouts with whitespace.
 
-```OCaml
+```Rust
 let foobar = comp(text("foo"), text("bar"), true, false);
 ```
 
@@ -268,7 +268,7 @@ foo bar |
 ## Infix fixed compositions
 The infix fixed compositions are syntactic sugar for compositions where the leftmost literal of the left operand, and the rightmost literal of the right operand are fixed together. I.e. the two following layouts are equivalent:
 
-```OCaml
+```Rust
 let foobarbaz1 = comp(text("foo"), comp(text("bar"), text("baz"), false, true), false, false);
 let foobarbaz2 = comp(text("foo"), fix(comp(text("bar"), text("baz"), false, false)), false, false);
 ```
