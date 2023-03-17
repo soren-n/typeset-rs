@@ -81,7 +81,7 @@ impl fmt::Display for Layout {
 
 /// Constructs a new Null layout.
 ///
-/// Null layouts are the neutral elements of layout compositions.
+/// Null layouts are literals and are the neutral elements of layout compositions.
 ///
 /// # Examples
 /// ```
@@ -95,7 +95,7 @@ pub fn null() -> Box<Layout> {
 
 /// Constructs a new Text layout.
 ///
-/// Text layouts are basic elements of layout compositions.
+/// Text layouts are literals and basic elements of layout compositions.
 ///
 /// # Examples
 /// ```
