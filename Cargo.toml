@@ -8,7 +8,7 @@ homepage = "https://docs.rs/typeset"
 repository = "https://github.com/soren-n/typeset-rs"
 documentation = "https://docs.rs/typeset"
 keywords = ["dsl", "pretty", "printer"]
-categories = ["template engine"]
+categories = ["compilers", "template-engine"]
 license-file = "LICENSE"
 readme = "README.md"
 
