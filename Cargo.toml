@@ -1,7 +1,7 @@
 [package]
 name = "typeset"
 description = "A DSL for defining source code pretty printers"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
 homepage = "https://docs.rs/typeset"
