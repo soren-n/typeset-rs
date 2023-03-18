@@ -50,6 +50,12 @@ jobs:
           name: crate
           path: ./target/release
 
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
       - name: Publish crate
         uses: actions-rs/cargo@v1
         with:
