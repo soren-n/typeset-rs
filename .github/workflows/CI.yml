@@ -1,0 +1,53 @@
+name: Build and publish
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Build crate
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+
+      - name: Build crate
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+
+      - name: Upload crate
+        uses: actions/upload-artifact@v3
+        with:
+          name: crate
+          path: ./target/package/*
+
+  publish:
+    name: Publish version
+    if: >-
+      github.repository == 'soren-n/typeset-rs' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v')
+
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download crate
+        uses: actions/download-artifact@v3
+        with:
+          name: crate
+          path: ./target/package
+
+      - name: Publish crate
+        uses: actions-rs/cargo@v1
+        with:
+          command: publish
+          args: --token ${{ secrets.CRATES_API_TOKEN }}
