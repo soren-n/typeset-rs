@@ -31,7 +31,7 @@ jobs:
           path: ./target/package/*
 
   publish:
-    name: Publish version
+    name: Publish crate
     if: >-
       github.repository == 'soren-n/typeset-rs' &&
       github.event_name == 'push' &&
