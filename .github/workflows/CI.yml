@@ -28,7 +28,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: crate
-          path: ./target/package/*
+          path: ./target/release/*
 
   publish:
     name: Publish crate
@@ -45,7 +45,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: crate
-          path: ./target/package
+          path: ./target/release
 
       - name: Publish crate
         uses: actions-rs/cargo@v1
