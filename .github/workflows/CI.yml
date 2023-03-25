@@ -52,11 +52,17 @@ jobs:
           toolchain: nightly
           override: true
 
-      - name: Publish crate
+      - name: Publish typeset
         uses: actions-rs/cargo@v1
         with:
           command: publish
-          args: --dry-run --token ${{ secrets.CRATES_API_TOKEN }}
+          args: --dry-run --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
+
+      - name: Publish typeset-parser
+        uses: actions-rs/cargo@v1
+        with:
+          command: publish
+          args: --dry-run --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
 
   publish:
     name: Publish crate
@@ -84,8 +90,14 @@ jobs:
           toolchain: nightly
           override: true
 
-      - name: Publish crate
+      - name: Publish typeset
         uses: actions-rs/cargo@v1
         with:
           command: publish
-          args: --token ${{ secrets.CRATES_API_TOKEN }}
+          args: --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
+
+      - name: Publish typeset-parser
+        uses: actions-rs/cargo@v1
+        with:
+          command: publish
+          args: --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
