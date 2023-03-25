@@ -1,0 +1,19 @@
+[package]
+name = "typeset"
+description = "A DSL for defining source code pretty printers"
+version = "2.0.0"
+edition = "2021"
+authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
+homepage = "https://docs.rs/typeset/latest/typeset/"
+repository = "https://github.com/soren-n/typeset-rs/typeset"
+documentation = "https://docs.rs/typeset/latest/typeset/"
+keywords = ["dsl", "pretty", "printer"]
+categories = ["compilers", "template-engine"]
+license-file = "LICENSE"
+readme = "README.md"
+
+[dependencies]
+lazy_static = "1.4.0"
+pest = "2.5.6"
+pest_derive = "2.5.6"
+bumpalo = "3.12.0"

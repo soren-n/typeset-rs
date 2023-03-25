@@ -6,10 +6,8 @@ mod order;
 mod list;
 mod avl;
 mod map;
-mod parser;
 mod compiler;
 
-pub use self::parser::_parse;
 pub use self::compiler::{
   Layout,
   Doc,
