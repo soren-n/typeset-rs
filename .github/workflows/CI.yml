@@ -30,8 +30,8 @@ jobs:
           name: crate
           path: ./target/release/*
 
-  publish-test:
-    name: Publish dry-run
+  publish-typeset-dry-run:
+    name: Publish typeset dry-run
 
     needs: [build]
     runs-on: ubuntu-latest
@@ -58,20 +58,14 @@ jobs:
           command: publish
           args: --dry-run --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
 
-      - name: Publish typeset-parser
-        uses: actions-rs/cargo@v1
-        with:
-          command: publish
-          args: --dry-run --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
-
-  publish:
-    name: Publish crate
+  publish-typeset:
+    name: Publish typeset
     if: >-
       github.repository == 'soren-n/typeset-rs' &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
 
-    needs: [publish-test]
+    needs: [publish-typeset-dry-run]
     runs-on: ubuntu-latest
 
     steps:
@@ -95,6 +89,60 @@ jobs:
         with:
           command: publish
           args: --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
+
+  publish-typeset-parser-dry-run:
+    name: Publish typeset-parser dry-run
+
+    needs: [build, publish-typeset]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+
+      - name: Download crate
+        uses: actions/download-artifact@v3
+        with:
+          name: crate
+          path: ./target/release
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      - name: Publish typeset-parser
+        uses: actions-rs/cargo@v1
+        with:
+          command: publish
+          args: --dry-run --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
+
+  publish-typeset-parser:
+    name: Publish typeset-parser
+    if: >-
+      github.repository == 'soren-n/typeset-rs' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v')
+
+    needs: [publish-typeset, publish-typeset-parser-dry-run]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+
+      - name: Download crate
+        uses: actions/download-artifact@v3
+        with:
+          name: crate
+          path: ./target/release
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
 
       - name: Publish typeset-parser
         uses: actions-rs/cargo@v1
