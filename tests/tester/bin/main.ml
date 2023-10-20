@@ -39,13 +39,20 @@ let print_layout layout =
   in
   _visit layout _skip
 
+let rec _process_output items =
+  match items with
+  | [] -> None
+  | "!!!!output!!!!" :: output ->
+    Some (String.concat "\n" output)
+  | item :: items1 ->
+    print_endline item;
+    _process_output items1
+
 let run cmd =
   let channel = Unix.open_process_in cmd in
   let result = In_channel.input_lines channel in
   In_channel.close channel;
-  match List.rev result with
-  | [] -> None
-  | output :: _ -> Some output
+  _process_output result
 
 let rust_impl layout_dsl =
   let open Printf in

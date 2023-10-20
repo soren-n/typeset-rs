@@ -17,6 +17,7 @@ fn main() {
     Ok(layout) => {
       let document = compile(layout);
       let result = render(document, 2, 80);
+      println!("!!!!output!!!!");
       println!("{}", result)
     }
   }
