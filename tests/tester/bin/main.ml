@@ -9,21 +9,11 @@ let print_layout layout =
     match layout with
     | UNull -> "null"
     | UText data -> sprintf "\"%s\"" data
-    | UFix layout1 ->
-      _visit layout1 _group |> fun dsl ->
-      wrap (sprintf "fix %s" dsl)
-    | UGrp layout1 ->
-      _visit layout1 _group |> fun dsl ->
-      wrap (sprintf "grp %s" dsl)
-    | USeq layout1 ->
-      _visit layout1 _group |> fun dsl ->
-      wrap (sprintf "seq %s" dsl)
-    | UNest layout1 ->
-      _visit layout1 _group |> fun dsl ->
-      wrap (sprintf "nest %s" dsl)
-    | UPack layout1 ->
-      _visit layout1 _group |> fun dsl ->
-      wrap (sprintf "pack %s" dsl)
+    | UFix layout1 -> _visit layout1 _group |> sprintf "fix %s"
+    | UGrp layout1 -> _visit layout1 _group |> sprintf "grp %s"
+    | USeq layout1 -> _visit layout1 _group |> sprintf "seq %s"
+    | UNest layout1 -> _visit layout1 _group |> sprintf "nest %s"
+    | UPack layout1 -> _visit layout1 _group |> sprintf "pack %s"
     | ULine (left, right) ->
       _visit left _skip |> fun left1 ->
       _visit right _group |> fun right1 ->
