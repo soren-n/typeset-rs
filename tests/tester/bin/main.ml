@@ -72,14 +72,14 @@ let rust_ocaml_identity =
       | Some (log, actual_output) ->
         let judgement = expected_output = actual_output in
         if judgement then true else begin
-        printf "============= log ================\n";
-        printf "%s\n" (String.concat "\n" log);
         printf "============ layout ==============\n";
         printf "%s\n" layout_dsl;
         printf "======== expected_output =========\n";
         printf "\"%s\"\n" expected_output;
         printf "========= actual_output ==========\n";
         printf "\"%s\"\n" actual_output;
+        printf "============== log ===============\n";
+        printf "%s\n" (String.concat "\n" log);
         printf "============== end ===============\n";
         false
         end)
