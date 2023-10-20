@@ -3,3 +3,6 @@ members = [
   "typeset",
   "typeset-parser"
 ]
+exclude = [
+  "tests/unit"
+]

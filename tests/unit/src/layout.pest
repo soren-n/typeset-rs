@@ -1,0 +1,48 @@
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+
+fix_op = { "fix" }
+grp_op = { "grp" }
+seq_op = { "seq" }
+nest_op = { "nest" }
+pack_op = { "pack" }
+unary_op = _{
+  fix_op |
+  grp_op |
+  seq_op |
+  nest_op |
+  pack_op
+}
+
+single_line_op = { "@" }
+double_line_op = { "@@" }
+unpad_comp_op = { "&" }
+pad_comp_op = { "+" }
+fix_unpad_comp_op = { "!&" }
+fix_pad_comp_op = { "!+" }
+binary_op = _{
+  single_line_op |
+  double_line_op |
+  unpad_comp_op |
+  pad_comp_op |
+  fix_unpad_comp_op |
+  fix_pad_comp_op
+}
+
+null = { "null" }
+
+digit = { '0'..'9' }
+non_zero = { '1'..'9' }
+index = @{ "0" | non_zero ~ digit* }
+variable = _{ "{" ~ index ~ "}" }
+
+raw_string = { (!("\\" | "\"") ~ ANY)+ }
+predefined = { "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
+escaped_string = { "\\" ~ predefined }
+text = { (raw_string | escaped_string)* }
+string = _{ "\"" ~ text ~ "\"" }
+
+primary = _{ null | variable | string | "(" ~ expr ~ ")" }
+atom = _{ unary_op? ~ primary }
+expr = { atom ~ (binary_op ~ atom)* }
+
+layout = _{ SOI ~ expr ~ EOI }
