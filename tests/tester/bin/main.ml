@@ -57,23 +57,14 @@ let rust_impl layout_dsl =
   let open Printf in
   run (sprintf "./_build/unit '%s'" layout_dsl)
 
-let capture func =
-  let buffer = Buffer.create 1024 in
-  let result = func buffer in
-  let raw_output = Buffer.contents buffer in
-  let output = String.split_on_char '\n'
-    (String.sub raw_output 0 ((String.length raw_output) - 1))
-  in
-  (result, output)
-
 let rust_ocaml_identity =
-  QCheck.Test.make ~count: 1024
+  QCheck.Test.make ~count: 2048
     ~name: "rust_ocaml_identity"
     arbitrary_eDSL
     (fun layout ->
       let open Printf in
       print_layout layout |> fun layout_dsl ->
-      capture (compile layout) |> fun (document, ocaml_log) ->
+      compile layout |> fun document ->
       render document 2 80 |> fun expected_output ->
       rust_impl layout_dsl |> fun maybe_actual_output ->
       match maybe_actual_output with
@@ -87,8 +78,6 @@ let rust_ocaml_identity =
         printf "\"%s\"\n" expected_output;
         printf "========= actual_output ==========\n";
         printf "\"%s\"\n" actual_output;
-        printf "========== ocaml log =============\n";
-        printf "%s\n" (String.concat "\n" ocaml_log);
         printf "=========== rust log =============\n";
         printf "%s\n" (String.concat "\n" rust_log);
         printf "============== end ===============\n";
