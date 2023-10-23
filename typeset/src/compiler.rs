@@ -261,16 +261,14 @@ fn _broken<'b, 'a: 'b>(
   mem: &'b Bump,
   layout: Box<Layout>
 ) -> &'b EDSL<'b> {
-  fn _mark<'b, 'a: 'b, R>(
+  fn _mark<'b, 'a: 'b>(
     mem: &'b Bump,
-    layout: Box<Layout>,
-    cont: &'b dyn Fn(&'b Bump, &'b Broken<'b>) -> R
-  ) -> R {
-    fn _visit<'b, 'a: 'b, R>(
+    layout: Box<Layout>
+  ) -> &'b Broken<'b> {
+    fn _visit<'b, 'a: 'b>(
       mem: &'b Bump,
-      layout: Box<Layout>,
-      cont: &'b dyn Fn(&'b Bump, bool, &'b Broken<'b>) -> R
-    ) -> R {
+      layout: Box<Layout>
+    ) -> (bool, &'b Broken<'b>) {
       fn _null<'a>(
         mem: &'a Bump
       ) -> &'a Broken<'a> {
@@ -329,39 +327,46 @@ fn _broken<'b, 'a: 'b>(
         mem.alloc(Broken::Comp(left, right, attr))
       }
       match layout {
-        box Layout::Null => cont(mem, false, _null(mem)),
+        box Layout::Null => (false, _null(mem)),
         box Layout::Text(data) => {
           let data1 = mem.alloc_str(data.as_str());
-          cont(mem, false, _text(mem, data1))
+          (false, _text(mem, data1))
         }
-        box Layout::Fix(layout1) =>
-          _visit(mem, layout1.clone(), mem.alloc(|mem, broken, layout2|
-          cont(mem, broken, _fix(mem, layout2)))),
-        box Layout::Grp(layout1) =>
-          _visit(mem, layout1.clone(), mem.alloc(|mem, broken, layout2|
-          cont(mem, broken, _grp(mem, layout2)))),
-        box Layout::Seq(layout1) =>
-          _visit(mem, layout1.clone(), mem.alloc(|mem, broken, layout2|
-          cont(mem, broken, _seq(mem, broken, layout2)))),
-        box Layout::Nest(layout1) =>
-          _visit(mem, layout1.clone(), mem.alloc(|mem, broken, layout2|
-          cont(mem, broken, _nest(mem, layout2)))),
-        box Layout::Pack(layout1) =>
-          _visit(mem, layout1.clone(), mem.alloc(|mem, broken, layout2|
-          cont(mem, broken, _pack(mem, layout2)))),
-        box Layout::Line(left, right) =>
-          _visit(mem, left.clone(), mem.alloc(move |mem, _l_broken, left1|
-          _visit(mem, right.clone(), mem.alloc(move |mem, _r_broken, right1|
-          cont(mem, true, _line(mem, left1, right1)))))),
-        box Layout::Comp(left, right, attr) =>
-          _visit(mem, left.clone(), mem.alloc(move |mem, l_broken, left1|
-          _visit(mem, right.clone(), mem.alloc(move |mem, r_broken, right1| {
-            let broken = l_broken || r_broken;
-            cont(mem, broken, _comp(mem, left1, right1, attr.clone()))
-          }))))
+        box Layout::Fix(layout1) => {
+          let (broken, layout2) = _visit(mem, layout1.clone());
+          (broken, _fix(mem, layout2))
+        }
+        box Layout::Grp(layout1) => {
+          let (broken, layout2) = _visit(mem, layout1.clone());
+          (broken, _grp(mem, layout2))
+        }
+        box Layout::Seq(layout1) => {
+          let (broken, layout2) = _visit(mem, layout1.clone());
+          (broken, _seq(mem, broken, layout2))
+        }
+        box Layout::Nest(layout1) => {
+          let (broken, layout2) = _visit(mem, layout1.clone());
+          (broken, _nest(mem, layout2))
+        }
+        box Layout::Pack(layout1) => {
+          let (broken, layout2) = _visit(mem, layout1.clone());
+          (broken, _pack(mem, layout2))
+        }
+        box Layout::Line(left, right) => {
+          let (_l_broken, left1) = _visit(mem, left.clone());
+          let (_r_broken, right1) = _visit(mem, right.clone());
+          (true, _line(mem, left1, right1))
+        }
+        box Layout::Comp(left, right, attr) => {
+          let (l_broken, left1) = _visit(mem, left.clone());
+          let (r_broken, right1) = _visit(mem, right.clone());
+          let broken = l_broken || r_broken;
+          (broken, _comp(mem, left1, right1, attr.clone()))
+        }
       }
     }
-    _visit(mem, layout, mem.alloc(|mem, _break, layout| cont(mem, layout)))
+    let (_break, layout) = _visit(mem, layout);
+    layout
   }
   fn _remove<'b, 'a: 'b, R>(
     mem: &'b Bump,
@@ -439,16 +444,16 @@ fn _broken<'b, 'a: 'b>(
       Broken::Seq(broken, layout1) =>
         if *broken { _remove(mem, layout1, true, cont) } else {
         _remove(mem, layout1, false,
-          compose(mem, cont, mem.alloc(|mem, layout1|
-            _seq(mem, layout1))))},
+          compose(mem, cont, mem.alloc(|mem, layout2|
+            _seq(mem, layout2))))},
       Broken::Nest(layout1) =>
         _remove(mem, layout1, broken,
-          compose(mem, cont, mem.alloc(|mem, layout1|
-            _nest(mem, layout1)))),
+          compose(mem, cont, mem.alloc(|mem, layout2|
+            _nest(mem, layout2)))),
       Broken::Pack(layout1) =>
         _remove(mem, layout1, broken,
-          compose(mem, cont, mem.alloc(|mem, layout1|
-            _pack(mem, layout1)))),
+          compose(mem, cont, mem.alloc(|mem, layout2|
+            _pack(mem, layout2)))),
       Broken::Line(left, right) =>
         _remove(mem, left, broken, mem.alloc(move |mem, left1|
         _remove(mem, right, broken, mem.alloc(move |mem, right1|
@@ -460,8 +465,8 @@ fn _broken<'b, 'a: 'b>(
         else { cont(mem, _comp(mem, left1, right1, *attr)) }))))
     }
   }
-  _mark(mem, layout, mem.alloc(|mem, layout1|
-  _remove(mem, layout1, false, mem.alloc(|_mem, result| result))))
+  let layout1 = _mark(mem, layout);
+  _remove(mem, layout1, false, mem.alloc(|_mem, result| result))
 }
 
 #[derive(Debug)]
@@ -1028,17 +1033,16 @@ fn _fixed<'b, 'a: 'b>(
   ) -> &'a FixedFix<'a> {
     mem.alloc(FixedFix::Last(term))
   }
-  fn _visit_doc<'b, 'a: 'b, R>(
+  fn _visit_doc<'b, 'a: 'b>(
     mem: &'b Bump,
-    doc: &'a LinearDoc<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b FixedDoc<'b>) -> R
-  ) -> R {
+    doc: &'a LinearDoc<'a>
+  ) -> &'b FixedDoc<'b> {
     match doc {
-      LinearDoc::Nil => cont(mem, _eod(mem)),
+      LinearDoc::Nil => _eod(mem),
       LinearDoc::Cons(obj, doc1) =>
-        _visit_obj(mem, obj, mem.alloc(move |mem, obj1|
-        _visit_doc(mem, doc1, mem.alloc(move |mem, doc2|
-        cont(mem, _break(mem, obj1, doc2))))))
+        _visit_obj(mem, obj, mem.alloc(move |mem, obj1| {
+        let doc2 = _visit_doc(mem, doc1);
+        _break(mem, obj1, doc2)}))
     }
   }
   fn _visit_obj<'b, 'a: 'b, R>(
@@ -1048,8 +1052,8 @@ fn _fixed<'b, 'a: 'b>(
   ) -> R {
     match obj {
       LinearObj::Next(term, comp, obj1) =>
-        _visit_term(mem, term, mem.alloc(move |mem, term1|
-        _visit_comp(mem, comp, mem.alloc(move |mem, is_fixed, comp1|
+        _visit_term(mem, term, mem.alloc(move |mem, term1| {
+        let (is_fixed, comp1) = _visit_comp(mem, comp);
         if is_fixed {
           _visit_fix(
             mem,
@@ -1064,7 +1068,7 @@ fn _fixed<'b, 'a: 'b>(
             compose(mem, cont, mem.alloc(|mem, obj2|
               _next(mem, _term(mem, term1), comp1, obj2))
             ))
-        })))),
+        }})),
       LinearObj::Last(term) =>
         _visit_term(mem, term, mem.alloc(|mem, term1|
         cont(mem, _last(mem, _term(mem, term1)))))
@@ -1078,8 +1082,8 @@ fn _fixed<'b, 'a: 'b>(
   ) -> R {
     match obj {
       LinearObj::Next(term, comp, obj1) =>
-        _visit_term(mem, term, mem.alloc(move |mem, term1|
-        _visit_comp(mem, comp, mem.alloc(move |mem, is_fixed, comp1|
+        _visit_term(mem, term, mem.alloc(move |mem, term1| {
+        let (is_fixed, comp1) = _visit_comp(mem, comp);
         if is_fixed {
           _visit_fix(
             mem,
@@ -1097,7 +1101,7 @@ fn _fixed<'b, 'a: 'b>(
                 comp1,
                 obj2
               ))))
-        })))),
+        }})),
       LinearObj::Last(term) =>
         _visit_term(mem, term, mem.alloc(|mem, term1|
         cont(mem, _last(mem, _fix(mem, line(mem, _fix_last(mem, term1)))))))
@@ -1119,22 +1123,23 @@ fn _fixed<'b, 'a: 'b>(
           mem.alloc(|mem, term2| _pack(mem, *index, term2))))
     }
   }
-  fn _visit_comp<'b, 'a: 'b, R>(
+  fn _visit_comp<'b, 'a: 'b>(
     mem: &'b Bump,
-    comp: &'a LinearComp<'a>,
-    cont: &'b dyn Fn(&'b Bump, bool, &'b FixedComp<'b>) -> R
-  ) -> R {
+    comp: &'a LinearComp<'a>
+  ) -> (bool, &'b FixedComp<'b>) {
     match comp {
-      LinearComp::Comp(attr) => cont(mem, attr.fix, _comp(mem, attr.pad)),
-      LinearComp::Grp(index, comp1) =>
-        _visit_comp(mem, comp1, mem.alloc(|mem, is_fixed, comp2|
-        cont(mem, is_fixed, _grp(mem, *index, comp2)))),
-      LinearComp::Seq(index, comp1) =>
-        _visit_comp(mem, comp1, mem.alloc(|mem, is_fixed, comp2|
-        cont(mem, is_fixed, _seq(mem, *index, comp2))))
+      LinearComp::Comp(attr) => (attr.fix, _comp(mem, attr.pad)),
+      LinearComp::Grp(index, comp1) => {
+        let (is_fixed, comp2) = _visit_comp(mem, comp1);
+        (is_fixed, _grp(mem, *index, comp2))
+      }
+      LinearComp::Seq(index, comp1) => {
+        let (is_fixed, comp2) = _visit_comp(mem, comp1);
+        (is_fixed, _seq(mem, *index, comp2))
+      }
     }
   }
-  _visit_doc(mem, doc, mem.alloc(|_mem, doc1| doc1))
+  _visit_doc(mem, doc)
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1362,43 +1367,42 @@ fn _structurize<'b, 'a: 'b>(
   ) -> Property<(u64, Option<u64>)>{
     Property::Seq((from_index, to_index))
   }
-  fn _graphify<'b, 'a: 'b, R>(
+  fn _graphify<'b, 'a: 'b>(
     mem: &'b Bump,
-    doc: &'a FixedDoc<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b GraphDoc<'b>) -> R
-  ) -> R {
-    fn _lift_stack<'b, 'a: 'b, R>(
+    doc: &'a FixedDoc<'a>
+  ) -> &'b GraphDoc<'b> {
+    fn _lift_stack<'b, 'a: 'b>(
       mem: &'b Bump,
-      comp: &'a FixedComp<'a>,
-      cont: &'b dyn Fn(&'b Bump, &'b List<'b, Property<u64>>, bool) -> R
-    ) -> R {
+      comp: &'a FixedComp<'a>
+    ) -> (&'b List<'b, Property<u64>>, bool) {
       match comp {
-        FixedComp::Comp(pad) => cont(mem, _list::nil(mem), *pad),
-        FixedComp::Grp(index, comp1) =>
-          _lift_stack(mem, comp1, mem.alloc(|mem, props, pad|
-          cont(mem, _list::cons(mem, _unary_grp(*index), props), pad))),
-        FixedComp::Seq(index, comp1) =>
-          _lift_stack(mem, comp1, mem.alloc(|mem, props, pad|
-            cont(mem, _list::cons(mem, _unary_seq(*index), props), pad)))
+        FixedComp::Comp(pad) => (_list::nil(mem), *pad),
+        FixedComp::Grp(index, comp1) => {
+          let (props, pad) = _lift_stack(mem, comp1);
+          (_list::cons(mem, _unary_grp(*index), props), pad)
+        }
+        FixedComp::Seq(index, comp1) => {
+          let (props, pad) = _lift_stack(mem, comp1);
+          (_list::cons(mem, _unary_seq(*index), props), pad)
+        }
       }
     }
     type Graph<'a> = Map<'a, u64, Property<(u64, Option<u64>)>>;
-    fn _close<'b, 'a: 'b, R>(
+    fn _close<'b, 'a: 'b>(
       mem: &'b Bump,
       to_node: u64,
       props: &'a Graph<'a>,
-      stack: &'a List<'a, Property<u64>>,
-      cont: &'b dyn Fn(&'b Bump, &'b Graph<'b>) -> R
-    ) -> R {
+      stack: &'a List<'a, Property<u64>>
+    ) -> &'b Graph<'b> {
       match stack {
-        List::Nil => cont(mem, props),
+        List::Nil => props,
         List::Cons(_, Property::Grp(index), stack1) =>
           match props.lookup_unsafe(&total, *index) {
             Property::Seq(_) => unreachable!("Invariant"),
             Property::Grp((from_node, _to_node)) => {
               let prop1 = _binary_grp(from_node, Some(to_node));
               let props1 = props.insert(mem, &total, *index, prop1);
-              _close(mem, to_node, props1, stack1, cont)
+              _close(mem, to_node, props1, stack1)
             }
           }
         List::Cons(_, Property::Seq(index), stack1) => {
@@ -1407,78 +1411,76 @@ fn _structurize<'b, 'a: 'b>(
             Property::Seq((from_node, _to_node)) => {
               let prop1 = _binary_seq(from_node, Some(to_node));
               let props1 = props.insert(mem, &total, *index, prop1);
-              _close(mem, to_node, props1, stack1, cont)
+              _close(mem, to_node, props1, stack1)
             }
           }
         }
       }
     }
-    fn _open<'b, 'a: 'b, R>(
+    fn _open<'b, 'a: 'b>(
       mem: &'b Bump,
       from_node: u64,
       props: &'a Graph<'a>,
-      stack: &'a List<Property<u64>>,
-      cont: &'b dyn Fn(&'b Bump, &'b Graph<'b>) -> R
-    ) -> R {
+      stack: &'a List<Property<u64>>
+    ) -> &'b Graph<'b> {
       match stack {
-        List::Nil => cont(mem, props),
+        List::Nil => props,
         List::Cons(_, Property::Grp(index), stack1) => {
           let prop1 = _binary_grp(from_node, None);
           let props1 = props.insert(mem, &total, *index, prop1);
-          _open(mem, from_node, props1, stack1, cont)
+          _open(mem, from_node, props1, stack1)
         }
         List::Cons(_, Property::Seq(index), stack1) => {
           let prop1 = _binary_seq(from_node, None);
           let props1 = props.insert(mem, &total, *index, prop1);
-          _open(mem, from_node, props1, stack1, cont)
+          _open(mem, from_node, props1, stack1)
         }
       }
     }
-    fn _update<'b, 'a: 'b, R>(
+    fn _update<'b, 'a: 'b>(
       mem: &'b Bump,
       node: u64,
       props: &'a Graph<'a>,
       scope: &'b List<'b, Property<u64>>,
-      stack: &'b List<'b, Property<u64>>,
-      cont: &'b dyn Fn(&'b Bump, &'b List<'b, Property<u64>>, &'b Graph<'b>) -> R
-    ) -> R {
+      stack: &'b List<'b, Property<u64>>
+    ) -> (&'b List<'b, Property<u64>>, &'b Graph<'b>) {
       match (scope, stack) {
-        (_, List::Nil) =>
-          _close(mem, node, props, scope, mem.alloc(|mem, props1|
-          cont(mem, _list::nil(mem), props1))),
-        (List::Nil, _) =>
-          _open(mem, node, props, stack, mem.alloc(move |mem, props1|
-          cont(mem, stack, props1))),
+        (_, List::Nil) => {
+          let props1 = _close(mem, node, props, scope);
+          (_list::nil(mem), props1)
+        }
+        (List::Nil, _) => {
+          let props1 = _open(mem, node, props, stack);
+          (stack, props1)
+        }
         ( List::Cons(_, Property::Grp(left), scope1)
         , List::Cons(_, Property::Grp(right), stack1)) => {
           if left > right { unreachable!("Invariant") }
           if left == right {
-            _update(mem, node, props, scope1, stack1,
-              mem.alloc(|mem, stack2, props1|
-            cont(mem, _list::cons(mem, _unary_grp(*left), stack2), props1)))
+            let (stack2, props1) = _update(mem, node, props, scope1, stack1);
+            (_list::cons(mem, _unary_grp(*left), stack2), props1)
           } else {
-            _close(mem, node, props, scope, mem.alloc(move |mem, props1|
-            _open(mem, node, props1, stack, mem.alloc(move |mem, props2|
-            cont(mem, stack, props2)))))
+            let props1 = _close(mem, node, props, scope);
+            let props2 = _open(mem, node, props1, stack);
+            (stack, props2)
           }
         }
         ( List::Cons(_, Property::Seq(left), scope1)
         , List::Cons(_, Property::Seq(right), stack1)) => {
           if left > right { unreachable!("Invariant") }
           if left == right {
-            _update(mem, node, props, scope1, stack1,
-              mem.alloc(|mem, stack2, props1|
-            cont(mem, _list::cons(mem, _unary_seq(*left), stack2), props1)))
+            let (stack2, props1) = _update(mem, node, props, scope1, stack1);
+            (_list::cons(mem, _unary_seq(*left), stack2), props1)
           } else {
-            _close(mem, node, props, scope, mem.alloc(move |mem, props1|
-            _open(mem, node, props1, stack, mem.alloc(move |mem, props2|
-            cont(mem, stack, props2)))))
+            let props1 = _close(mem, node, props, scope);
+            let props2 = _open(mem, node, props1, stack);
+            (stack, props2)
           }
         }
         _ => {
-          _close(mem, node, props, scope, mem.alloc(move |mem, props1|
-          _open(mem, node, props1, stack, mem.alloc(move |mem, props2|
-          cont(mem, stack, props2)))))
+          let props1 = _close(mem, node, props, scope);
+          let props2 = _open(mem, node, props1, stack);
+          (stack, props2)
         }
       }
     }
@@ -1548,54 +1550,46 @@ fn _structurize<'b, 'a: 'b>(
         _ => unreachable!("Invariant")
       }
     }
-    fn _visit_doc<'b, 'a: 'b, R>(
+    fn _visit_doc<'b, 'a: 'b>(
       mem: &'b Bump,
-      doc: &'a FixedDoc<'a>,
-      cont: &'b dyn Fn(&'b Bump, &'b GraphDoc<'b>) -> R
-    ) -> R {
+      doc: &'a FixedDoc<'a>
+    ) -> &'b GraphDoc<'b> {
       match doc {
-        FixedDoc::EOD => cont(mem, _eod(mem)),
+        FixedDoc::EOD => _eod(mem),
         FixedDoc::Break(obj, doc1) => {
           let scope = _list::nil(mem);
           let nodes = mem.alloc(|_mem, nodes| nodes);
           let pads = mem.alloc(|_mem, pads| pads);
           let props = _map::empty(mem);
-          _visit_obj(mem, obj, 0, scope, nodes, pads, props,
-            mem.alloc(|
-              mem,
-              nodes1: &'b dyn Fn(&'b Bump, &'b List<'b, &'b GraphNode<'b>>) -> &'b List<'b, &'b GraphNode<'b>>,
-              pads1: &'b dyn Fn(&'b Bump, &'b List<'b, bool>) -> &'b List<'b, bool>,
-              props1: &'b Graph<'b>
-            | {
-              let nodes2 = nodes1(mem, _list::nil(mem));
-              let props2 = props1.values(mem).fold(
-                mem,
-                _list::nil(mem),
-                mem.alloc(|mem, item: Property<(u64, Option<u64>)>, items|
-                  _list::cons(mem, item, items))
-              );
-              _transpose(mem, nodes2, props2);
-              _visit_doc(mem, doc1, mem.alloc(|mem, doc2|
-              cont(mem, _break(mem, nodes2, pads1(mem, _list::nil(mem)), doc2))))
-            })
-          )
+          let (nodes1, pads1, props1) = _visit_obj(
+            mem, obj, 0, scope, nodes, pads, props
+          );
+          let nodes2 = nodes1(mem, _list::nil(mem));
+          let props2 = props1.values(mem).fold(
+            mem,
+            _list::nil(mem),
+            mem.alloc(|mem, item: Property<(u64, Option<u64>)>, items|
+              _list::cons(mem, item, items))
+          );
+          _transpose(mem, nodes2, props2);
+          let doc2 = _visit_doc(mem, doc1);
+          _break(mem, nodes2, pads1(mem, _list::nil(mem)), doc2)
         }
       }
     }
-    fn _visit_obj<'b, 'a: 'b, R>(
+    fn _visit_obj<'b, 'a: 'b>(
       mem: &'b Bump,
       obj: &'a FixedObj<'a>,
       index: u64,
       scope: &'a List<'a, Property<u64>>,
       nodes: &'b dyn Fn(&'b Bump, &'b List<'b, &'b GraphNode<'b>>) -> &'b List<'b, &'b GraphNode<'b>>,
       pads: &'b dyn Fn(&'b Bump, &'b List<'b, bool>) -> &'b List<'b, bool>,
-      props: &'a Graph<'a>,
-      cont: &'b dyn Fn(&'b Bump,
-        &'b dyn Fn(&'b Bump, &'b List<'b, &'b GraphNode<'b>>) -> &'b List<'b, &'b GraphNode<'b>>,
-        &'b dyn Fn(&'b Bump, &'b List<'b, bool>) -> &'b List<'b, bool>,
-        &'b Graph<'b>
-      ) -> R
-    ) -> R {
+      props: &'a Graph<'a>
+    ) -> (
+      &'b dyn Fn(&'b Bump, &'b List<'b, &'b GraphNode<'b>>) -> &'b List<'b, &'b GraphNode<'b>>,
+      &'b dyn Fn(&'b Bump, &'b List<'b, bool>) -> &'b List<'b, bool>,
+      &'b Graph<'b>
+    ) {
       match obj {
         FixedObj::Next(term, comp, obj1) => {
           match term {
@@ -1604,34 +1598,30 @@ fn _structurize<'b, 'a: 'b>(
               let nodes2 = compose(mem, nodes, mem.alloc(move |mem, nodes1|
                 _list::cons(mem, make_node(mem, index, term1), nodes1)
               ));
-              _lift_stack(mem, comp, mem.alloc(move |mem, stack, pad| {
+              let (stack, pad) = _lift_stack(mem, comp);
               let pads2 = compose(mem, pads, mem.alloc(move |mem, pads1|
                 _list::cons(mem, pad, pads1)
               ));
-              _update(mem, index, props, scope, stack,
-                mem.alloc(move |mem, scope1, props1|
-                  _visit_obj(
-                    mem,
-                    obj1,
-                    index + 1,
-                    scope1,
-                    nodes2,
-                    pads2,
-                    props1,
-                    cont)
-                  ))}))})),
+              let (scope1, props1) = _update(mem, index, props, scope, stack);
+              _visit_obj(
+                mem,
+                obj1,
+                index + 1,
+                scope1,
+                nodes2,
+                pads2,
+                props1
+              )})),
             FixedItem::Fix(fix) => {
-              _visit_fix(mem, fix, index, scope, props,
-                mem.alloc(move |mem, fix1, scope1, props1| {
+              let (fix1, scope1, props1) = _visit_fix(mem, fix, index, scope, props);
               let nodes2 = compose(mem, nodes, mem.alloc(move |mem, nodes1|
                 _list::cons(mem, make_node(mem, index, _fix(mem, fix1)), nodes1)
               ));
-              _lift_stack(mem, comp, mem.alloc(move |mem, stack, pad| {
+              let (stack, pad) = _lift_stack(mem, comp);
               let pads2 = compose(mem, pads, mem.alloc(move |mem, pads1|
                 _list::cons(mem, pad, pads1)
               ));
-              _update(mem, index, props1, scope1, stack,
-                mem.alloc(move |mem, scope2, props2|
+              let (scope2, props2) = _update(mem, index, props1, scope1, stack);
               _visit_obj(
                 mem,
                 obj1,
@@ -1639,9 +1629,8 @@ fn _structurize<'b, 'a: 'b>(
                 scope2,
                 nodes2,
                 pads2,
-                props2,
-                cont)
-              ))}))}))
+                props2
+              )
             }
           }
         }
@@ -1652,16 +1641,16 @@ fn _structurize<'b, 'a: 'b>(
               let nodes2 = compose(mem, nodes, mem.alloc(move |mem, nodes1|
                 _list::cons(mem, make_node(mem, index, term1), nodes1)
               ));
-              _close(mem, index, props, scope, mem.alloc(|mem, props1|
-              cont(mem, nodes2, pads, props1)))})),
-            FixedItem::Fix(fix) =>
-              _visit_fix(mem, fix, index, scope, props,
-                mem.alloc(move |mem, fix1, scope1, props1| {
+              let props1 = _close(mem, index, props, scope);
+              (nodes2, pads, props1)})),
+            FixedItem::Fix(fix) => {
+              let (fix1, scope1, props1) = _visit_fix(mem, fix, index, scope, props);
               let nodes2 = compose(mem, nodes, mem.alloc(move |mem, nodes1|
                 _list::cons(mem, make_node(mem, index, _fix(mem, fix1)), nodes1)
               ));
-              _close(mem, index, props1, scope1, mem.alloc(|mem, props2|
-              cont(mem, nodes2, pads, props2)))}))
+              let props2 = _close(mem, index, props1, scope1);
+              (nodes2, pads, props2)
+            }
           }
         }
       }
@@ -1675,46 +1664,42 @@ fn _structurize<'b, 'a: 'b>(
         FixedTerm::Null => cont(mem, _null(mem)),
         FixedTerm::Text(data) => cont(mem, _text(mem, data)),
         FixedTerm::Nest(term1) =>
-          _visit_term(mem, term1, compose(mem, cont,mem.alloc(|mem, term2|
+          _visit_term(mem, term1, compose(mem, cont, mem.alloc(|mem, term2|
           _nest(mem, term2)))),
         FixedTerm::Pack(index, term1) =>
           _visit_term(mem, term1, compose(mem, cont, mem.alloc(|mem, term2|
           _pack(mem, *index, term2))))
       }
     }
-    fn _visit_fix<'b, 'a: 'b, R>(
+    fn _visit_fix<'b, 'a: 'b>(
       mem: &'b Bump,
       fix: &'a FixedFix<'a>,
       index: u64,
       scope: &'a List<'a, Property<u64>>,
-      props: &'a Graph<'a>,
-      cont: &'b dyn Fn(&'b Bump,
-        &'b GraphFix<'b>,
-        &'b List<'b, Property<u64>>,
-        &'b Graph<'b>
-      ) -> R
-    ) -> R {
+      props: &'a Graph<'a>
+    ) -> (
+      &'b GraphFix<'b>,
+      &'b List<'b, Property<u64>>,
+      &'b Graph<'b>
+    ) {
       match fix {
         FixedFix::Next(term, comp, fix1) =>
-          _visit_term(mem, term, mem.alloc(move |mem, term1|
-          _lift_stack(mem, comp, mem.alloc(move |mem, stack, pad|
-          _update(mem, index, props, scope, stack,
-            mem.alloc(move |mem, scope1, props1|
-          _visit_fix(mem, fix1, index, scope1, props1,
-            mem.alloc(move |mem, fix2, scope2, props2|
-          cont(mem, _fix_next(mem, term1, fix2, pad), scope2, props2))))))))),
+          _visit_term(mem, term, mem.alloc(move |mem, term1| {
+          let (stack, pad) = _lift_stack(mem, comp);
+          let (scope1, props1) = _update(mem, index, props, scope, stack);
+          let (fix2, scope2, props2) = _visit_fix(mem, fix1, index, scope1, props1);
+          (_fix_next(mem, term1, fix2, pad), scope2, props2)})),
         FixedFix::Last(term) =>
-          _visit_term(mem, term, mem.alloc(|mem, term1|
-          cont(mem, _fix_last(mem, term1), scope, props)))
+          _visit_term(mem, term, mem.alloc(move |mem, term1|
+          (_fix_last(mem, term1), scope, props)))
       }
     }
-    _visit_doc(mem, doc, cont)
+    _visit_doc(mem, doc)
   }
-  fn _solve<'a, R>(
+  fn _solve<'a>(
     mem: &'a Bump,
-    doc: &'a GraphDoc<'a>,
-    cont: &'a dyn Fn(&'a Bump, &'a GraphDoc<'a>) -> R
-  ) -> R {
+    doc: &'a GraphDoc<'a>
+  ) -> &'a GraphDoc<'a> {
     fn _move_ins<'a>(
       head: &'a GraphEdge<'a>,
       tail: &'a GraphEdge<'a>,
@@ -1842,44 +1827,41 @@ fn _structurize<'b, 'a: 'b>(
       }
       _visit(mem, Some(outs), edge, none, some)
     }
-    fn _leftmost<'a, R>(
+    fn _leftmost<'a>(
       mem: &'a Bump,
-      head: &'a GraphEdge<'a>,
-      cont: &'a dyn Fn(&'a Bump, &'a GraphEdge<'a>) -> R
-    ) -> R {
-      fn _visit<'a, R>(
+      head: &'a GraphEdge<'a>
+    ) -> &'a GraphEdge<'a> {
+      fn _visit<'a>(
         mem: &'a Bump,
         curr: &'a GraphEdge<'a>,
         index: u64,
-        result: &'a GraphEdge<'a>,
-        cont: &'a dyn Fn(&'a Bump, &'a GraphEdge<'a>) -> R
-      ) -> R {
+        result: &'a GraphEdge<'a>
+      ) -> &'a GraphEdge<'a> {
         match curr.ins_next.get() {
-          None => cont(mem, result),
+          None => result,
           Some(next) => {
             let index1 = next.source.get().index;
             if index1 < index {
-              _visit(mem, next, index1, next, cont)
+              _visit(mem, next, index1, next)
             } else {
-              _visit(mem, next, index, result, cont)
+              _visit(mem, next, index, result)
             }
           }
         }
       }
-      _visit(mem, head, head.source.get().index, head, cont)
+      _visit(mem, head, head.source.get().index, head)
     }
-    fn _visit_doc<'a, R>(
+    fn _visit_doc<'a>(
       mem: &'a Bump,
-      doc: &'a GraphDoc<'a>,
-      cont: &'a dyn Fn(&'a Bump, &'a GraphDoc<'a>) -> R
-    ) -> R {
+      doc: &'a GraphDoc<'a>
+    ) -> &'a GraphDoc<'a> {
       match doc {
-        GraphDoc::EOD => cont(mem, _eod(mem)),
+        GraphDoc::EOD => _eod(mem),
         GraphDoc::Break(nodes, pads, doc1) => {
           let count = nodes.length();
           _visit_node(mem, count, 0, nodes);
-          _visit_doc(mem, doc1, mem.alloc(|mem, doc2|
-          cont(mem, _break(mem, nodes, pads, doc2))))
+          let doc2 = _visit_doc(mem, doc1);
+          _break(mem, nodes, pads, doc2)
         }
       }
     }
@@ -1896,27 +1878,27 @@ fn _structurize<'b, 'a: 'b>(
         (node.outs_head.get(), node.outs_tail.get())
       ) {
         ( (Some(ins_head), Some(ins_tail))
-        , (Some(outs_head), Some(_outs_tail))) =>
-          _leftmost(mem, ins_head, mem.alloc(move |mem, ins_first|
+        , (Some(outs_head), Some(_outs_tail))) => {
+          let ins_first = _leftmost(mem, ins_head);
           _resolve(mem, ins_first, outs_head,
             mem.alloc(move |mem| _visit_node(mem, count, index + 1, nodes)),
             mem.alloc(move |mem, outs_head1| {
               _move_ins(ins_head, ins_tail, outs_head1);
               _visit_node(mem, count, index + 1, nodes)
-            })))),
+            }))
+        }
         ((Some(_), None), _) | ((None, Some(_)), _)
         | (_, (Some(_), None)) | (_, (None, Some(_))) =>
           unreachable!("Invariant"),
         (_, _) => _visit_node(mem, count, index + 1, nodes)
       }
     }
-    _visit_doc(mem, doc, cont)
+    _visit_doc(mem, doc)
   }
-  fn _rebuild<'b, 'a: 'b, R>(
+  fn _rebuild<'b, 'a: 'b>(
     mem: &'b Bump,
-    doc: &'a GraphDoc<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b RebuildDoc<'b>) -> R
-  ) -> R {
+    doc: &'a GraphDoc<'a>
+  ) -> &'b RebuildDoc<'b> {
     fn _eod<'a>(
       mem: &'a Bump
     ) -> &'a RebuildDoc<'a> {
@@ -2007,16 +1989,14 @@ fn _structurize<'b, 'a: 'b>(
     ) -> &'a RebuildObj<'a> {
       _comp(mem, left, right, pad)
     }
-    fn _topology<'b, 'a: 'b, R>(
+    fn _topology<'b, 'a: 'b>(
       mem: &'b Bump,
-      nodes: &'a List<'a, &'a GraphNode<'a>>,
-      cont: &'b dyn Fn(
-        &'b Bump,
-        &'b List<'b, &'b GraphTerm<'b>>,
-        &'b List<'b, u64>,
-        &'b List<'b, &'b List<'b, Property<()>>>
-      ) -> R
-    ) -> R {
+      nodes: &'a List<'a, &'a GraphNode<'a>>
+    ) -> (
+      &'b List<'b, &'b GraphTerm<'b>>,
+      &'b List<'b, u64>,
+      &'b List<'b, &'b List<'b, Property<()>>>
+    ) {
       fn _num_ins<'a>(
         node: &'a GraphNode<'a>
       ) -> u64 {
@@ -2054,22 +2034,20 @@ fn _structurize<'b, 'a: 'b>(
           mem.alloc(|_mem, props| props)
         )
       }
-      fn _visit<'b, 'a: 'b, R>(
+      fn _visit<'b, 'a: 'b>(
         mem: &'b Bump,
         nodes: &'a List<'a, &'a GraphNode<'a>>,
         index: u64,
         terms: &'b dyn Fn(&'b Bump, &'b List<'b, &'b GraphTerm<'b>>) -> &'b List<'b, &'b GraphTerm<'b>>,
         ins: &'b dyn Fn(&'b Bump, &'b List<'b, u64>) -> &'b List<'b, u64>,
-        outs: &'b dyn Fn(&'b Bump, &'b List<'b, &'b List<'b, Property<()>>>) -> &'b List<'b, &'b List<'b, Property<()>>>,
-        cont: &'b dyn Fn(
-          &'b Bump,
-          &'b List<'b, &'b GraphTerm<'b>>,
-          &'b List<'b, u64>,
-          &'b List<'b, &'b List<'b, Property<()>>>
-        ) -> R
-      ) -> R {
+        outs: &'b dyn Fn(&'b Bump, &'b List<'b, &'b List<'b, Property<()>>>) -> &'b List<'b, &'b List<'b, Property<()>>>
+      ) -> (
+        &'b List<'b, &'b GraphTerm<'b>>,
+        &'b List<'b, u64>,
+        &'b List<'b, &'b List<'b, Property<()>>>
+      ) {
         if index == nodes.length() {
-          cont(mem,
+          (
             terms(mem, _list::nil(mem)),
             ins(mem, _list::nil(mem)),
             outs(mem, _list::nil(mem))
@@ -2085,8 +2063,7 @@ fn _structurize<'b, 'a: 'b>(
             compose(mem, ins, mem.alloc(move |mem, ins1|
               _list::cons(mem, num_ins, ins1))),
             compose(mem, outs, mem.alloc(move |mem, outs1|
-              _list::cons(mem, prop_outs, outs1))),
-            cont
+              _list::cons(mem, prop_outs, outs1)))
           )
         }
       }
@@ -2096,38 +2073,33 @@ fn _structurize<'b, 'a: 'b>(
         0,
         mem.alloc(|_mem, terms| terms),
         mem.alloc(|_mem, ins| ins),
-        mem.alloc(|_mem, outs| outs),
-        cont
+        mem.alloc(|_mem, outs| outs)
       )
     }
-    fn _open<'a, R>(
+    fn _open<'a>(
       mem: &'a Bump,
       props: &'a List<'a, Property<()>>,
       stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
-      partial: &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>,
-      cont: &'a dyn Fn(&'a Bump, &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>) -> R
-    ) -> R {
-      fn _visit<'a, R>(
+      partial: &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>
+    ) -> &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>> {
+      fn _visit<'a>(
         mem: &'a Bump,
         props: &'a List<'a, Property<()>>,
-        stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
-        cont: &'a dyn Fn(&'a Bump, &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>) -> R
-      ) -> R {
+        stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>
+      ) -> &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>> {
         match props {
-          List::Nil => cont(mem, stack),
+          List::Nil => stack,
           List::Cons(_, Property::Grp(()), props1) =>
             _visit(
               mem,
               props1,
-              _list::cons(mem, mem.alloc(|mem, obj| _grp(mem, obj)), stack),
-              cont
+              _list::cons(mem, mem.alloc(|mem, obj| _grp(mem, obj)), stack)
             ),
           List::Cons(_, Property::Seq(()), props1) =>
             _visit(
               mem,
               props1,
-              _list::cons(mem, mem.alloc(|mem, obj| _seq(mem, obj)), stack),
-              cont
+              _list::cons(mem, mem.alloc(|mem, obj| _seq(mem, obj)), stack)
             )
         }
       }
@@ -2140,78 +2112,78 @@ fn _structurize<'b, 'a: 'b>(
               mem,
               mem.alloc(|mem, obj| top(mem, partial(mem, obj))),
               stack1
-            ),
-            cont
+            )
           ),
         _ => unreachable!("Invariant")
       }
     }
-    fn _close<'a, R>(
+    fn _close<'a>(
       mem: &'a Bump,
       count: u64,
       stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
-      term: &'a RebuildObj<'a>,
-      cont: &'a dyn Fn(&'a Bump, &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>, &'a RebuildObj<'a>) -> R
-    ) -> R {
-      fn _visit<'a, R>(
+      term: &'a RebuildObj<'a>
+    ) -> (
+      &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+      &'a RebuildObj<'a>
+    ) {
+      fn _visit<'a>(
         mem: &'a Bump,
         count: u64,
         stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
-        result: &'a RebuildObj<'a>,
-        cont: &'a dyn Fn(&'a Bump, &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>, &'a RebuildObj<'a>) -> R
-      ) -> R {
-        if count == 0 { cont(mem, stack, result) } else {
+        result: &'a RebuildObj<'a>
+      ) -> (
+        &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+        &'a RebuildObj<'a>
+      ) {
+        if count == 0 { (stack, result) } else {
           match stack {
             List::Cons(_, top, stack1) =>
-              _visit(mem, count - 1, stack1, top(mem, result), cont),
+              _visit(mem, count - 1, stack1, top(mem, result)),
             _ => unreachable!("Invariant")
           }
         }
       }
-      _visit(mem, count, stack, term, cont)
+      _visit(mem, count, stack, term)
     }
-    fn _final<'a, R>(
+    fn _final<'a>(
       mem: &'a Bump,
       stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
-      term: &'a RebuildObj<'a>,
-      cont: &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> R
-    ) -> R {
+      term: &'a RebuildObj<'a>
+    ) -> &'a RebuildObj<'a> {
       match stack {
-        List::Cons(_, last, List::Nil) => cont(mem, last(mem, term)),
+        List::Cons(_, last, List::Nil) => last(mem, term),
         _ => unreachable!("Invariant")
       }
     }
-    fn _visit_doc<'b, 'a: 'b, R>(
+    fn _visit_doc<'b, 'a: 'b>(
       mem: &'b Bump,
-      doc: &'a GraphDoc<'a>,
-      cont: &'b dyn Fn(&'b Bump, &'b RebuildDoc<'b>) -> R
-    ) -> R {
+      doc: &'a GraphDoc<'a>
+    ) -> &'b RebuildDoc<'b> {
       match doc {
-        GraphDoc::EOD => cont(mem, _eod(mem)),
-        GraphDoc::Break(nodes, pads, doc1) =>
-          _topology(mem, nodes, mem.alloc(move |mem, terms, ins, outs| {
+        GraphDoc::EOD => _eod(mem),
+        GraphDoc::Break(nodes, pads, doc1) => {
+          let (terms, ins, outs) = _topology(mem, nodes);
           let stack: &'b List<'b, &'b dyn Fn(&'b Bump, &'b RebuildObj<'b>) -> &'b RebuildObj<'b>> = _list::cons(
             mem,
             mem.alloc(|_mem, obj| obj),
             _list::nil(mem)
           );
           let partial = mem.alloc(|_mem, obj| obj);
-          _visit_line(mem, terms, pads, ins, outs, stack, partial,
-            mem.alloc(move |mem, obj|
-          _visit_doc(mem, doc1, mem.alloc(move |mem, doc2|
-          cont(mem, _break(mem, obj, doc2))))))}))
+          let obj = _visit_line(mem, terms, pads, ins, outs, stack, partial);
+          let doc2 = _visit_doc(mem, doc1);
+          _break(mem, obj, doc2)
+        }
       }
     }
-    fn _visit_line<'b, 'a: 'b, R>(
+    fn _visit_line<'b, 'a: 'b>(
       mem: &'b Bump,
       terms: &'a List<'a, &'a GraphTerm<'a>>,
       pads: &'a List<'a, bool>,
       ins: &'a List<'a, u64>,
       outs: &'a List<'a, &'a List<'a, Property<()>>>,
       stack: &'a List<'a, &'a dyn Fn(&'b Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
-      partial: &'b dyn Fn(&'b Bump, &'b RebuildObj<'b>) -> &'b RebuildObj<'b>,
-      cont: &'b dyn Fn(&'b Bump, &'b RebuildObj<'b>) -> R
-    ) -> R {
+      partial: &'b dyn Fn(&'b Bump, &'b RebuildObj<'b>) -> &'b RebuildObj<'b>
+    ) -> &'b RebuildObj<'b> {
       match (terms, pads) {
         ( List::Cons(_, GraphTerm::Fix(fix), List::Nil)
         , List::Nil) =>
@@ -2219,12 +2191,14 @@ fn _structurize<'b, 'a: 'b>(
           match (ins, outs) {
             ( List::Cons(_, 0, List::Nil)
             , List::Cons(_, List::Nil, List::Nil)) =>
-              _final(mem, stack, partial(mem, _fix(mem, fix1)), cont),
+              _final(mem, stack, partial(mem, _fix(mem, fix1))),
             ( List::Cons(_, in_props, List::Nil)
-            , List::Cons(_, List::Nil, List::Nil)) =>
-              _close(mem, *in_props, stack, partial(mem, _fix(mem, fix1)),
-                mem.alloc(|mem, stack1, fix2|
-              _final(mem, stack1, fix2, cont))),
+            , List::Cons(_, List::Nil, List::Nil)) => {
+              let (stack1, fix2) = _close(
+                mem, *in_props, stack, partial(mem, _fix(mem, fix1))
+              );
+              _final(mem, stack1, fix2)
+            }
             (_, _) => unreachable!("Invariant")
           })),
         ( List::Cons(_, term, List::Nil)
@@ -2233,12 +2207,14 @@ fn _structurize<'b, 'a: 'b>(
           match (ins, outs) {
             ( List::Cons(_, 0, List::Nil)
             , List::Cons(_, List::Nil, List::Nil)) =>
-              _final(mem, stack, partial(mem, _term(mem, term1)), cont),
+              _final(mem, stack, partial(mem, _term(mem, term1))),
             ( List::Cons(_, in_props, List::Nil)
-            , List::Cons(_, List::Nil, List::Nil)) =>
-              _close(mem, *in_props, stack, partial(mem, _term(mem, term1)),
-                mem.alloc(|mem, stack1, term2|
-              _final(mem, stack1, term2, cont))),
+            , List::Cons(_, List::Nil, List::Nil)) => {
+              let (stack1, term2) = _close(
+                mem, *in_props, stack, partial(mem, _term(mem, term1))
+              );
+              _final(mem, stack1, term2)
+            }
             (_, _) => unreachable!("Invariant")
           })),
         ( List::Cons(_, GraphTerm::Fix(fix), terms1)
@@ -2250,24 +2226,26 @@ fn _structurize<'b, 'a: 'b>(
               let partial1 = compose(mem, partial, mem.alloc(move |mem, obj|
                 __comp(mem, _fix(mem, fix1), *pad, obj)
               ));
-              _visit_line(mem, terms1, pads1, ins1, outs1, stack, partial1, cont)
+              _visit_line(mem, terms1, pads1, ins1, outs1, stack, partial1)
             }
             ( List::Cons(_, in_props, ins1)
-            , List::Cons(_, List::Nil, outs1)) =>
-              _close(mem, *in_props, stack, partial(mem, _fix(mem, fix1)),
-                mem.alloc(move |mem: &'b Bump, stack1, fix2| {
+            , List::Cons(_, List::Nil, outs1)) => {
+              let (stack1, fix2) = _close(
+                mem, *in_props, stack, partial(mem, _fix(mem, fix1))
+              );
               let partial1 = mem.alloc(move |mem, obj|
                 __comp(mem, fix2, *pad, obj)
               );
-              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1, cont)})),
+              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1)
+            }
             ( List::Cons(_, 0, ins1)
-            , List::Cons(_, out_props, outs1)) =>
-              _open(mem, out_props, stack, partial,
-                mem.alloc(|mem: &'b Bump, stack1| {
+            , List::Cons(_, out_props, outs1)) => {
+              let stack1 = _open(mem, out_props, stack, partial);
               let partial1 = mem.alloc(|mem, obj|
                 __comp(mem, _fix(mem, fix1), *pad, obj)
               );
-              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1, cont)})),
+              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1)
+            }
             (_, _) => unreachable!("Invariant")
           })),
         ( List::Cons(_, term, terms1)
@@ -2279,24 +2257,26 @@ fn _structurize<'b, 'a: 'b>(
               let partial1 = compose(mem, partial, mem.alloc(move |mem, obj|
                 __comp(mem, _term(mem, term1), *pad, obj)
               ));
-              _visit_line(mem, terms1, pads1, ins1, outs1, stack, partial1, cont)
+              _visit_line(mem, terms1, pads1, ins1, outs1, stack, partial1)
             }
             ( List::Cons(_, in_props, ins1)
-            , List::Cons(_, List::Nil, outs1)) =>
-              _close(mem, *in_props, stack, partial(mem, _term(mem, term1)),
-                mem.alloc(move |mem: &'b Bump, stack1, term2| {
+            , List::Cons(_, List::Nil, outs1)) => {
+              let (stack1, term2) = _close(
+                mem, *in_props, stack, partial(mem, _term(mem, term1))
+              );
               let partial1 = mem.alloc(move |mem, obj|
                 __comp(mem, term2, *pad, obj)
               );
-              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1, cont)})),
+              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1)
+            }
             ( List::Cons(_, 0, ins1)
-            , List::Cons(_, out_props, outs1)) =>
-              _open(mem, out_props, stack, partial,
-                mem.alloc(|mem: &'b Bump, stack1| {
+            , List::Cons(_, out_props, outs1)) => {
+              let stack1 = _open(mem, out_props, stack, partial);
               let partial1 = mem.alloc(|mem, obj|
                 __comp(mem, _term(mem, term1), *pad, obj)
               );
-              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1, cont)})),
+              _visit_line(mem, terms1, pads1, ins1, outs1, stack1, partial1)
+            }
             (_, _) => unreachable!("Invariant")
           })),
         (_, _) => unreachable!("Invariant")
@@ -2337,11 +2317,11 @@ fn _structurize<'b, 'a: 'b>(
           cont(mem, _fix_comp(mem, _fix_term(mem, term1), fix2, *pad))))))
       }
     }
-    _visit_doc(mem, doc, cont)
+    _visit_doc(mem, doc)
   }
-  _graphify(mem, doc, mem.alloc(|mem, doc1|
-  _solve(mem, doc1, mem.alloc(|mem, doc2|
-  _rebuild(mem, doc2, mem.alloc(|_mem, doc3| doc3))))))
+  let doc1 = _graphify(mem, doc);
+  let doc2 = _solve(mem, doc1);
+  _rebuild(mem, doc2)
 }
 
 #[derive(Debug)]
@@ -2480,15 +2460,18 @@ fn _denull<'b, 'a: 'b>(
       RebuildDoc::EOD => none(mem),
       RebuildDoc::Break(obj, doc1) =>
         _visit_obj(mem, obj,
-          mem.alloc(|mem| _visit_doc(mem, doc1,
-            mem.alloc(|mem| some(mem, _eod(mem))),
-            mem.alloc(|mem, doc2| some(mem, _empty(mem, doc2))))),
-          mem.alloc(move |mem, obj1| _visit_doc(mem, doc1,
-            mem.alloc(move |mem| some(mem, _line(mem, obj1))),
-            mem.alloc(|mem, doc2| some(mem, _break(mem, obj1, doc2))))),
-          mem.alloc(move |mem, _pad, obj1| _visit_doc(mem, doc1,
-            mem.alloc(move |mem| some(mem, _line(mem, obj1))),
-            mem.alloc(|mem, doc2| some(mem, _break(mem, obj1, doc2))))))
+          mem.alloc(|mem|
+            _visit_doc(mem, doc1,
+              mem.alloc(|mem| some(mem, _eod(mem))),
+              mem.alloc(|mem, doc2| some(mem, _empty(mem, doc2))))),
+          mem.alloc(move |mem, obj1|
+            _visit_doc(mem, doc1,
+              mem.alloc(move |mem| some(mem, _line(mem, obj1))),
+              mem.alloc(|mem, doc2| some(mem, _break(mem, obj1, doc2))))),
+          mem.alloc(move |mem, _pad, obj1|
+            _visit_doc(mem, doc1,
+              mem.alloc(move |mem| some(mem, _line(mem, obj1))),
+              mem.alloc(|mem, doc2| some(mem, _break(mem, obj1, doc2))))))
     }
   }
   fn _visit_obj<'b, 'a: 'b, R>(
@@ -2520,18 +2503,20 @@ fn _denull<'b, 'a: 'b>(
             last_some(mem, _seq(mem, obj2)))),
       RebuildObj::Comp(left, right, l_pad) =>
         _visit_obj(mem, left,
-          mem.alloc(|mem| _visit_obj(mem, right,
-            last_none,
-            mem.alloc(|mem, obj| next_none(mem, *l_pad, obj)),
-            mem.alloc(|mem, r_pad, right1| {
-              let pad = *l_pad || r_pad;
-              next_none(mem, pad, right1)}))),
-          mem.alloc(move |mem, left1| _visit_obj(mem, right,
-            mem.alloc(move |mem| last_some(mem, left1)),
-            mem.alloc(|mem, right1| last_some(mem, _comp(mem, left1, right1, *l_pad))),
-            mem.alloc(|mem, r_pad, right1| {
-              let pad = *l_pad || r_pad;
-              last_some(mem, _comp(mem, left1, right1, pad))}))),
+          mem.alloc(|mem|
+            _visit_obj(mem, right,
+              last_none,
+              mem.alloc(|mem, right1| next_none(mem, *l_pad, right1)),
+              mem.alloc(|mem, r_pad, right1| {
+                let pad = *l_pad || r_pad;
+                next_none(mem, pad, right1)}))),
+          mem.alloc(move |mem, left1|
+            _visit_obj(mem, right,
+              mem.alloc(move |mem| last_some(mem, left1)),
+              mem.alloc(|mem, right1| last_some(mem, _comp(mem, left1, right1, *l_pad))),
+              mem.alloc(|mem, r_pad, right1| {
+                let pad = *l_pad || r_pad;
+                last_some(mem, _comp(mem, left1, right1, pad))}))),
           mem.alloc(|_mem, _pad, _left1| unreachable!("Invariant")))
     }
   }
@@ -2548,18 +2533,20 @@ fn _denull<'b, 'a: 'b>(
           mem.alloc(|mem, term1| _fix_term(mem, term1)))),
       RebuildFix::Comp(left, right, l_pad) =>
         _visit_fix(mem, left,
-          mem.alloc(|mem| _visit_fix(mem, right,
-            last_none,
-            mem.alloc(|mem, obj| next_none(mem, *l_pad, obj)),
-            mem.alloc(|mem, r_pad, right1| {
-              let pad = *l_pad || r_pad;
-              next_none(mem, pad, right1)}))),
-          mem.alloc(move |mem, left1| _visit_fix(mem, right,
-            mem.alloc(move |mem| last_some(mem, left1)),
-            mem.alloc(|mem, right1| last_some(mem, _fix_comp(mem, left1, right1, *l_pad))),
-            mem.alloc(|mem, r_pad, right1| {
-              let pad = *l_pad || r_pad;
-              last_some(mem, _fix_comp(mem, left1, right1, pad))}))),
+          mem.alloc(|mem|
+            _visit_fix(mem, right,
+              last_none,
+              mem.alloc(|mem, right1| next_none(mem, *l_pad, right1)),
+              mem.alloc(|mem, r_pad, right1| {
+                let pad = *l_pad || r_pad;
+                next_none(mem, pad, right1)}))),
+          mem.alloc(move |mem, left1|
+            _visit_fix(mem, right,
+              mem.alloc(move |mem| last_some(mem, left1)),
+              mem.alloc(|mem, right1| last_some(mem, _fix_comp(mem, left1, right1, *l_pad))),
+              mem.alloc(|mem, r_pad, right1| {
+                let pad = *l_pad || r_pad;
+                last_some(mem, _fix_comp(mem, left1, right1, pad))}))),
           mem.alloc(|_mem, _pad, _left1| unreachable!("Invariant")))
     }
   }
@@ -2671,125 +2658,129 @@ fn _identities<'b, 'a: 'b>(
       (Count::One, Count::One) => Count::Many
     }
   }
-  fn _elim_seqs<'b, 'a: 'b, R>(
+  fn _elim_seqs<'b, 'a: 'b>(
     mem: &'b Bump,
-    doc: &'a DenullDoc<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b DenullDoc<'b>) -> R
-  ) -> R {
-    fn _visit_doc<'b, 'a: 'b, R>(
+    doc: &'a DenullDoc<'a>
+  ) -> &'b DenullDoc<'b> {
+    fn _visit_doc<'b, 'a: 'b>(
       mem: &'b Bump,
-      doc: &'a DenullDoc<'a>,
-      cont: &'b dyn Fn(&'b Bump, &'b DenullDoc<'b>) -> R
-    ) -> R {
+      doc: &'a DenullDoc<'a>
+    ) -> &'b DenullDoc<'b> {
       match doc {
-        DenullDoc::EOD => cont(mem, _eod(mem)),
-        DenullDoc::Empty(doc1) =>
-          _visit_doc(mem, doc1, mem.alloc(|mem, doc2|
-          cont(mem, _empty(mem, doc2)))),
-        DenullDoc::Break(obj, doc1) =>
-          _visit_obj(mem, obj, false, mem.alloc(move |mem, _count, obj1|
-          _visit_doc(mem, doc1, mem.alloc(move |mem, doc2|
-          cont(mem, _break(mem, obj1, doc2)))))),
-        DenullDoc::Line(obj) =>
-          _visit_obj(mem, obj, false, mem.alloc(|mem, _count, obj1|
-          cont(mem, _line(mem, obj1))))
+        DenullDoc::EOD => _eod(mem),
+        DenullDoc::Empty(doc1) => {
+          let doc2 = _visit_doc(mem, doc1);
+          _empty(mem, doc2)
+        }
+        DenullDoc::Break(obj, doc1) => {
+          let (_count, obj1) = _visit_obj(mem, obj, false);
+          let doc2 = _visit_doc(mem, doc1);
+          _break(mem, obj1, doc2)
+        }
+        DenullDoc::Line(obj) => {
+          let (_count, obj1) = _visit_obj(mem, obj, false);
+          _line(mem, obj1)
+        }
       }
     }
-    fn _visit_obj<'b, 'a: 'b, R>(
+    fn _visit_obj<'b, 'a: 'b>(
       mem: &'b Bump,
       obj: &'a DenullObj<'a>,
-      under_seq: bool,
-      cont: &'b dyn Fn(&'b Bump, Count, &'b DenullObj<'b>) -> R
-    ) -> R {
+      under_seq: bool
+    ) -> (Count, &'b DenullObj<'b>) {
       match obj {
         DenullObj::Term(term) |
         DenullObj::Fix(DenullFix::Term(term)) =>
-          cont(mem, Count::Zero, _term(mem, term)),
+          (Count::Zero, _term(mem, term)),
         DenullObj::Fix(fix) =>
-          cont(mem, Count::Zero, _fix(mem, fix)),
-        DenullObj::Grp(obj1) =>
-          _visit_obj(mem, obj1, false, mem.alloc(|mem, _count, obj2|
-          cont(mem, Count::Zero, _grp(mem, obj2)))),
+          (Count::Zero, _fix(mem, fix)),
+        DenullObj::Grp(obj1) => {
+          let (_count, obj2) = _visit_obj(mem, obj1, false);
+          (Count::Zero, _grp(mem, obj2))
+        }
         DenullObj::Seq(obj1) =>
           if under_seq {
-            _visit_obj(mem, obj1, true, cont)
+            _visit_obj(mem, obj1, true)
           } else {
-            _visit_obj(mem, obj1, true, mem.alloc(|mem, count, obj2|
+            let (count, obj2) = _visit_obj(mem, obj1, true);
             match count {
-              Count::Zero | Count::One => cont(mem, count, obj2),
-              Count::Many => cont(mem, Count::Many, _seq(mem, obj2))
-            }))
+              Count::Zero | Count::One => (count, obj2),
+              Count::Many => (Count::Many, _seq(mem, obj2))
+            }
           },
-        DenullObj::Comp(left, right, pad) =>
-          _visit_obj(mem, left, under_seq, mem.alloc(move |mem, l_count, left1|
-          _visit_obj(mem, right, under_seq, mem.alloc(move |mem, r_count, right1| {
+        DenullObj::Comp(left, right, pad) => {
+          let (l_count, left1) = _visit_obj(mem, left, under_seq);
+          let (r_count, right1) = _visit_obj(mem, right, under_seq);
           let count = _add(Count::One, _add(l_count, r_count));
-          cont(mem, count, _comp(mem, left1, right1, *pad))}))))
+          (count, _comp(mem, left1, right1, *pad))
+        }
       }
     }
-    _visit_doc(mem, doc, cont)
+    _visit_doc(mem, doc)
   }
-  fn _elim_grps<'b, 'a: 'b, R>(
+  fn _elim_grps<'b, 'a: 'b>(
     mem: &'b Bump,
-    doc: &'a DenullDoc<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b DenullDoc<'b>) -> R
-  ) -> R {
-    fn _visit_doc<'b, 'a: 'b, R>(
+    doc: &'a DenullDoc<'a>
+  ) -> &'b DenullDoc<'b> {
+    fn _visit_doc<'b, 'a: 'b>(
       mem: &'b Bump,
-      doc: &'a DenullDoc<'a>,
-      cont: &'b dyn Fn(&'b Bump, &'b DenullDoc<'b>) -> R
-    ) -> R {
+      doc: &'a DenullDoc<'a>
+    ) -> &'b DenullDoc<'b> {
       match doc {
         DenullDoc::EOD =>
-          cont(mem, _eod(mem)),
-        DenullDoc::Empty(doc1) =>
-          _visit_doc(mem, doc1, mem.alloc(|mem, doc2|
-          cont(mem, _empty(mem, doc2)))),
-        DenullDoc::Break(obj, doc1) =>
-          _visit_obj(mem, obj, true, mem.alloc(move |mem, _count, obj1|
-          _visit_doc(mem, doc1, mem.alloc(move |mem, doc2|
-          cont(mem, _break(mem, obj1, doc2)))))),
-        DenullDoc::Line(obj) =>
-          _visit_obj(mem, obj, true, mem.alloc(|mem, _count, obj1|
-          cont(mem, _line(mem, obj1))))
+          _eod(mem),
+        DenullDoc::Empty(doc1) => {
+          let doc2 = _visit_doc(mem, doc1);
+          _empty(mem, doc2)
+        }
+        DenullDoc::Break(obj, doc1) => {
+          let (_count, obj1) = _visit_obj(mem, obj, true);
+          let doc2 = _visit_doc(mem, doc1);
+          _break(mem, obj1, doc2)
+        }
+        DenullDoc::Line(obj) => {
+          let (_count, obj1) = _visit_obj(mem, obj, true);
+          _line(mem, obj1)
+        }
       }
     }
-    fn _visit_obj<'b, 'a: 'b, R>(
+    fn _visit_obj<'b, 'a: 'b>(
       mem: &'b Bump,
       obj: &'a DenullObj<'a>,
-      in_head: bool,
-      cont: &'b dyn Fn(&'b Bump, Count, &'b DenullObj<'b>) -> R
-    ) -> R {
+      in_head: bool
+    ) -> (Count, &'b DenullObj<'b>) {
       match obj {
         DenullObj::Term(term) |
         DenullObj::Fix(DenullFix::Term(term)) =>
-          cont(mem, Count::Zero, _term(mem, term)),
+          (Count::Zero, _term(mem, term)),
         DenullObj::Fix(fix) =>
-          cont(mem, Count::Zero, _fix(mem, fix)),
+          (Count::Zero, _fix(mem, fix)),
         DenullObj::Grp(obj1) =>
           if in_head  {
-            _visit_obj(mem, obj1, true, cont)
+            _visit_obj(mem, obj1, true)
           } else {
-            _visit_obj(mem, obj1, false, mem.alloc(|mem, count, obj2|
+            let (count, obj2) = _visit_obj(mem, obj1, false);
             match count {
-              Count::Zero => cont(mem, Count::Zero, obj2),
-              Count::One | Count::Many => cont(mem, Count::Zero, _grp(mem, obj2))
-            }))
+              Count::Zero => (Count::Zero, obj2),
+              Count::One | Count::Many => (Count::Zero, _grp(mem, obj2))
+            }
           }
-        DenullObj::Seq(obj1) =>
-          _visit_obj(mem, obj1, false, mem.alloc(|mem, count, obj2|
-          cont(mem, count, _seq(mem, obj2)))),
-        DenullObj::Comp(left, right, pad) =>
-          _visit_obj(mem, left, in_head, mem.alloc(move |mem, l_count, left1|
-          _visit_obj(mem, right, false, mem.alloc(move |mem, r_count, right1| {
+        DenullObj::Seq(obj1) => {
+          let (count, obj2) = _visit_obj(mem, obj1, false);
+          (count, _seq(mem, obj2))
+        }
+        DenullObj::Comp(left, right, pad) => {
+          let (l_count, left1) = _visit_obj(mem, left, in_head);
+          let (r_count, right1) = _visit_obj(mem, right, false);
           let count = _add(Count::One, _add(l_count, r_count));
-          cont(mem, count, _comp(mem, left1, right1, *pad))}))))
+          (count, _comp(mem, left1, right1, *pad))
+        }
       }
     }
-    _visit_doc(mem, doc, cont)
+    _visit_doc(mem, doc)
   }
-  _elim_seqs(mem, doc, mem.alloc(|mem, doc1|
-  _elim_grps(mem, doc1, mem.alloc(|_mem, doc2| doc2))))
+  let doc1 = _elim_seqs(mem, doc);
+  _elim_grps(mem, doc1)
 }
 
 /*
@@ -2863,25 +2854,28 @@ fn _reassociate<'b, 'a: 'b>(
   ) -> &'a DenullObj<'a> {
     _comp(mem, left, right, pad)
   }
-  fn _visit_doc<'b, 'a: 'b, R>(
+  fn _visit_doc<'b, 'a: 'b>(
     mem: &'b Bump,
-    doc: &'a DenullDoc<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b DenullDoc<'b>) -> R
-  ) -> R {
+    doc: &'a DenullDoc<'a>
+  ) -> &'b DenullDoc<'b> {
     match doc {
       DenullDoc::EOD =>
-        cont(mem, _eod(mem)),
-      DenullDoc::Empty(doc1) =>
-        _visit_doc(mem, doc1, mem.alloc(|mem, doc2|
-        cont(mem, _empty(mem, doc2)))),
-      DenullDoc::Break(obj, doc1) =>
-        _visit_obj(mem, obj, mem.alloc(move |_mem, obj1| obj1),
-          mem.alloc(move |mem, obj2|
-        _visit_doc(mem, doc1, mem.alloc(move |mem, doc2|
-        cont(mem, _break(mem, obj2, doc2)))))),
-      DenullDoc::Line(obj) =>
-        _visit_obj(mem, obj, mem.alloc(|_mem, obj1| obj1), mem.alloc(|mem, obj2|
-        cont(mem, _line(mem, obj2))))
+        _eod(mem),
+      DenullDoc::Empty(doc1) => {
+        let doc2 = _visit_doc(mem, doc1);
+        _empty(mem, doc2)
+      }
+      DenullDoc::Break(obj, doc1) => {
+        let partial = mem.alloc(move |_mem, obj1| obj1);
+        _visit_obj(mem, obj, partial, mem.alloc(move |mem, obj2| {
+        let doc2 = _visit_doc(mem, doc1);
+        _break(mem, obj2, doc2)}))
+      }
+      DenullDoc::Line(obj) => {
+        let partial = mem.alloc(|_mem, obj1| obj1);
+        _visit_obj(mem, obj, partial, mem.alloc(|mem, obj2|
+        _line(mem, obj2)))
+      }
     }
   }
   fn _visit_obj<'b, 'a: 'b, R>(
@@ -2911,7 +2905,7 @@ fn _reassociate<'b, 'a: 'b>(
         )))
     }
   }
-  _visit_doc(mem, doc, mem.alloc(|_mem, doc1| doc1))
+  _visit_doc(mem, doc)
 }
 
 #[derive(Debug)]
@@ -3038,50 +3032,46 @@ fn _rescope<'b, 'a: 'b>(
   fn _prop_pack(index: u64) -> Prop {
     Prop::Pack(index)
   }
-  fn _join_props<'b, 'a: 'b, R>(
+  fn _join_props<'b, 'a: 'b>(
     mem: &'b Bump,
     l: &'a List<'a, Prop>,
-    r: &'a List<'a, Prop>,
-    cont: &'b dyn Fn(
-      &'b Bump,
-      &'b List<'b, Prop>,
-      &'b List<'b, Prop>,
-      &'b List<'b, Prop>
-    ) -> R
-  ) -> R {
-    fn _visit<'b, 'a: 'b, R>(
+    r: &'a List<'a, Prop>
+  ) -> (
+    &'b List<'b, Prop>,
+    &'b List<'b, Prop>,
+    &'b List<'b, Prop>
+  ) {
+    fn _visit<'b, 'a: 'b>(
       mem: &'b Bump,
       l: &'a List<'a, Prop>,
       r: &'a List<'a, Prop>,
-      c: &'a dyn Fn(&'b Bump, &'a List<'a, Prop>) -> &'a List<'a, Prop>,
-      cont: &'b dyn Fn(
-        &'b Bump,
-        &'b List<'b, Prop>,
-        &'b List<'b, Prop>,
-        &'b List<'b, Prop>
-      ) -> R
-    ) -> R {
+      c: &'a dyn Fn(&'b Bump, &'a List<'a, Prop>) -> &'a List<'a, Prop>
+    ) -> (
+      &'b List<'b, Prop>,
+      &'b List<'b, Prop>,
+      &'b List<'b, Prop>
+    ) {
       match (l, r) {
         ( List::Cons(_, Prop::Nest, l1)
         , List::Cons(_, Prop::Nest, r1)) => {
           let c1 = compose(mem, c, mem.alloc(|mem, props|
             _list::cons(mem, Prop::Nest, props)));
-          _visit(mem, l1, r1, c1, cont)
+          _visit(mem, l1, r1, c1)
         }
         ( List::Cons(_, Prop::Pack(l_index), l1)
         , List::Cons(_, Prop::Pack(r_index), r1)) =>
           if l_index != r_index {
-            cont(mem, l, r, c(mem, _list::nil(mem)))
+            (l, r, c(mem, _list::nil(mem)))
           } else {
             let c1 = compose(mem, c, mem.alloc(|mem, props|
               _list::cons(mem, _prop_pack(*l_index), props)));
-            _visit(mem, l1, r1, c1, cont)
+            _visit(mem, l1, r1, c1)
           }
         (_, _) =>
-          cont(mem, l, r, c(mem, _list::nil(mem)))
+          (l, r, c(mem, _list::nil(mem)))
       }
     }
-    _visit(mem, l, r, mem.alloc(|_mem, props| props), cont)
+    _visit(mem, l, r, mem.alloc(|_mem, props| props))
   }
   fn _apply_props<'b, 'a: 'b, R>(
     mem: &'b Bump,
@@ -3099,112 +3089,126 @@ fn _rescope<'b, 'a: 'b>(
         _pack(mem, *index, obj))))
     }
   }
-  fn _visit_doc<'b, 'a: 'b, R>(
+  fn _visit_doc<'b, 'a: 'b>(
     mem: &'b Bump,
-    doc: &'a DenullDoc<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b FinalDoc<'b>) -> R
-  ) -> R {
+    doc: &'a DenullDoc<'a>
+  ) -> &'b FinalDoc<'b> {
     match doc {
       DenullDoc::EOD =>
-        cont(mem, _eod(mem)),
-      DenullDoc::Empty(doc1) =>
-        _visit_doc(mem, doc1, mem.alloc(|mem, doc2|
-        cont(mem, _empty(mem, doc2)))),
-      DenullDoc::Break(obj, doc1) =>
-        _visit_obj(mem, obj, mem.alloc(move |mem, props, obj1|
-        _apply_props(mem, props, obj1, mem.alloc(move |mem, obj2|
-        _visit_doc(mem, doc1, mem.alloc(move |mem, doc2|
-        cont(mem, _break(mem, obj2, doc2)))))))),
-      DenullDoc::Line(obj) =>
-        _visit_obj(mem, obj, mem.alloc(|mem, props, obj1|
+        _eod(mem),
+      DenullDoc::Empty(doc1) => {
+        let doc2 = _visit_doc(mem, doc1);
+        _empty(mem, doc2)
+      }
+      DenullDoc::Break(obj, doc1) => {
+        let (props, obj1) = _visit_obj(mem, obj);
+        _apply_props(mem, props, obj1, mem.alloc(move |mem, obj2| {
+        let doc2 = _visit_doc(mem, doc1);
+        _break(mem, obj2, doc2)}))
+      }
+      DenullDoc::Line(obj) => {
+        let (props, obj1) = _visit_obj(mem, obj);
         _apply_props(mem, props, obj1, mem.alloc(|mem, obj2|
-        cont(mem, _line(mem, obj2))))))
+        _line(mem, obj2)))
+      }
     }
   }
-  fn _visit_obj<'b, 'a: 'b, R>(
+  fn _visit_obj<'b, 'a: 'b>(
     mem: &'b Bump,
-    obj: &'a DenullObj<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>, &'b FinalDocObj<'b>) -> R
-  ) -> R {
+    obj: &'a DenullObj<'a>
+  ) -> (
+    &'b List<'b, Prop>,
+    &'b FinalDocObj<'b>
+  ) {
     match obj {
       DenullObj::Term(term) =>
-        _visit_term(mem, term, mem.alloc(|_mem, props| props), cont),
-      DenullObj::Fix(fix) =>
-        _visit_fix(mem, fix, mem.alloc(|mem, props, fix1|
-        cont(mem, props, _fix(mem, fix1)))),
-      DenullObj::Grp(obj1) =>
-        _visit_obj(mem, obj1, mem.alloc(|mem, props, obj2|
-        cont(mem, props, _grp(mem, obj2)))),
-      DenullObj::Seq(obj1) =>
-        _visit_obj(mem, obj1, mem.alloc(|mem, props, obj2|
-        cont(mem, props, _seq(mem, obj2)))),
-      DenullObj::Comp(left, right, pad) =>
-        _visit_obj(mem, left, mem.alloc(move |mem, l_props, left1|
-        _visit_obj(mem, right, mem.alloc(move |mem, r_props, right1|
-        _join_props(mem, l_props, r_props,
-          mem.alloc(move |mem, l_props1, r_props1, c_props|
+        _visit_term(mem, term, mem.alloc(|_mem, props| props)),
+      DenullObj::Fix(fix) => {
+        let (props, fix1) = _visit_fix(mem, fix);
+        (props, _fix(mem, fix1))
+      }
+      DenullObj::Grp(obj1) => {
+        let (props, obj2) = _visit_obj(mem, obj1);
+        (props, _grp(mem, obj2))
+      }
+      DenullObj::Seq(obj1) => {
+        let (props, obj2) = _visit_obj(mem, obj1);
+        (props, _seq(mem, obj2))
+      }
+      DenullObj::Comp(left, right, pad) => {
+        let (l_props, left1) = _visit_obj(mem, left);
+        let (r_props, right1) = _visit_obj(mem, right);
+        let (l_props1, r_props1, c_props) = _join_props(mem, l_props, r_props);
         _apply_props(mem, l_props1, left1, mem.alloc(move |mem, left2|
         _apply_props(mem, r_props1, right1, mem.alloc(move |mem, right2|
-        cont(mem, c_props, _comp(mem, left2, right2, *pad))))))))))))
+        (c_props, _comp(mem, left2, right2, *pad))))))
+      }
     }
   }
-  fn _visit_fix<'b, 'a: 'b, R>(
+  fn _visit_fix<'b, 'a: 'b>(
     mem: &'b Bump,
-    fix: &'a DenullFix<'a>,
-    cont: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>, &'b FinalDocObjFix<'b>) -> R
-  ) -> R {
+    fix: &'a DenullFix<'a>
+  ) -> (
+    &'b List<'b, Prop>,
+    &'b FinalDocObjFix<'b>
+  ) {
     match fix {
       DenullFix::Term(term) =>
-        _visit_fix_term(mem, term, mem.alloc(|_mem, props| props), cont),
-      DenullFix::Comp(left, right, pad) =>
-        _visit_fix(mem, left, mem.alloc(move |mem, l_props, left1|
-        _visit_fix(mem, right, mem.alloc(move |mem, _r_props, right1|
-        cont(mem, l_props, _fix_comp(mem, left1, right1, *pad))))))
+        _visit_fix_term(mem, term, mem.alloc(|_mem, props| props)),
+      DenullFix::Comp(left, right, pad) => {
+        let (l_props, left1) = _visit_fix(mem, left);
+        let (_r_props, right1) = _visit_fix(mem, right);
+        (l_props, _fix_comp(mem, left1, right1, *pad))
+      }
     }
   }
-  fn _visit_term<'b, 'a: 'b, R>(
+  fn _visit_term<'b, 'a: 'b>(
     mem: &'b Bump,
     term: &'a DenullTerm<'a>,
-    result: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>) -> &'b List<'b, Prop>,
-    cont: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>, &'b FinalDocObj<'b>) -> R
-  ) -> R {
+    result: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>) -> &'b List<'b, Prop>
+  ) -> (
+    &'b List<'b, Prop>,
+    &'b FinalDocObj<'b>
+  ) {
     match term {
       DenullTerm::Text(data) =>
-        cont(mem, result(mem, _list::nil(mem)), _text(mem, data)),
+        (result(mem, _list::nil(mem)), _text(mem, data)),
       DenullTerm::Nest(term1) => {
         let result1 = compose(mem, result, mem.alloc(|mem, props|
           _list::cons(mem, Prop::Nest, props)));
-        _visit_term(mem, term1, result1, cont)
+        _visit_term(mem, term1, result1)
       }
       DenullTerm::Pack (index, term1) => {
         let result1 = compose(mem, result, mem.alloc(|mem, props|
           _list::cons(mem, _prop_pack(*index), props)));
-        _visit_term(mem, term1, result1, cont)
+        _visit_term(mem, term1, result1)
       }
     }
   }
-  fn _visit_fix_term<'b, 'a: 'b, R>(
+  fn _visit_fix_term<'b, 'a: 'b>(
     mem: &'b Bump,
     term: &'a DenullTerm<'a>,
-    result: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>) -> &'b List<'b, Prop>,
-    cont: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>, &'b FinalDocObjFix<'b>) -> R
-  ) -> R {
+    result: &'b dyn Fn(&'b Bump, &'b List<'b, Prop>) -> &'b List<'b, Prop>
+  ) -> (
+    &'b List<'b, Prop>,
+    &'b FinalDocObjFix<'b>
+  ) {
     match term {
       DenullTerm::Text(data) =>
-        cont(mem, result(mem, _list::nil(mem)), _fix_text(mem, data)),
+        (result(mem, _list::nil(mem)), _fix_text(mem, data)),
       DenullTerm::Nest(term1) => {
         let result1 = compose(mem, result, mem.alloc(|mem, props|
           _list::cons(mem, Prop::Nest, props)));
-        _visit_fix_term(mem, term1, result1, cont)
+        _visit_fix_term(mem, term1, result1)
       }
       DenullTerm::Pack(index, term1) => {
         let result1 = compose(mem, result, mem.alloc(|mem, props|
           _list::cons(mem, _prop_pack(*index), props)));
-        _visit_fix_term(mem, term1, result1, cont)
+        _visit_fix_term(mem, term1, result1)
       }
     }
   }
-  _visit_doc(mem, doc, mem.alloc(|_mem, doc1| doc1))
+  _visit_doc(mem, doc)
 }
 
 #[derive(Debug, Clone)]
@@ -3390,11 +3394,17 @@ pub fn compile(
 ) -> Box<Doc> {
   let mem = Bump::new();
   let layout1 = _broken(&mem, layout);
+  println!("Rust: {:?}", layout1);
   let layout2 = _serialize(&mem, layout1);
+  println!("Rust: {:?}", layout2);
   let doc = _linearize(&mem, layout2);
+  println!("Rust: {:?}", doc);
   let doc1 = _fixed(&mem, doc);
+  println!("Rust: {:?}", doc1);
   let doc2 = _structurize(&mem, doc1);
+  println!("Rust: {:?}", doc2);
   let doc3 = _denull(&mem, doc2);
+  println!("Rust: {:?}", doc3);
   let doc4 = _identities(&mem, doc3);
   let doc5 = _reassociate(&mem, doc4);
   let doc6 = _rescope(&mem, doc5);
