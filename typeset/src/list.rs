@@ -1,20 +1,21 @@
+use std::fmt::Debug;
 use bumpalo::Bump;
 
 use crate::util::compose;
 
 #[derive(Debug)]
-pub enum List<'a, T: Copy + Clone> {
+pub enum List<'a, T: Copy + Clone + Debug> {
   Nil,
   Cons(u64, T, &'a List<'a, T>)
 }
 
-pub fn nil<'a, T: Copy + Clone>(
+pub fn nil<'a, T: Copy + Clone + Debug>(
   mem: &'a Bump
 ) -> &'a List<'a, T> {
   mem.alloc(List::Nil)
 }
 
-pub fn cons<'a, T: Copy + Clone>(
+pub fn cons<'a, T: Copy + Clone + Debug>(
   mem: &'a Bump,
   item: T,
   items: &'a List<'a, T>
@@ -22,14 +23,14 @@ pub fn cons<'a, T: Copy + Clone>(
   mem.alloc(List::Cons(items.length() + 1, item, items))
 }
 
-impl<'b, 'a: 'b, T: Copy + Clone> List<'a, T> {
+impl<'b, 'a: 'b, T: Copy + Clone + Debug> List<'a, T> {
   pub fn fold<R>(
     &'a self,
     mem: &'b Bump,
     nil_case: R,
     cons_case: &'a dyn Fn(&'b Bump, T, R) -> R
   ) -> R {
-    fn _visit<'b, 'a: 'b, T: Copy + Clone, R>(
+    fn _visit<'b, 'a: 'b, T: Copy + Clone + Debug, R>(
       mem: &'b Bump,
       items: &'a List<'a, T>,
       nil_case: R,
@@ -37,7 +38,7 @@ impl<'b, 'a: 'b, T: Copy + Clone> List<'a, T> {
       cont: &'b dyn Fn(&'b Bump, R) -> R
     ) -> R {
       match items {
-        List::Nil => nil_case,
+        List::Nil => cont(mem, nil_case),
         List::Cons(_, item, items1) =>
           _visit(mem, items1, nil_case, cons_case,
             compose(mem, cont, mem.alloc(|mem, result|
@@ -47,12 +48,12 @@ impl<'b, 'a: 'b, T: Copy + Clone> List<'a, T> {
     _visit(mem, self, nil_case, cons_case, mem.alloc(|_mem, result| result))
   }
 
-  pub fn map<S: Copy + Clone>(
+  pub fn map<S: Copy + Clone + Debug>(
     &'a self,
     mem: &'b Bump,
     func: &'a dyn Fn(&'b Bump, T) -> S
   ) -> &'b List<'b, S> {
-    fn _visit<'b, 'a: 'b, A: Copy + Clone, B: Copy + Clone>(
+    fn _visit<'b, 'a: 'b, A: Copy + Clone + Debug, B: Copy + Clone + Debug>(
       mem: &'b Bump,
       items: &'a List<'a, A>,
       func: &'a dyn Fn(&'b Bump, A) -> B,

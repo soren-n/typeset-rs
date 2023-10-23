@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::cmp::max;
 
 use bumpalo::Bump;
@@ -9,16 +10,16 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum AVL<'a, T: Copy + Clone> {
+pub enum AVL<'a, T: Copy + Clone + Debug> {
   Null,
   Node(u64, u64, T, &'a AVL<'a, T>, &'a AVL<'a, T>)
 }
 
-pub fn null<'a, T: Copy + Clone>(mem: &'a Bump) -> &'a AVL<'a, T>{
+pub fn null<'a, T: Copy + Clone + Debug>(mem: &'a Bump) -> &'a AVL<'a, T>{
   mem.alloc(AVL::Null)
 }
 
-pub fn node<'a, T: Copy + Clone>(
+pub fn node<'a, T: Copy + Clone + Debug>(
   mem: &'a Bump,
   count: u64,
   height: u64,
@@ -29,7 +30,7 @@ pub fn node<'a, T: Copy + Clone>(
   mem.alloc(AVL::Node(count, height, data, left, right))
 }
 
-pub fn fold<'b, 'a: 'b, T: Copy + Clone, R: Copy + Clone>(
+pub fn fold<'b, 'a: 'b, T: Copy + Clone + Debug, R: Copy + Clone + Debug>(
   mem: &'b Bump,
   tree: &'a AVL<'a, T>,
   null_case: R,
@@ -45,7 +46,7 @@ pub fn fold<'b, 'a: 'b, T: Copy + Clone, R: Copy + Clone>(
   }
 }
 
-pub fn map<'b, 'a: 'b,  A: Copy + Clone, B: Copy + Clone>(
+pub fn map<'b, 'a: 'b,  A: Copy + Clone + Debug, B: Copy + Clone + Debug>(
   mem: &'b Bump,
   tree: &'a AVL<'a, A>,
   func: &'a dyn Fn(&'b Bump, A) -> B
@@ -56,21 +57,21 @@ pub fn map<'b, 'a: 'b,  A: Copy + Clone, B: Copy + Clone>(
       node(mem, count, height, func(mem, data), left, right)))
 }
 
-pub fn get_count<'a, T: Copy + Clone>(tree: &'a AVL<'a, T>) -> u64 {
+pub fn get_count<'a, T: Copy + Clone + Debug>(tree: &'a AVL<'a, T>) -> u64 {
   match tree {
     AVL::Null => 0,
     AVL::Node(count, _, _, _, _) => *count
   }
 }
 
-pub fn get_height<'a, T: Copy + Clone>(tree: &'a AVL<'a, T>) -> u64 {
+pub fn get_height<'a, T: Copy + Clone + Debug>(tree: &'a AVL<'a, T>) -> u64 {
   match tree {
     AVL::Null => 0,
     AVL::Node(_, height, _, _, _) => *height
   }
 }
 
-fn _local_inbalance<'a, T: Copy + Clone>(
+fn _local_inbalance<'a, T: Copy + Clone + Debug>(
   pos: Order,
   tree: &'a AVL<'a, T>
 ) -> Order {
@@ -98,12 +99,12 @@ fn _local_inbalance<'a, T: Copy + Clone>(
   }
 }
 
-fn _local_rebalance<'b, 'a: 'b, T: Copy + Clone>(
+fn _local_rebalance<'b, 'a: 'b, T: Copy + Clone + Debug>(
   mem: &'b Bump,
   pos: Order,
   tree: &'a AVL<'a, T>
 ) -> &'b AVL<'b, T> {
-  fn _rotate_left<'b, 'a: 'b, T: Copy + Clone>(
+  fn _rotate_left<'b, 'a: 'b, T: Copy + Clone + Debug>(
     mem: &'b Bump,
     p: &'a AVL<'a, T>
   ) -> &'b AVL<'b, T> {
@@ -127,7 +128,7 @@ fn _local_rebalance<'b, 'a: 'b, T: Copy + Clone>(
       }
     }
   }
-  fn _rotate_right<'b, 'a: 'b, T: Copy + Clone>(
+  fn _rotate_right<'b, 'a: 'b, T: Copy + Clone + Debug>(
     mem: &'b Bump,
     q: &'a AVL<'a, T>
   ) -> &'b AVL<'b, T> {
@@ -158,13 +159,13 @@ fn _local_rebalance<'b, 'a: 'b, T: Copy + Clone>(
   }
 }
 
-pub fn insert<'b, 'a: 'b, T: Copy + Clone>(
+pub fn insert<'b, 'a: 'b, T: Copy + Clone + Debug>(
   mem: &'b Bump,
   order: &'a dyn Fn(T, T) -> Order,
   data: T,
   tree: &'a AVL<'a, T>
 ) -> &'b AVL<'b, T> {
-  fn _visit<'b, 'a: 'b, T: Copy + Clone>(
+  fn _visit<'b, 'a: 'b, T: Copy + Clone + Debug>(
     mem: &'b Bump,
     order: &'a dyn Fn(T, T) -> Order,
     data: T,
@@ -237,27 +238,27 @@ pub fn insert<'b, 'a: 'b, T: Copy + Clone>(
   )
 }
 
-pub fn remove<'b, 'a: 'b, T: Copy + Clone>(
+pub fn remove<'b, 'a: 'b, T: Copy + Clone + Debug>(
   mem: &'b Bump,
   order: &'a dyn Fn(T, T) -> Order,
   data: T,
   tree: &'a AVL<'a, T>
 ) -> &'b AVL<'b, T> {
-  fn _leftmost<'a, T: Copy + Clone>(tree: &'a AVL<'a, T>) -> T {
+  fn _leftmost<'a, T: Copy + Clone + Debug>(tree: &'a AVL<'a, T>) -> T {
     match tree {
       AVL::Null => unreachable!("Invariant"),
       AVL::Node(_, _, data, AVL::Null, _) => *data,
       AVL::Node(_, _, _, left, _) => _leftmost(left)
     }
   }
-  fn _rightmost<'a, T: Copy + Clone>(tree: &'a AVL<'a, T>) -> T {
+  fn _rightmost<'a, T: Copy + Clone + Debug>(tree: &'a AVL<'a, T>) -> T {
     match tree {
       AVL::Null => unreachable!("Invariant"),
       AVL::Node(_, _, data, _, AVL::Null) => *data,
       AVL::Node(_, _, _, _, right) => _rightmost(right)
     }
   }
-  fn _visit<'b, 'a: 'b, T: Copy + Clone, R>(
+  fn _visit<'b, 'a: 'b, T: Copy + Clone + Debug, R>(
     mem: &'b Bump,
     order: &'a dyn Fn(T, T) -> Order,
     data: T,
@@ -378,7 +379,7 @@ pub fn remove<'b, 'a: 'b, T: Copy + Clone>(
   )
 }
 
-pub fn is_member<'a, T: Copy + Clone>(
+pub fn is_member<'a, T: Copy + Clone + Debug>(
   order: &'a dyn Fn(T, T) -> Order,
   item: T,
   tree: &'a AVL<'a, T>
@@ -394,7 +395,7 @@ pub fn is_member<'a, T: Copy + Clone>(
   }
 }
 
-pub fn get_member<'a, T: Copy + Clone>(
+pub fn get_member<'a, T: Copy + Clone + Debug>(
   index: u64,
   tree: &'a AVL<'a, T>
 ) -> Option<T> {
@@ -411,7 +412,7 @@ pub fn get_member<'a, T: Copy + Clone>(
   }
 }
 
-pub fn get_leftmost<'a, T: Copy + Clone>(
+pub fn get_leftmost<'a, T: Copy + Clone + Debug>(
   tree: &'a AVL<'a, T>
 ) -> Option<T> {
   match tree {
@@ -424,7 +425,7 @@ pub fn get_leftmost<'a, T: Copy + Clone>(
   }
 }
 
-pub fn get_rightmost<'a, T: Copy + Clone>(
+pub fn get_rightmost<'a, T: Copy + Clone + Debug>(
   tree: &'a AVL<'a, T>
 ) -> Option<T> {
   match tree {
@@ -437,11 +438,11 @@ pub fn get_rightmost<'a, T: Copy + Clone>(
   }
 }
 
-pub fn to_list<'b, 'a: 'b, T: Copy + Clone>(
+pub fn to_list<'b, 'a: 'b, T: Copy + Clone + Debug>(
   mem: &'b Bump,
   tree: &'a AVL<'a, T>
 ) -> &'b List<'b, T> {
-  fn _visit<'b, 'a: 'b, T: Copy + Clone>(
+  fn _visit<'b, 'a: 'b, T: Copy + Clone + Debug>(
     mem: &'b Bump,
     tree: &'a AVL<'a, T>,
     result: &'a List<'a, T>
@@ -458,11 +459,11 @@ pub fn to_list<'b, 'a: 'b, T: Copy + Clone>(
   _visit(mem, tree, nil(mem))
 }
 
-pub fn from_list<'b, 'a: 'b, T: Copy + Clone>(
+pub fn from_list<'b, 'a: 'b, T: Copy + Clone + Debug>(
   mem: &'b Bump,
   items: &'a List<'a, T>
 ) -> &'b AVL<'b, T> {
-  fn _build<'b, 'a: 'b, T: Copy + Clone>(
+  fn _build<'b, 'a: 'b, T: Copy + Clone + Debug>(
     mem: &'b Bump,
     pos: Order,
     count: u64,

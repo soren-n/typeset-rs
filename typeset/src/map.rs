@@ -1,33 +1,46 @@
+use std::fmt::Debug;
 use bumpalo::Bump;
 
 use crate::{
   order::Order,
-  list::{self as _list, List},
+  list::List,
   avl::{self as _avl, AVL}
 };
 
 #[derive(Debug, Copy, Clone)]
-pub enum Entry<K: Copy + Clone, V: Copy + Clone> {
+pub enum Entry<
+  K: Copy + Clone + Debug,
+  V: Copy + Clone + Debug
+> {
   Peek(K),
   Bind(K, V)
 }
 
 pub type Map<'a, K, V> = AVL<'a, Entry<K, V>>;
 
-fn _entry_peek<'a, K: Copy + Clone, V: Copy + Clone>(
+fn _entry_peek<'a,
+  K: Copy + Clone + Debug,
+  V: Copy + Clone + Debug
+>(
   key: K
 ) -> Entry<K, V> {
   Entry::Peek(key)
 }
 
-fn _entry_bind<K: Copy + Clone, V: Copy + Clone>(
+fn _entry_bind<
+  K: Copy + Clone + Debug,
+  V: Copy + Clone + Debug
+>(
   key: K,
   value: V
 ) -> Entry<K, V> {
   Entry::Bind(key, value)
 }
 
-fn _entry_key<'a, K: Copy + Clone, V: Copy + Clone>(
+fn _entry_key<'a,
+  K: Copy + Clone + Debug,
+  V: Copy + Clone + Debug
+>(
   entry: Entry<K, V>
 ) -> K {
   match entry {
@@ -36,13 +49,19 @@ fn _entry_key<'a, K: Copy + Clone, V: Copy + Clone>(
   }
 }
 
-pub fn empty<'a, K: Copy + Clone, V: Copy + Clone>(
+pub fn empty<'a,
+  K: Copy + Clone + Debug,
+  V: Copy + Clone + Debug
+>(
   mem: &'a Bump
 ) -> &'a Map<'a, K, V> {
   _avl::null(mem)
 }
 
-impl<'b, 'a: 'b, K: Copy + Clone, V: Copy + Clone> Map<'a, K, V> {
+impl<'b, 'a: 'b,
+  K: Copy + Clone + Debug,
+  V: Copy + Clone + Debug
+> Map<'a, K, V> {
   pub fn size(
     &'a self
   ) -> u64 {
@@ -55,8 +74,8 @@ impl<'b, 'a: 'b, K: Copy + Clone, V: Copy + Clone> Map<'a, K, V> {
     empty_case: R,
     bind_case: &'a dyn Fn(&'b Bump, K, V, R) -> R
   ) -> R {
-    let map1 = _avl::to_list(mem, self);
-    map1.fold(mem, empty_case, mem.alloc(|mem, bind: Entry<K, V>, result|
+    let entries = _avl::to_list(mem, self);
+    entries.fold(mem, empty_case, mem.alloc(|mem, bind: Entry<K, V>, result|
     match bind {
       Entry::Peek(_) => unreachable!("Invariant"),
       Entry::Bind(key, value) =>
@@ -64,7 +83,7 @@ impl<'b, 'a: 'b, K: Copy + Clone, V: Copy + Clone> Map<'a, K, V> {
     }))
   }
 
-  pub fn map<U: Copy + Clone>(
+  pub fn map<U: Copy + Clone + Debug>(
     &'a self,
     mem: &'b Bump,
     func: &'a dyn Fn(&'b Bump, V) -> U
@@ -163,40 +182,43 @@ impl<'b, 'a: 'b, K: Copy + Clone, V: Copy + Clone> Map<'a, K, V> {
     &'a self,
     mem: &'b Bump
   ) -> &'b List<'b, (K, V)> {
-    self.fold(
-      mem,
-      _list::nil(mem),
-      mem.alloc(|mem, key, value, key_values|
-        _list::cons(mem, (key, value), key_values))
-    )
+    let entries = _avl::to_list(mem, self);
+    entries.map(mem, mem.alloc(|_mem, entry: Entry<K, V>|
+      match entry {
+        Entry::Peek(_) => unreachable!("Invariant"),
+        Entry::Bind(key, value) => (key, value)
+      }))
   }
 
   pub fn keys(
     &'a self,
     mem: &'b Bump
   ) -> &'b List<'b, K> {
-    self.fold(
-      mem,
-      _list::nil(mem),
-      mem.alloc(|mem, key, _value, result|
-        _list::cons(mem, key, result))
-    )
+    let entries = _avl::to_list(mem, self);
+    entries.map(mem, mem.alloc(|_mem, entry: Entry<K, V>|
+      match entry {
+        Entry::Peek(_) => unreachable!("Invariant"),
+        Entry::Bind(key, _value) => key
+      }))
   }
 
   pub fn values(
     &'a self,
     mem: &'b Bump
   ) -> &'b List<'b, V> {
-    self.fold(
-      mem,
-      _list::nil(mem),
-      mem.alloc(|mem, _key, value, result|
-        _list::cons(mem, value, result))
-    )
+    let entries = _avl::to_list(mem, self);
+    entries.map(mem, mem.alloc(|_mem, entry: Entry<K, V>|
+      match entry {
+        Entry::Peek(_) => unreachable!("Invariant"),
+        Entry::Bind(_key, value) => value
+      }))
   }
 }
 
-pub fn from_entries<'b, 'a: 'b, K: Copy + Clone, V: Copy + Clone>(
+pub fn from_entries<'b, 'a: 'b,
+  K: Copy + Clone + Debug,
+  V: Copy + Clone + Debug
+>(
   mem: &'b Bump,
   entries: &'a List<'a, (K, V)>
 ) -> &'b Map<'b, K, V> {

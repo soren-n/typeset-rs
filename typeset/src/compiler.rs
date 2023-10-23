@@ -588,18 +588,19 @@ fn _serialize<'b, 'a: 'b>(
     comps: &'b dyn Fn(&'b Bump, &'b SerialComp<'b>) -> &'b SerialComp<'b>,
     glue: &'b dyn Fn(&'b Bump, &'b SerialTerm<'b>, &'b Serial<'b>) -> &'b Serial<'b>,
     result: &'b dyn Fn(&'b Bump, &'b Serial<'b>) -> R,
-    layout: &'a EDSL<'a>,
-    cont: &'b dyn Fn(&'b Bump, u64, u64, &'b dyn Fn(&'b Bump, &'b Serial<'b>) -> R) -> R
-  ) -> R {
+    layout: &'a EDSL<'a>
+  ) -> (
+    u64, u64, &'b dyn Fn(&'b Bump, &'b Serial<'b>) -> R
+  ) {
     match layout {
       EDSL::Null =>
-        cont(mem, i, j, compose(mem, result, mem.alloc(|mem, serial|
+        (i, j, compose(mem, result, mem.alloc(|mem, serial|
         glue(mem, _null(mem), serial)))),
       EDSL::Text(data) =>
-        cont(mem, i, j, compose(mem, result, mem.alloc(|mem, serial|
+        (i, j, compose(mem, result, mem.alloc(|mem, serial|
         glue(mem, terms(mem, _text(mem, data)), serial)))),
       EDSL::Fix(layout1) =>
-        _visit(mem, i, j, true, terms, comps, glue, result, layout1, cont),
+        _visit(mem, i, j, true, terms, comps, glue, result, layout1),
       EDSL::Grp(layout1) =>
         _visit(
           mem,
@@ -609,8 +610,7 @@ fn _serialize<'b, 'a: 'b>(
           compose(mem, comps, mem.alloc(move |mem, comp| _grp(mem, i, comp))),
           glue,
           result,
-          layout1,
-          cont
+          layout1
         ),
       EDSL::Seq(layout1) =>
         _visit(
@@ -621,8 +621,7 @@ fn _serialize<'b, 'a: 'b>(
           compose(mem, comps, mem.alloc(move |mem, comp| _seq(mem, i, comp))),
           glue,
           result,
-          layout1,
-          cont
+          layout1
         ),
       EDSL::Nest(layout1) =>
         _visit(
@@ -633,8 +632,7 @@ fn _serialize<'b, 'a: 'b>(
           comps,
           glue,
           result,
-          layout1,
-          cont
+          layout1
         ),
       EDSL::Pack(layout1) =>
         _visit(
@@ -645,11 +643,10 @@ fn _serialize<'b, 'a: 'b>(
           comps,
           glue,
           result,
-          layout1,
-          cont
+          layout1
         ),
-      EDSL::Line(left, right) =>
-        _visit(
+      EDSL::Line(left, right) => {
+        let (i1, j1, result1) = _visit(
           mem,
           i, j,
           fixed,
@@ -657,19 +654,12 @@ fn _serialize<'b, 'a: 'b>(
           comps,
           mem.alloc(|mem, term, serial| __line(mem, term, serial)),
           result,
-          left,
-          mem.alloc(move |mem, i1, j1, result1|
-            _visit(
-              mem,
-              i1, j1,
-              fixed,
-              terms,
-              comps,
-              glue,
-              result1,
-              right,
-              cont
-            ))),
+          left
+        );
+        _visit(
+          mem, i1, j1, fixed, terms, comps, glue, result1, right
+        )
+      }
       EDSL::Comp(left, right, attr) => {
         let glue1 = mem.alloc(move |mem, term, serial| {
           let attr1 = Attr {
@@ -678,31 +668,16 @@ fn _serialize<'b, 'a: 'b>(
           };
           __comp(mem, comps, attr1, term, serial)
         });
+        let (i1, j1, result1) = _visit(
+          mem, i, j, fixed, terms, comps, glue1, result, left
+        );
         _visit(
-          mem,
-          i, j,
-          fixed,
-          terms,
-          comps,
-          glue1,
-          result,
-          left,
-          mem.alloc(move |mem, i1, j1, result1|
-            _visit(
-              mem,
-              i1, j1,
-              fixed,
-              terms,
-              comps,
-              glue,
-              result1,
-              right,
-              cont
-            )))
+          mem, i1, j1, fixed, terms, comps, glue, result1, right
+        )
       }
     }
   }
-  _visit(
+  let (_i, _j, result) = _visit(
     mem,
     0, 0,
     false,
@@ -710,9 +685,9 @@ fn _serialize<'b, 'a: 'b>(
     mem.alloc(|_mem, x| x),
     mem.alloc(|mem, term, serial| _last(mem, term, serial)),
     mem.alloc(|_mem, x| x),
-    layout,
-    mem.alloc(|mem, _i, _j, result: &'b dyn Fn(&'b Bump, &'b Serial<'b>) -> &'b Serial<'b>| result(mem, _past(mem)))
-  )
+    layout
+  );
+  result(mem, _past(mem))
 }
 
 #[derive(Debug)]
@@ -1290,6 +1265,15 @@ enum RebuildTerm<'a> {
   Pack(u64, &'a RebuildTerm<'a>)
 }
 
+#[derive(Copy, Clone)]
+struct RebuildCont<'a>(&'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>);
+
+impl<'a> fmt::Debug for RebuildCont<'a> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "RebuildCont(<fn>)")
+  }
+}
+
 fn _structurize<'b, 'a: 'b>(
   mem: &'b Bump,
   doc: &'a FixedDoc<'a>
@@ -1569,7 +1553,7 @@ fn _structurize<'b, 'a: 'b>(
             mem,
             _list::nil(mem),
             mem.alloc(|mem, item: Property<(u64, Option<u64>)>, items|
-              _list::cons(mem, item, items))
+            _list::cons(mem, item, items))
           );
           _transpose(mem, nodes2, props2);
           let doc2 = _visit_doc(mem, doc1);
@@ -1613,7 +1597,9 @@ fn _structurize<'b, 'a: 'b>(
                 props1
               )})),
             FixedItem::Fix(fix) => {
-              let (fix1, scope1, props1) = _visit_fix(mem, fix, index, scope, props);
+              let (fix1, scope1, props1) = _visit_fix(
+                mem, fix, index, scope, props
+              );
               let nodes2 = compose(mem, nodes, mem.alloc(move |mem, nodes1|
                 _list::cons(mem, make_node(mem, index, _fix(mem, fix1)), nodes1)
               ));
@@ -2079,27 +2065,27 @@ fn _structurize<'b, 'a: 'b>(
     fn _open<'a>(
       mem: &'a Bump,
       props: &'a List<'a, Property<()>>,
-      stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+      stack: &'a List<'a, RebuildCont<'a>>,
       partial: &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>
-    ) -> &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>> {
+    ) -> &'a List<'a, RebuildCont<'a>> {
       fn _visit<'a>(
         mem: &'a Bump,
         props: &'a List<'a, Property<()>>,
-        stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>
-      ) -> &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>> {
+        stack: &'a List<'a, RebuildCont<'a>>
+      ) -> &'a List<'a, RebuildCont<'a>> {
         match props {
           List::Nil => stack,
           List::Cons(_, Property::Grp(()), props1) =>
             _visit(
               mem,
               props1,
-              _list::cons(mem, mem.alloc(|mem, obj| _grp(mem, obj)), stack)
+              _list::cons(mem, RebuildCont(mem.alloc(|mem, obj| _grp(mem, obj))), stack)
             ),
           List::Cons(_, Property::Seq(()), props1) =>
             _visit(
               mem,
               props1,
-              _list::cons(mem, mem.alloc(|mem, obj| _seq(mem, obj)), stack)
+              _list::cons(mem, RebuildCont(mem.alloc(|mem, obj| _seq(mem, obj))), stack)
             )
         }
       }
@@ -2110,7 +2096,7 @@ fn _structurize<'b, 'a: 'b>(
             props,
             _list::cons(
               mem,
-              mem.alloc(|mem, obj| top(mem, partial(mem, obj))),
+              RebuildCont(mem.alloc(|mem, obj| top.0(mem, partial(mem, obj)))),
               stack1
             )
           ),
@@ -2120,25 +2106,25 @@ fn _structurize<'b, 'a: 'b>(
     fn _close<'a>(
       mem: &'a Bump,
       count: u64,
-      stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+      stack: &'a List<'a, RebuildCont<'a>>,
       term: &'a RebuildObj<'a>
     ) -> (
-      &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+      &'a List<'a, RebuildCont<'a>>,
       &'a RebuildObj<'a>
     ) {
       fn _visit<'a>(
         mem: &'a Bump,
         count: u64,
-        stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+        stack: &'a List<'a, RebuildCont<'a>>,
         result: &'a RebuildObj<'a>
       ) -> (
-        &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+        &'a List<'a, RebuildCont<'a>>,
         &'a RebuildObj<'a>
       ) {
         if count == 0 { (stack, result) } else {
           match stack {
             List::Cons(_, top, stack1) =>
-              _visit(mem, count - 1, stack1, top(mem, result)),
+              _visit(mem, count - 1, stack1, top.0(mem, result)),
             _ => unreachable!("Invariant")
           }
         }
@@ -2147,11 +2133,11 @@ fn _structurize<'b, 'a: 'b>(
     }
     fn _final<'a>(
       mem: &'a Bump,
-      stack: &'a List<'a, &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
+      stack: &'a List<'a, RebuildCont<'a>>,
       term: &'a RebuildObj<'a>
     ) -> &'a RebuildObj<'a> {
       match stack {
-        List::Cons(_, last, List::Nil) => last(mem, term),
+        List::Cons(_, last, List::Nil) => last.0(mem, term),
         _ => unreachable!("Invariant")
       }
     }
@@ -2163,9 +2149,9 @@ fn _structurize<'b, 'a: 'b>(
         GraphDoc::EOD => _eod(mem),
         GraphDoc::Break(nodes, pads, doc1) => {
           let (terms, ins, outs) = _topology(mem, nodes);
-          let stack: &'b List<'b, &'b dyn Fn(&'b Bump, &'b RebuildObj<'b>) -> &'b RebuildObj<'b>> = _list::cons(
+          let stack: &'b List<'b, RebuildCont<'b>> = _list::cons(
             mem,
-            mem.alloc(|_mem, obj| obj),
+            RebuildCont(mem.alloc(|_mem, obj| obj)),
             _list::nil(mem)
           );
           let partial = mem.alloc(|_mem, obj| obj);
@@ -2175,15 +2161,15 @@ fn _structurize<'b, 'a: 'b>(
         }
       }
     }
-    fn _visit_line<'b, 'a: 'b>(
-      mem: &'b Bump,
+    fn _visit_line<'a>(
+      mem: &'a Bump,
       terms: &'a List<'a, &'a GraphTerm<'a>>,
       pads: &'a List<'a, bool>,
       ins: &'a List<'a, u64>,
       outs: &'a List<'a, &'a List<'a, Property<()>>>,
-      stack: &'a List<'a, &'a dyn Fn(&'b Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>>,
-      partial: &'b dyn Fn(&'b Bump, &'b RebuildObj<'b>) -> &'b RebuildObj<'b>
-    ) -> &'b RebuildObj<'b> {
+      stack: &'a List<'a, RebuildCont<'a>>,
+      partial: &'a dyn Fn(&'a Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>
+    ) -> &'a RebuildObj<'a> {
       match (terms, pads) {
         ( List::Cons(_, GraphTerm::Fix(fix), List::Nil)
         , List::Nil) =>
@@ -3394,17 +3380,11 @@ pub fn compile(
 ) -> Box<Doc> {
   let mem = Bump::new();
   let layout1 = _broken(&mem, layout);
-  println!("Rust: {:?}", layout1);
   let layout2 = _serialize(&mem, layout1);
-  println!("Rust: {:?}", layout2);
   let doc = _linearize(&mem, layout2);
-  println!("Rust: {:?}", doc);
   let doc1 = _fixed(&mem, doc);
-  println!("Rust: {:?}", doc1);
   let doc2 = _structurize(&mem, doc1);
-  println!("Rust: {:?}", doc2);
   let doc3 = _denull(&mem, doc2);
-  println!("Rust: {:?}", doc3);
   let doc4 = _identities(&mem, doc3);
   let doc5 = _reassociate(&mem, doc4);
   let doc6 = _rescope(&mem, doc5);
