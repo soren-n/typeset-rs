@@ -59,7 +59,7 @@ let rec _gen_eDSL n =
 
 let gen_eDSL =
   let open QCheck.Gen in
-  nat >>= _gen_eDSL
+  small_nat >>= _gen_eDSL
 
 let shrink_eDSL eDSL =
   let open QCheck.Iter in
