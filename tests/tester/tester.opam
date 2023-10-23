@@ -5,4 +5,6 @@ build: [
 depends: [
   "ocaml" {>= "4.08"}
   "dune" {>= "3.11"}
+  "typeset" {>= "0.4"}
+  "qcheck" {with-test & >= "0.21"}
 ]
