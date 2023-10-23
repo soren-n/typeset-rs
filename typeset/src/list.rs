@@ -1,8 +1,6 @@
 use bumpalo::Bump;
 
-use crate::{
-  util::compose
-};
+use crate::util::compose;
 
 #[derive(Debug)]
 pub enum List<'a, T: Copy + Clone> {

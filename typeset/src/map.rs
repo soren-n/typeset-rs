@@ -1,7 +1,7 @@
 use bumpalo::Bump;
 
 use crate::{
-  order::{Order},
+  order::Order,
   list::{self as _list, List},
   avl::{self as _avl, AVL}
 };
