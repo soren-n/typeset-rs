@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -25,7 +25,7 @@ jobs:
           args: --release --all-features
 
       - name: Upload crate
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: crate
           path: ./target/release/*
@@ -38,10 +38,10 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: crate
           path: ./target/release
@@ -70,10 +70,10 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: crate
           path: ./target/release
@@ -98,10 +98,10 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: crate
           path: ./target/release
@@ -130,10 +130,10 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: crate
           path: ./target/release
