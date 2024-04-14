@@ -1,16 +1,16 @@
 [package]
 name = "typeset"
 description = "A DSL for defining source code pretty printers"
-version = "2.0.3"
-edition = "2021"
-authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
-homepage = "https://docs.rs/typeset/latest/typeset/"
-repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset"
-documentation = "https://docs.rs/typeset/latest/typeset/"
 keywords = ["dsl", "pretty", "printer"]
 categories = ["compilers", "template-engine"]
-license-file = "LICENSE"
-readme = "README.md"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+license.workspace-file true
+readme.workspace = true
 
 [dependencies]
 bumpalo = "3.14.0"
