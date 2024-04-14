@@ -13,4 +13,4 @@ license-file = "LICENSE"
 readme = "README.md"
 
 [dependencies]
-bumpalo = ">=3.14.0, <4.0.0"
+bumpalo = "3.14.0"
