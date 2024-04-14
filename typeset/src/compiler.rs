@@ -101,7 +101,7 @@ pub fn null() -> Box<Layout> {
 /// ```
 /// use typeset::text;
 ///
-/// let layout = text("foobar");
+/// let layout = text("foobar".to_string());
 /// ```
 pub fn text(
   data: String
@@ -117,7 +117,11 @@ pub fn text(
 /// ```
 /// use typeset::{text, comp, fix};
 ///
-/// let layout = fix(comp(text("foo"), text("bar"), false, false));
+/// let layout = fix(comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// ));
 /// ```
 pub fn fix(
   layout: Box<Layout>
@@ -133,7 +137,11 @@ pub fn fix(
 /// ```
 /// use typeset::{text, comp, grp};
 ///
-/// let layout = grp(comp(text("foo"), text("bar"), false, false));
+/// let layout = grp(comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// ));
 /// ```
 pub fn grp(
   layout: Box<Layout>
@@ -149,7 +157,11 @@ pub fn grp(
 /// ```
 /// use typeset::{text, comp, seq};
 ///
-/// let layout = grp(comp(text("foo"), text("bar"), false, false));
+/// let layout = seq(comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// ));
 /// ```
 pub fn seq(
   layout: Box<Layout>
@@ -165,7 +177,11 @@ pub fn seq(
 /// ```
 /// use typeset::{text, comp, nest};
 ///
-/// let layout = nest(comp(text("foo"), text("bar"), false, false));
+/// let layout = nest(comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// ));
 /// ```
 pub fn nest(
   layout: Box<Layout>
@@ -181,7 +197,11 @@ pub fn nest(
 /// ```
 /// use typeset::{text, comp, pack};
 ///
-/// let layout = pack(comp(text("foo"), text("bar"), false, false));
+/// let layout = pack(comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// ));
 /// ```
 pub fn pack(
   layout: Box<Layout>
@@ -197,7 +217,10 @@ pub fn pack(
 /// ```
 /// use typeset::{text, line};
 ///
-/// let layout = line(text("foo"), text("bar"));
+/// let layout = line(
+///   text("foo".to_string()),
+///   text("bar".to_string())
+/// );
 /// ```
 pub fn line(
   left: Box<Layout>,
@@ -214,7 +237,11 @@ pub fn line(
 /// ```
 /// use typeset::{text, comp};
 ///
-/// let layout = comp(text("foo"), text("bar"), false, false);
+/// let layout = comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// );
 /// ```
 pub fn comp(
   left: Box<Layout>,
@@ -3372,7 +3399,11 @@ fn _move_to_heap<'a>(
 /// ```
 /// use typeset::{text, comp, compile};
 ///
-/// let layout = comp(text("foo"), text("bar"), false, false);
+/// let layout = comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// );
 /// let document = compile(layout);
 /// ```
 pub fn compile(
@@ -3472,9 +3503,13 @@ fn _get_offset<'a>(
 /// ```
 /// use typeset::{text, comp, compile, render};
 ///
-/// let layout = comp(text("foo"), text("bar"), false, false);
+/// let layout = comp(
+///   text("foo".to_string()),
+///   text("bar".to_string()),
+///   false, false
+/// );
 /// let document = compile(layout);
-/// println!(render(document, 2, 80));
+/// println!("{}", render(document, 2, 80));
 /// ```
 pub fn render(
   doc: Box<Doc>,
