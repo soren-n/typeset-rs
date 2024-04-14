@@ -7,13 +7,3 @@ members = [
 exclude = [
   "tests/unit"
 ]
-
-[workspace.package]
-version = "2.0.3"
-edition = "2021"
-authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
-homepage = "https://docs.rs/typeset/latest/typeset/"
-repository = "https://github.com/soren-n/typeset-rs"
-documentation = "https://docs.rs/typeset/latest/typeset/"
-license-file = "LICENSE"
-readme = "README.md"
