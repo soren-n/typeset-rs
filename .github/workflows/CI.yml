@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: crate
           path: ./target/release
@@ -73,7 +73,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: crate
           path: ./target/release
@@ -101,7 +101,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: crate
           path: ./target/release
@@ -133,7 +133,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download crate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: crate
           path: ./target/release
