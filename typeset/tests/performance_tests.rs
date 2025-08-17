@@ -138,7 +138,11 @@ fn test_memory_efficiency() {
         );
 
         let result = compile_safe_with_depth(layout, 50);
-        assert!(result.is_ok(), "Memory efficiency test failed at iteration {}", i);
+        assert!(
+            result.is_ok(),
+            "Memory efficiency test failed at iteration {}",
+            i
+        );
         let doc = result.unwrap();
         let output = render(doc, 2, 80);
 
@@ -156,7 +160,7 @@ fn test_compile_vs_compile_safe_performance() {
     let start = Instant::now();
     let doc1_result = compile_safe_with_depth(layout.clone(), 50);
     let compile_duration = start.elapsed();
-    
+
     assert!(doc1_result.is_ok(), "Regular compile failed");
     let doc1 = doc1_result.unwrap();
 

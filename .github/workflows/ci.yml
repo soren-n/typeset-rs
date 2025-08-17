@@ -54,7 +54,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential
+        sudo apt-get install -y build-essential bubblewrap g++-multilib gcc-multilib mercurial musl-tools rsync
 
     - name: Install OCaml
       uses: ocaml/setup-ocaml@v2
@@ -62,8 +62,7 @@ jobs:
         ocaml-compiler: '5.2.0'
         opam-local-packages: |
           tests/tester/
-        opam-depext: true
-        opam-depext-flags: "--skip=darcs"
+        opam-depext: false
 
     - name: Install dependencies
       run: |

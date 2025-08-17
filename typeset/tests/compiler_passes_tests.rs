@@ -4,8 +4,8 @@
 //! and that the overall pipeline produces correct results.
 
 use typeset::{
-    braces, comp, compile, compile_safe, compile_safe_with_depth, fix, grp, join_with_commas, join_with_spaces, nest, pack,
-    parens, render, seq, text,
+    braces, comp, compile, compile_safe, compile_safe_with_depth, fix, grp, join_with_commas,
+    join_with_spaces, nest, pack, parens, render, seq, text,
 };
 
 /// Test the complete compiler pipeline with various layout constructs
