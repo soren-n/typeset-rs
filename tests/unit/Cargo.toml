@@ -7,4 +7,4 @@ edition = "2021"
 lazy_static = "1.4.0"
 pest = "2.7.9"
 pest_derive = "2.7.9"
-typeset = { version = "2.0.5", path = "../../typeset" }
+typeset = { version = "3.0.0", path = "../../typeset" }

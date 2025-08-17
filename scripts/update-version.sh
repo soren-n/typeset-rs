@@ -25,4 +25,8 @@ rm -f typeset-parser/Cargo.toml.bak
 sed -i.bak "s/typeset = { version = \".*\", path = \"..\/typeset\" }/typeset = { version = \"$NEW_VERSION\", path = \"..\/typeset\" }/" typeset-parser/Cargo.toml
 rm -f typeset-parser/Cargo.toml.bak
 
+# Update typeset-parser dependency version in typeset/Cargo.toml
+sed -i.bak "s/typeset-parser = { version = \".*\", path = \"..\/typeset-parser\" }/typeset-parser = { version = \"$NEW_VERSION\", path = \"..\/typeset-parser\" }/" typeset/Cargo.toml
+rm -f typeset/Cargo.toml.bak
+
 echo "Successfully updated version to $NEW_VERSION"
