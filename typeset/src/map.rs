@@ -1,8 +1,10 @@
+#![allow(dead_code)] // Complete persistent map implementation
+
 use bumpalo::Bump;
 use std::fmt::Debug;
 
 use crate::{
-    avl::{self as _avl, AVL},
+    avl::{self as _avl, Avl},
     list::List,
     order::Order,
 };
@@ -13,9 +15,9 @@ pub enum Entry<K: Copy + Clone + Debug, V: Copy + Clone + Debug> {
     Bind(K, V),
 }
 
-pub type Map<'a, K, V> = AVL<'a, Entry<K, V>>;
+pub type Map<'a, K, V> = Avl<'a, Entry<K, V>>;
 
-fn _entry_peek<'a, K: Copy + Clone + Debug, V: Copy + Clone + Debug>(key: K) -> Entry<K, V> {
+fn _entry_peek<K: Copy + Clone + Debug, V: Copy + Clone + Debug>(key: K) -> Entry<K, V> {
     Entry::Peek(key)
 }
 
@@ -23,7 +25,7 @@ fn _entry_bind<K: Copy + Clone + Debug, V: Copy + Clone + Debug>(key: K, value: 
     Entry::Bind(key, value)
 }
 
-fn _entry_key<'a, K: Copy + Clone + Debug, V: Copy + Clone + Debug>(entry: Entry<K, V>) -> K {
+fn _entry_key<K: Copy + Clone + Debug, V: Copy + Clone + Debug>(entry: Entry<K, V>) -> K {
     match entry {
         Entry::Peek(key) => key,
         Entry::Bind(key, _) => key,
@@ -112,8 +114,8 @@ impl<'b, 'a: 'b, K: Copy + Clone + Debug, V: Copy + Clone + Debug> Map<'a, K, V>
 
     pub fn lookup(&'a self, key_order: &'a dyn Fn(K, K) -> Order, key: K) -> Option<V> {
         match self {
-            AVL::Null => None,
-            AVL::Node(_, _, entry, left, right) => match key_order(key, _entry_key(*entry)) {
+            Avl::Null => None,
+            Avl::Node(_, _, entry, left, right) => match key_order(key, _entry_key(*entry)) {
                 Order::LT => left.lookup(key_order, key),
                 Order::GT => right.lookup(key_order, key),
                 Order::EQ => match entry {
@@ -126,8 +128,8 @@ impl<'b, 'a: 'b, K: Copy + Clone + Debug, V: Copy + Clone + Debug> Map<'a, K, V>
 
     pub fn lookup_unsafe(&'a self, key_order: &'a dyn Fn(K, K) -> Order, key: K) -> V {
         match self {
-            AVL::Null => unreachable!("Invariant"),
-            AVL::Node(_, _, entry, left, right) => match key_order(key, _entry_key(*entry)) {
+            Avl::Null => unreachable!("Invariant"),
+            Avl::Node(_, _, entry, left, right) => match key_order(key, _entry_key(*entry)) {
                 Order::LT => left.lookup_unsafe(key_order, key),
                 Order::GT => right.lookup_unsafe(key_order, key),
                 Order::EQ => match entry {

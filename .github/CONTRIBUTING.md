@@ -90,7 +90,7 @@ cargo test --all --all-features
 cd tests && ./build.sh && ./run.sh
 
 # Quick formatting fix
-./fix-code-quality.sh
+./scripts/fix-code-quality.sh
 ```
 
 ### Test Structure

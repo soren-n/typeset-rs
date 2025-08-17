@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Complete persistent list implementation
+
 use bumpalo::Bump;
 use std::fmt::Debug;
 
