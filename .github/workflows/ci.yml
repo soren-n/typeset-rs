@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [stable, nightly]
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ matrix.rust }}
+
+    - name: Check formatting
+      run: cargo fmt --all --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Type checking
+      run: cargo check --all-targets --all-features
+
+    - name: Run Rust tests
+      run: cargo test --all --all-features
+
+  test-ocaml:
+    name: OCaml Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install OCaml
+      uses: ocaml/setup-ocaml@v2
+      with:
+        ocaml-compiler: '5.2.0'
+        opam-local-packages: |
+          tests/tester/
+
+    - name: Install dependencies
+      run: |
+        opam install qcheck typeset --yes
+        opam install . --deps-only --yes
+      working-directory: tests/tester
+
+    - name: Build OCaml tests
+      run: |
+        cd tests/tester && dune build
+        cd tests && ./build.sh
+
+    - name: Run OCaml tests
+      run: cd tests && ./run.sh
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit
+      run: cargo audit
+
+    - name: Run cargo-deny
+      uses: EmbarkStudios/cargo-deny-action@v1
+
+  build:
+    name: Build and Test
+    needs: [check, test-ocaml, security]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@nightly
+
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build release
+      run: cargo build --release --all-features
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-artifacts
+        path: target/release/
+        retention-days: 7
