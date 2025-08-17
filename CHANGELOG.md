@@ -1,3 +1,10 @@
+# [3.1.0](https://github.com/soren-n/typeset-rs/compare/v3.0.5...v3.1.0) (2025-08-17)
+
+
+### Features
+
+* add stable Rust support with MSRV 1.89.0 ([746ecdd](https://github.com/soren-n/typeset-rs/commit/746ecdd23678c03223491aa947df5c553d538bfc))
+
 ## [3.0.5](https://github.com/soren-n/typeset-rs/compare/v3.0.4...v3.0.5) (2025-08-17)
 
 
