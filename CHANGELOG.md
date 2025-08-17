@@ -1,3 +1,10 @@
+## [3.0.4](https://github.com/soren-n/typeset-rs/compare/v3.0.3...v3.0.4) (2025-08-17)
+
+
+### Bug Fixes
+
+* **ci:** resolve circular dependency during crate publishing ([ee10693](https://github.com/soren-n/typeset-rs/commit/ee1069383b5347edd90b16de9f923ba9ee05eb05))
+
 ## [3.0.3](https://github.com/soren-n/typeset-rs/compare/v3.0.2...v3.0.3) (2025-08-17)
 
 
