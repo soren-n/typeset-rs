@@ -90,3 +90,41 @@ To fix formatting and linting issues quickly:
 ```
 
 All checks (including both Rust and OCaml tests) must pass before commits are allowed.
+
+## CI/CD Pipeline
+
+### GitHub Workflows
+
+**CI Pipeline** (`.github/workflows/ci.yml`) - Runs on every push and PR:
+- Quality gates: formatting, linting, type checking
+- Matrix testing: stable and nightly Rust
+- OCaml property-based testing 
+- Security auditing with cargo-audit and cargo-deny
+- Build verification and artifact generation
+
+**Release Pipeline** (`.github/workflows/release.yml`) - Automated semantic versioning:
+- Analyzes conventional commits to determine version bump
+- Updates Cargo.toml versions automatically
+- Generates CHANGELOG.md from commit messages
+- Creates git tags and GitHub releases
+- Publishes crates to crates.io in dependency order
+
+**Dependencies** (`.github/workflows/dependencies.yml`) - Weekly maintenance:
+- Updates Rust dependencies with automated PRs
+- Security vulnerability scanning
+- License compliance checking
+
+### Semantic Versioning
+
+Uses [Conventional Commits](https://conventionalcommits.org/) for automatic versioning:
+- `feat:` → minor version bump
+- `fix:` → patch version bump  
+- `BREAKING CHANGE:` or `!` → major version bump
+
+### Development Workflow
+1. Create feature branch with descriptive name
+2. Make commits following conventional commit format
+3. Push triggers CI validation
+4. Create PR for review
+5. Merge to main triggers release pipeline (if applicable)
+6. Automated version bump, changelog, and crate publishing

@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  semantic-release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      new-release-published: ${{ steps.semantic.outputs.new-release-published }}
+      new-release-version: ${{ steps.semantic.outputs.new-release-version }}
+      new-release-major-version: ${{ steps.semantic.outputs.new-release-major-version }}
+      new-release-minor-version: ${{ steps.semantic.outputs.new-release-minor-version }}
+      new-release-patch-version: ${{ steps.semantic.outputs.new-release-patch-version }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install semantic-release
+      run: |
+        npm install -g semantic-release
+        npm install -g @semantic-release/changelog
+        npm install -g @semantic-release/git
+        npm install -g @semantic-release/github
+        npm install -g @semantic-release/exec
+
+    - name: Create semantic-release config
+      run: |
+        cat > .releaserc.json << 'EOF'
+        {
+          "branches": ["main"],
+          "plugins": [
+            "@semantic-release/commit-analyzer",
+            "@semantic-release/release-notes-generator",
+            "@semantic-release/changelog",
+            [
+              "@semantic-release/exec",
+              {
+                "prepareCmd": "sed -i 's/version = \".*\"/version = \"${nextRelease.version}\"/' typeset/Cargo.toml typeset-parser/Cargo.toml && sed -i 's/typeset = { version = \".*\", path = \"..\/typeset\" }/typeset = { version = \"${nextRelease.version}\", path = \"..\/typeset\" }/' typeset-parser/Cargo.toml"
+              }
+            ],
+            [
+              "@semantic-release/git",
+              {
+                "assets": ["CHANGELOG.md", "typeset/Cargo.toml", "typeset-parser/Cargo.toml"],
+                "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+              }
+            ],
+            "@semantic-release/github"
+          ]
+        }
+        EOF
+
+    - name: Run semantic release
+      id: semantic
+      run: semantic-release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish Crates
+    needs: [semantic-release]
+    runs-on: ubuntu-latest
+    if: needs.semantic-release.outputs.new-release-published == 'true'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@nightly
+
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build release
+      run: cargo build --release --all-features
+
+    - name: Publish typeset to crates.io
+      run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
+
+    - name: Wait for typeset to be available
+      run: |
+        echo "Waiting for typeset to be available on crates.io..."
+        sleep 30
+        for i in {1..10}; do
+          if cargo search typeset --limit 1 | grep -q "typeset.*${{ needs.semantic-release.outputs.new-release-version }}"; then
+            echo "typeset ${{ needs.semantic-release.outputs.new-release-version }} is now available"
+            break
+          fi
+          echo "Attempt $i: typeset not yet available, waiting..."
+          sleep 30
+        done
+
+    - name: Publish typeset-parser to crates.io
+      run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ needs.semantic-release.outputs.new-release-version }}
+        release_name: v${{ needs.semantic-release.outputs.new-release-version }}
+        body: |
+          🎉 **Release v${{ needs.semantic-release.outputs.new-release-version }}**
+          
+          This release was automatically generated based on conventional commits.
+          
+          ### 📦 Published Crates
+          - `typeset` v${{ needs.semantic-release.outputs.new-release-version }}
+          - `typeset-parser` v${{ needs.semantic-release.outputs.new-release-version }}
+          
+          See [CHANGELOG.md](./CHANGELOG.md) for full details.
+        draft: false
+        prerelease: false

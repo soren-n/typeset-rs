@@ -1,0 +1,91 @@
+name: Dependencies
+
+on:
+  schedule:
+    - cron: '0 9 * * 1' # Every Monday at 9 AM UTC
+  workflow_dispatch:
+
+jobs:
+  update-rust:
+    name: Update Rust Dependencies
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-edit
+      run: cargo install cargo-edit
+
+    - name: Update dependencies
+      run: |
+        cargo update
+        cargo upgrade --workspace --allow-prerelease
+
+    - name: Run tests
+      run: |
+        cargo test --all --all-features
+        cargo check --all-targets --all-features
+
+    - name: Create pull request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'chore(deps): update Rust dependencies'
+        title: 'chore(deps): Update Rust dependencies'
+        body: |
+          ## 📦 Dependency Updates
+          
+          This PR updates Rust dependencies to their latest versions.
+          
+          ### Changes
+          - Updated `Cargo.lock` with latest compatible versions
+          - Upgraded dependencies to latest versions where possible
+          
+          ### Verification
+          - ✅ Tests pass
+          - ✅ Type checking passes
+          
+          This is an automated PR created by the dependencies workflow.
+        branch: chore/update-rust-dependencies
+        delete-branch: true
+        labels: |
+          dependencies
+          automated
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit
+      run: cargo audit --json > audit-results.json
+
+    - name: Upload audit results
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-audit-results
+        path: audit-results.json
+        retention-days: 30
+
+    - name: Check for vulnerabilities
+      run: |
+        if cargo audit --quiet; then
+          echo "✅ No security vulnerabilities found"
+        else
+          echo "❌ Security vulnerabilities detected!"
+          cargo audit
+          exit 1
+        fi
