@@ -1,3 +1,10 @@
+## [3.0.3](https://github.com/soren-n/typeset-rs/compare/v3.0.2...v3.0.3) (2025-08-17)
+
+
+### Bug Fixes
+
+* **ci:** publish typeset-parser before typeset to resolve dependency issue ([4eaecd7](https://github.com/soren-n/typeset-rs/commit/4eaecd7202807cf5217de9ab59d94c5a4cc572b9))
+
 ## [3.0.2](https://github.com/soren-n/typeset-rs/compare/v3.0.1...v3.0.2) (2025-08-17)
 
 
