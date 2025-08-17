@@ -1,3 +1,10 @@
+## [3.0.2](https://github.com/soren-n/typeset-rs/compare/v3.0.1...v3.0.2) (2025-08-17)
+
+
+### Bug Fixes
+
+* **ci:** set GitHub Actions outputs for semantic-release job ([0bd32bd](https://github.com/soren-n/typeset-rs/commit/0bd32bdaccf62bf22798f7c29d8f5258d90506b0))
+
 ## [3.0.1](https://github.com/soren-n/typeset-rs/compare/v3.0.0...v3.0.1) (2025-08-17)
 
 
