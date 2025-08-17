@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/soren-n/typeset-rs/compare/v3.0.0...v3.0.1) (2025-08-17)
+
+
+### Bug Fixes
+
+* **release:** update version script to handle bidirectional dependencies ([7eeabca](https://github.com/soren-n/typeset-rs/commit/7eeabca81eb6456517579478c30a5f6fa9a201b6))
+
 # [3.0.0](https://github.com/soren-n/typeset-rs/compare/v2.0.5...v3.0.0) (2025-08-17)
 
 
