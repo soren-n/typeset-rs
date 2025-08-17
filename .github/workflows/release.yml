@@ -114,6 +114,11 @@ jobs:
     - name: Build release
       run: cargo build --release --all-features
 
+    - name: Prepare typeset-parser for publishing (remove dev-dependency)
+      run: |
+        # Temporarily remove the typeset dev-dependency to avoid circular dependency
+        sed -i 's/^typeset = { version = ".*", path = ".*" }$/# typeset = { version = "", path = "" } # removed for publishing/' typeset-parser/Cargo.toml
+
     - name: Publish typeset-parser to crates.io
       run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
 
