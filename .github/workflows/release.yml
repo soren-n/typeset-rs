@@ -114,24 +114,24 @@ jobs:
     - name: Build release
       run: cargo build --release --all-features
 
-    - name: Publish typeset to crates.io
-      run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
+    - name: Publish typeset-parser to crates.io
+      run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
 
-    - name: Wait for typeset to be available
+    - name: Wait for typeset-parser to be available
       run: |
-        echo "Waiting for typeset to be available on crates.io..."
+        echo "Waiting for typeset-parser to be available on crates.io..."
         sleep 30
         for i in {1..10}; do
-          if cargo search typeset --limit 1 | grep -q "typeset.*${{ needs.semantic-release.outputs.new-release-version }}"; then
-            echo "typeset ${{ needs.semantic-release.outputs.new-release-version }} is now available"
+          if cargo search typeset-parser --limit 1 | grep -q "typeset-parser.*${{ needs.semantic-release.outputs.new-release-version }}"; then
+            echo "typeset-parser ${{ needs.semantic-release.outputs.new-release-version }} is now available"
             break
           fi
-          echo "Attempt $i: typeset not yet available, waiting..."
+          echo "Attempt $i: typeset-parser not yet available, waiting..."
           sleep 30
         done
 
-    - name: Publish typeset-parser to crates.io
-      run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
+    - name: Publish typeset to crates.io
+      run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
