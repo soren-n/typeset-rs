@@ -120,7 +120,7 @@ jobs:
         sed -i 's/^typeset = { version = ".*", path = ".*" }$/# typeset = { version = "", path = "" } # removed for publishing/' typeset-parser/Cargo.toml
 
     - name: Publish typeset-parser to crates.io
-      run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
+      run: cargo publish --allow-dirty --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
 
     - name: Wait for typeset-parser to be available
       run: |
