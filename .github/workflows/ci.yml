@@ -51,12 +51,18 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+
     - name: Install OCaml
       uses: ocaml/setup-ocaml@v2
       with:
         ocaml-compiler: '5.2.0'
         opam-local-packages: |
           tests/tester/
+        opam-depext: false
 
     - name: Install dependencies
       run: |
