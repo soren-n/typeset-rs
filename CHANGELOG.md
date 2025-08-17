@@ -1,3 +1,10 @@
+## [3.0.5](https://github.com/soren-n/typeset-rs/compare/v3.0.4...v3.0.5) (2025-08-17)
+
+
+### Bug Fixes
+
+* **ci:** add --allow-dirty flag for publishing modified Cargo.toml ([13aba9c](https://github.com/soren-n/typeset-rs/commit/13aba9cde191fa4edc99006b3ea0eb65760fb67d))
+
 ## [3.0.4](https://github.com/soren-n/typeset-rs/compare/v3.0.3...v3.0.4) (2025-08-17)
 
 
