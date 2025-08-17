@@ -55,7 +55,7 @@ fn create_json_like_layout(size: usize) -> Box<Layout> {
 fn bench_construction(c: &mut Criterion) {
     let mut group = c.benchmark_group("construction");
 
-    group.bench_function("simple", |b| b.iter(|| create_simple_layout()));
+    group.bench_function("simple", |b| b.iter(create_simple_layout));
 
     for depth in [5, 10, 20].iter() {
         group.bench_with_input(BenchmarkId::new("nested", depth), depth, |b, &depth| {

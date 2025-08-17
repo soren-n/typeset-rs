@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust: [stable, nightly]
+        rust: [nightly]
     steps:
     - name: Checkout
       uses: actions/checkout@v5
@@ -62,11 +62,12 @@ jobs:
         ocaml-compiler: '5.2.0'
         opam-local-packages: |
           tests/tester/
-        opam-depext: false
+        opam-depext: true
+        opam-depext-flags: "--skip=darcs"
 
     - name: Install dependencies
       run: |
-        opam install qcheck typeset --yes
+        opam install qcheck --yes
         opam install . --deps-only --yes
       working-directory: tests/tester
 

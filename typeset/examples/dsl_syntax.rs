@@ -1,9 +1,8 @@
 use typeset::*;
 use typeset_parser::layout;
 
-/// Example demonstrating the DSL syntax for more concise layout construction
-/// Shows how the macro syntax compares to manual constructor calls
-
+/// Example demonstrating the DSL syntax for more concise layout construction.
+/// Shows how the macro syntax compares to manual constructor calls.
 fn main() {
     println!("=== DSL Syntax Demonstration ===\n");
 
@@ -70,7 +69,7 @@ fn main() {
     println!("{}", render(compile(infix_demo), 2, 15));
 
     // Practical example: function signature formatting
-    let function_params = vec![
+    let function_params = [
         text("param1".to_string()),
         text("param2".to_string()),
         text("very_long_parameter_name".to_string()),

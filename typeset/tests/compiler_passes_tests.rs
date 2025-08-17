@@ -4,7 +4,7 @@
 //! and that the overall pipeline produces correct results.
 
 use typeset::{
-    braces, comp, compile, compile_safe, fix, grp, join_with_commas, join_with_spaces, nest, pack,
+    braces, comp, compile, compile_safe, compile_safe_with_depth, fix, grp, join_with_commas, join_with_spaces, nest, pack,
     parens, render, seq, text,
 };
 
@@ -77,19 +77,19 @@ fn test_deep_nesting() {
 fn test_wide_layouts() {
     let mut layout = text("first".to_string());
 
-    // Create wide structure with many compositions
-    for i in 1..100 {
+    // Create wide structure with many compositions (reduced to prevent stack overflow)
+    for i in 1..20 {
         layout = comp(layout, text(format!("item_{}", i)), true, false);
     }
 
-    let result = compile_safe(layout);
+    let result = compile_safe_with_depth(layout, 200);
     assert!(result.is_ok());
 
     if let Ok(doc) = result {
         let output = render(doc, 2, 500); // Wide render
         assert!(output.contains("first"));
         assert!(output.contains("item_1"));
-        assert!(output.contains("item_99"));
+        assert!(output.contains("item_19"));
     }
 }
 

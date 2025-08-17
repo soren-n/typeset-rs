@@ -22,6 +22,7 @@ enum Statement {
         name: String,
         args: Vec<Expression>,
     },
+    #[allow(dead_code)]
     Return(Option<Expression>),
 }
 

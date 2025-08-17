@@ -1,15 +1,15 @@
 use typeset_parser::layout;
 
 fn main() {
-    let foo = typeset::text("foo".to_string());
-    let foobar = layout! {
-      fix (nest (foo & "bar")) @
-      pack ("baz" !+ foo) @@
-      grp null + seq (foo + foo !& foo)
+    let text_elem = typeset::text("foo".to_string());
+    let layout_result = layout! {
+      fix (nest (text_elem & "bar")) @
+      pack ("baz" !+ text_elem) @@
+      grp null + seq (text_elem + text_elem !& text_elem)
     };
-    let document = typeset::compile(foobar.clone());
+    let document = typeset::compile(layout_result.clone());
     println!("---------------------");
-    println!("{}", foobar);
+    println!("{}", layout_result);
     println!("---------------------");
     println!("{}", document);
     println!("---------------------");

@@ -117,12 +117,10 @@ jobs:
       run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset-parser
 
     - name: Create GitHub Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ needs.semantic-release.outputs.new-release-version }}
-        release_name: v${{ needs.semantic-release.outputs.new-release-version }}
+        name: v${{ needs.semantic-release.outputs.new-release-version }}
         body: |
           🎉 **Release v${{ needs.semantic-release.outputs.new-release-version }}**
           
