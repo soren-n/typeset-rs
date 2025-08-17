@@ -1,3 +1,28 @@
+# [3.0.0](https://github.com/soren-n/typeset-rs/compare/v2.0.5...v3.0.0) (2025-08-17)
+
+
+### Bug Fixes
+
+* add missing CI workflow file ([6c95482](https://github.com/soren-n/typeset-rs/commit/6c95482338306ef7a556d56acb8a8f46e70ae004))
+* **ci:** resolve GitHub Actions workflow failures ([942fb7c](https://github.com/soren-n/typeset-rs/commit/942fb7c73266f6c36a3f990e7c912fcc2245b50a))
+* **ci:** resolve remaining workflow issues ([27a524b](https://github.com/soren-n/typeset-rs/commit/27a524bb1250a74b333bd4e1c5cd8b322ef52e44))
+* **ci:** temporarily disable OCaml and security audit jobs ([afb916f](https://github.com/soren-n/typeset-rs/commit/afb916fc842ef24a4b233205125aec45c32b56c1))
+* **release:** resolve semantic-release sed command syntax error ([264f080](https://github.com/soren-n/typeset-rs/commit/264f080f1c2831d580e60e6ec035d46ddb4d7952))
+* resolve CI/CD workflow failures ([645022f](https://github.com/soren-n/typeset-rs/commit/645022f73f61d6e06b71ac1f21f50871a37b1b17))
+
+
+### Features
+
+* add comprehensive git pre-commit hooks ([b0e6047](https://github.com/soren-n/typeset-rs/commit/b0e6047c869ae24db2dd17265af2b208d1aaf773))
+* implement comprehensive CI/CD with semantic versioning ([a729fc7](https://github.com/soren-n/typeset-rs/commit/a729fc7855f661be72069ef26ec0dd799a29fbaa))
+* improve OCaml testing support in git hooks ([37e9076](https://github.com/soren-n/typeset-rs/commit/37e9076b6d0476c04252e000165a751a51686407))
+* major restructure and improvements ([7ee88ea](https://github.com/soren-n/typeset-rs/commit/7ee88eac42a46b7cef9897c8364c003cf2990edc))
+
+
+### BREAKING CHANGES
+
+* CI/CD pipeline now requires conventional commit messages for releases
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
