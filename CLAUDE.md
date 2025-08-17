@@ -70,3 +70,18 @@ The parser supports layout DSL with operators:
 - `&` / `!&`: unpadded compositions (with/without infix fix)
 - `+` / `!+`: padded compositions (with/without infix fix)
 - Constructors: `fix`, `grp`, `seq`, `nest`, `pack`, `null`
+
+## Git Hooks
+
+Pre-commit hooks are configured to enforce code quality:
+- **Formatting**: `cargo fmt --check` (must pass)
+- **Linting**: `cargo clippy` (warnings allowed, errors blocked)
+- **Type checking**: `cargo check --all-targets --all-features`
+- **Testing**: `cargo test --all --all-features`
+
+To fix formatting and linting issues quickly:
+```bash
+./fix-code-quality.sh    # Auto-fix formatting and clippy issues
+```
+
+All checks must pass before commits are allowed.
