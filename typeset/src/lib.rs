@@ -1,25 +1,13 @@
 #![feature(box_patterns)]
 #![allow(dead_code)]
 
-mod util;
-mod order;
-mod list;
 mod avl;
-mod map;
 mod compiler;
+mod list;
+mod map;
+mod order;
+mod util;
 
 pub use self::compiler::{
-  Layout,
-  Doc,
-  null,
-  text,
-  fix,
-  grp,
-  seq,
-  nest,
-  pack,
-  line,
-  comp,
-  compile,
-  render
+    comp, compile, fix, grp, line, nest, null, pack, render, seq, text, Doc, Layout,
 };
