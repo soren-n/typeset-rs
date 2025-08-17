@@ -49,7 +49,7 @@ cd tests && ./run.sh          # Run all tests
 ```
 
 The test system uses:
-- OCaml-based tester in `tests/tester/` 
+- OCaml-based tester in `tests/tester/` (requires opam, dune, qcheck, typeset)
 - Rust unit tests in `tests/unit/`
 - Build script compiles both and places executables in `tests/_build/`
 
@@ -77,11 +77,16 @@ Pre-commit hooks are configured to enforce code quality:
 - **Formatting**: `cargo fmt --check` (must pass)
 - **Linting**: `cargo clippy` (warnings allowed, errors blocked)
 - **Type checking**: `cargo check --all-targets --all-features`
-- **Testing**: `cargo test --all --all-features`
+- **Rust testing**: `cargo test --all --all-features`
+- **OCaml testing**: Installs dependencies (qcheck, typeset) if missing, then runs both Rust and OCaml tests
+
+### Prerequisites for OCaml Tests
+- OCaml and opam must be installed
+- Git hooks will auto-install missing OCaml packages: `qcheck`, `typeset`
 
 To fix formatting and linting issues quickly:
 ```bash
 ./fix-code-quality.sh    # Auto-fix formatting and clippy issues
 ```
 
-All checks must pass before commits are allowed.
+All checks (including both Rust and OCaml tests) must pass before commits are allowed.
