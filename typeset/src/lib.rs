@@ -141,8 +141,6 @@
 //!
 //! The public API remains unchanged, ensuring seamless migration from v1.x.
 
-#![feature(box_patterns)]
-
 mod avl;
 mod compiler;
 mod list;

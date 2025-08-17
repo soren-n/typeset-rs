@@ -251,6 +251,7 @@ pub enum DenullTerm<'a> {
 
 // Counter for identities optimization
 #[derive(Debug, Copy, Clone)]
+#[allow(dead_code)]
 pub enum Count {
     Zero,
     One,
@@ -284,6 +285,7 @@ pub enum FinalDocObjFix<'a> {
 }
 
 #[derive(Debug, Copy, Clone)]
+#[allow(dead_code)]
 pub enum Prop {
     Nest,
     Pack(u64),

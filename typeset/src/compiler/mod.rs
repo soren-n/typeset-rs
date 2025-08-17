@@ -30,7 +30,7 @@ pub mod types;
 // Re-export core types
 pub use error::CompilerError;
 pub use memory::TwoBufferBumpAllocator;
-pub use types::{Attr, Doc, DocObj, DocObjFix, Layout};
+pub use types::{Doc, Layout};
 
 // Legacy implementation removed - now using modular architecture
 
@@ -38,8 +38,6 @@ pub use types::{Attr, Doc, DocObj, DocObjFix, Layout};
 pub use pipeline::{compile, compile_safe, compile_safe_with_depth, render};
 
 // Re-export constructor functions using new modular types
-pub use constructors::{
-    blank_line, braces, brackets, comma, comp, fix, fix_pad, fix_unpad, format_layout, grp,
-    join_with, join_with_commas, join_with_lines, join_with_spaces, line, nest, newline, null,
-    pack, pad, parens, semicolon, seq, space, text, text_str, unpad,
-};
+// pub use constructors::{
+//     format_layout,
+// };

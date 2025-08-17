@@ -28,19 +28,20 @@ pub enum DocObjFix {
 
 impl fmt::Display for Doc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        #[allow(clippy::boxed_local)]
         fn _print_doc(doc: Box<Doc>) -> String {
-            match doc {
-                box Doc::Eod => "Eod".to_string(),
-                box Doc::Empty(doc1) => {
+            match *doc {
+                Doc::Eod => "Eod".to_string(),
+                Doc::Empty(doc1) => {
                     let doc_s = _print_doc(doc1);
                     format!("Empty\n{}", doc_s)
                 }
-                box Doc::Break(obj, doc1) => {
+                Doc::Break(obj, doc1) => {
                     let obj_s = _print_obj(*obj);
                     let doc1_s = _print_doc(doc1);
                     format!("Break {}\n{}", obj_s, doc1_s)
                 }
-                box Doc::Line(obj) => {
+                Doc::Line(obj) => {
                     let obj_s = _print_obj(*obj);
                     format!("Line {}", obj_s)
                 }

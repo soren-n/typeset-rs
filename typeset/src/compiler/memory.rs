@@ -48,10 +48,10 @@ impl TwoBufferBumpAllocator {
     /// Swaps buffers and clears the now-unused buffer
     /// Returns a new instance with swapped buffers for safe lifetime management
     pub fn swap_and_clear(self) -> Self {
-        let new_current = if self.current_is_a { false } else { true };
+        let new_current = !self.current_is_a;
 
         // Create new instance with swapped state
-        let new_allocator = Self {
+        Self {
             buffer_a: if new_current {
                 Rc::new(Bump::new())
             } else {
@@ -64,9 +64,7 @@ impl TwoBufferBumpAllocator {
             },
             current_is_a: new_current,
             max_recursion_depth: self.max_recursion_depth,
-        };
-
-        new_allocator
+        }
     }
 
     /// Sets maximum recursion depth for stack overflow protection

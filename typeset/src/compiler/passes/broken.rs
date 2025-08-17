@@ -11,6 +11,7 @@ use bumpalo::Bump;
 /// Transforms Layout into Edsl by collapsing broken sequences
 pub fn broken<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Edsl<'b> {
     fn _mark<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Broken<'b> {
+        #[allow(clippy::boxed_local)]
         fn _visit<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> (bool, &'b Broken<'b>) {
             fn _null<'a>(mem: &'a Bump) -> &'a Broken<'a> {
                 mem.alloc(Broken::Null)
@@ -48,38 +49,38 @@ pub fn broken<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Edsl<'b> {
             ) -> &'a Broken<'a> {
                 mem.alloc(Broken::Comp(left, right, attr))
             }
-            match layout {
-                box Layout::Null => (false, _null(mem)),
-                box Layout::Text(data) => {
+            match *layout {
+                Layout::Null => (false, _null(mem)),
+                Layout::Text(data) => {
                     let data1 = mem.alloc_str(data.as_str());
                     (false, _text(mem, data1))
                 }
-                box Layout::Fix(layout1) => {
+                Layout::Fix(layout1) => {
                     let (broken, layout2) = _visit(mem, layout1.clone());
                     (broken, _fix(mem, layout2))
                 }
-                box Layout::Grp(layout1) => {
+                Layout::Grp(layout1) => {
                     let (broken, layout2) = _visit(mem, layout1.clone());
                     (broken, _grp(mem, layout2))
                 }
-                box Layout::Seq(layout1) => {
+                Layout::Seq(layout1) => {
                     let (broken, layout2) = _visit(mem, layout1.clone());
                     (broken, _seq(mem, broken, layout2))
                 }
-                box Layout::Nest(layout1) => {
+                Layout::Nest(layout1) => {
                     let (broken, layout2) = _visit(mem, layout1.clone());
                     (broken, _nest(mem, layout2))
                 }
-                box Layout::Pack(layout1) => {
+                Layout::Pack(layout1) => {
                     let (broken, layout2) = _visit(mem, layout1.clone());
                     (broken, _pack(mem, layout2))
                 }
-                box Layout::Line(left, right) => {
+                Layout::Line(left, right) => {
                     let (_l_broken, left1) = _visit(mem, left.clone());
                     let (_r_broken, right1) = _visit(mem, right.clone());
                     (true, _line(mem, left1, right1))
                 }
-                box Layout::Comp(left, right, attr) => {
+                Layout::Comp(left, right, attr) => {
                     let (l_broken, left1) = _visit(mem, left.clone());
                     let (r_broken, right1) = _visit(mem, right.clone());
                     let broken = l_broken || r_broken;

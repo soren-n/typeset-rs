@@ -72,6 +72,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
         _next(mem, term, comps(mem, _comp(mem, attr)), serial)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn _visit<'b, 'a: 'b, R>(
         mem: &'b Bump,
         i: u64,

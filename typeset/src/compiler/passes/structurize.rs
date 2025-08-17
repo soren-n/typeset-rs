@@ -342,6 +342,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                 }
             }
         }
+        #[allow(clippy::type_complexity)]
         fn _visit_obj<'b, 'a: 'b>(
             mem: &'b Bump,
             obj: &'a FixedObj<'a>,
@@ -600,8 +601,9 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             _visit(mem, Some(outs), edge, none, some)
         }
         fn _leftmost<'a>(mem: &'a Bump, head: &'a GraphEdge<'a>) -> &'a GraphEdge<'a> {
+            #[allow(clippy::only_used_in_recursion)]
             fn _visit<'a>(
-                mem: &'a Bump,
+                _mem: &'a Bump,
                 curr: &'a GraphEdge<'a>,
                 index: u64,
                 result: &'a GraphEdge<'a>,
@@ -611,9 +613,9 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                     Some(next) => {
                         let index1 = next.source.get().index;
                         if index1 < index {
-                            _visit(mem, next, index1, next)
+                            _visit(_mem, next, index1, next)
                         } else {
-                            _visit(mem, next, index, result)
+                            _visit(_mem, next, index, result)
                         }
                     }
                 }

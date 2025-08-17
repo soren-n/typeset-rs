@@ -170,7 +170,7 @@ fn test_sequence_breaking() {
     // If sequence breaks, all items should be on separate lines
     if output.contains('\n') {
         let content_part = output.split("Before").nth(1).unwrap_or("");
-        let items: Vec<&str> = content_part.split_whitespace().collect();
+        let _items: Vec<&str> = content_part.split_whitespace().collect();
 
         // Each sequence item should be easily identifiable
         assert!(output.contains("seq1"));

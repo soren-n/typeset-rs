@@ -222,13 +222,14 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
                 DocObj::Comp(left, _right, _pad) => _visit_obj(mem, left, state),
             }
         }
-        fn _visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &DocObjFix, state: State<'a>) -> State<'a> {
+        #[allow(clippy::only_used_in_recursion)]
+        fn _visit_fix<'b, 'a: 'b>(_mem: &'b Bump, fix: &DocObjFix, state: State<'a>) -> State<'a> {
             match fix {
                 DocObjFix::Text(data) => _inc_pos(data.len(), state),
                 DocObjFix::Comp(left, right, pad) => {
-                    let state1 = _visit_fix(mem, left, state);
+                    let state1 = _visit_fix(_mem, left, state);
                     let state2 = _inc_pos(if *pad { 1 } else { 0 }, state1);
-                    _visit_fix(mem, right, state2)
+                    _visit_fix(_mem, right, state2)
                 }
             }
         }
@@ -248,25 +249,26 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
             state.width < next_comp_pos
         }
     }
+    #[allow(clippy::boxed_local)]
     fn _visit_doc<'b, 'a: 'b>(
         mem: &'b Bump,
         doc: Box<Doc>,
         state: State<'a>,
     ) -> (State<'b>, String) {
         let state1 = _reset(state);
-        match doc {
-            box Doc::Eod => (state1, "".to_string()),
-            box Doc::Empty(doc1) => {
+        match *doc {
+            Doc::Eod => (state1, "".to_string()),
+            Doc::Empty(doc1) => {
                 let (state2, doc2) = _visit_doc(mem, doc1, state1);
                 (state2, format!("\n{}", doc2))
             }
-            box Doc::Break(obj, doc1) => {
+            Doc::Break(obj, doc1) => {
                 let (state2, obj1) = _visit_obj(mem, *obj, state1, "".to_string());
                 let state3 = _reset(state2);
                 let (state4, doc2) = _visit_doc(mem, doc1, state3);
                 (state4, format!("{}\n{}", obj1, doc2))
             }
-            box Doc::Line(obj) => _visit_obj(mem, *obj, state1, "".to_string()),
+            Doc::Line(obj) => _visit_obj(mem, *obj, state1, "".to_string()),
         }
     }
     fn _visit_obj<'b, 'a: 'b>(
@@ -369,8 +371,9 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
             }
         }
     }
+    #[allow(clippy::only_used_in_recursion)]
     fn _visit_fix<'b, 'a: 'b>(
-        mem: &'b Bump,
+        _mem: &'b Bump,
         fix: DocObjFix,
         state: State<'a>,
         result: String,
@@ -381,11 +384,11 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
                 (state1, result.clone() + &data)
             }
             DocObjFix::Comp(left, right, pad) => {
-                let (state1, result1) = _visit_fix(mem, *left, state, result);
+                let (state1, result1) = _visit_fix(_mem, *left, state, result);
                 let padding = if pad { 1 } else { 0 };
                 let result2 = _pad(padding, result1);
                 let state2 = _inc_pos(padding, state1);
-                _visit_fix(mem, *right, state2, result2.clone())
+                _visit_fix(_mem, *right, state2, result2.clone())
             }
         }
     }

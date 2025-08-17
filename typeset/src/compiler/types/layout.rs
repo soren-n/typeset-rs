@@ -8,8 +8,9 @@ pub struct Attr {
 }
 
 /// Layout AST - the input language for the compiler
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum Layout {
+    #[default]
     Null,
     Text(String),
     Fix(Box<Layout>),
@@ -21,44 +22,39 @@ pub enum Layout {
     Comp(Box<Layout>, Box<Layout>, Attr),
 }
 
-impl Default for Layout {
-    fn default() -> Self {
-        Layout::Null
-    }
-}
-
 impl fmt::Display for Layout {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        #[allow(clippy::boxed_local)]
         fn _visit(layout: Box<Layout>) -> String {
-            match layout {
-                box Layout::Null => "Null".to_string(),
-                box Layout::Text(data) => format!("(Text \"{}\")", data),
-                box Layout::Fix(layout1) => {
+            match *layout {
+                Layout::Null => "Null".to_string(),
+                Layout::Text(data) => format!("(Text \"{}\")", data),
+                Layout::Fix(layout1) => {
                     let layout_s = _visit(layout1);
                     format!("(Fix {})", layout_s)
                 }
-                box Layout::Grp(layout1) => {
+                Layout::Grp(layout1) => {
                     let layout_s = _visit(layout1);
                     format!("(Grp {})", layout_s)
                 }
-                box Layout::Seq(layout1) => {
+                Layout::Seq(layout1) => {
                     let layout_s = _visit(layout1);
                     format!("(Seq {})", layout_s)
                 }
-                box Layout::Nest(layout1) => {
+                Layout::Nest(layout1) => {
                     let layout_s = _visit(layout1);
                     format!("(Nest {})", layout_s)
                 }
-                box Layout::Pack(layout1) => {
+                Layout::Pack(layout1) => {
                     let layout_s = _visit(layout1);
                     format!("(Pack {})", layout_s)
                 }
-                box Layout::Line(left, right) => {
+                Layout::Line(left, right) => {
                     let left_s = _visit(left);
                     let right_s = _visit(right);
                     format!("(Line {} {})", left_s, right_s)
                 }
-                box Layout::Comp(left, right, attr) => {
+                Layout::Comp(left, right, attr) => {
                     let left_s = _visit(left);
                     let right_s = _visit(right);
                     format!("(Comp {} {} {} {})", left_s, right_s, attr.pad, attr.fix)
