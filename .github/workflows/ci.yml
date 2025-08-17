@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust: [nightly]
+        rust: [stable, nightly]
     steps:
     - name: Checkout
       uses: actions/checkout@v5

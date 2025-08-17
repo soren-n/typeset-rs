@@ -3,6 +3,7 @@ name = "typeset-parser"
 description = "Compile time macro parser for typeset"
 version = "3.0.5"
 edition = "2021"
+rust-version = "1.89.0"
 authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
 homepage = "https://docs.rs/typeset-parser/latest/typeset-parser/"
 repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset-parser"

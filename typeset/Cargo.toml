@@ -3,6 +3,7 @@ name = "typeset"
 description = "A DSL for defining source code pretty printers"
 version = "3.0.5"
 edition = "2021"
+rust-version = "1.89.0"
 authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
 homepage = "https://docs.rs/typeset/latest/typeset/"
 repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset"

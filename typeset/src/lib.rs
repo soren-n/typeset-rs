@@ -125,10 +125,11 @@
 //! };
 //! ```
 //!
-//! ## Feature Flags
+//! ## Rust Version Compatibility
 //!
-//! Currently, typeset requires the `box_patterns` unstable feature for optimal performance.
-//! This requirement will be removed in a future version.
+//! This crate works on stable Rust (MSRV: 1.89.0). The test suite includes some components
+//! that use unstable features like `box_patterns`, but the core library and procedural
+//! macro work perfectly on stable Rust.
 //!
 //! ## Version 2.0 Changes
 //!
