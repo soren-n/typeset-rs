@@ -78,7 +78,18 @@ jobs:
 
     - name: Run semantic release
       id: semantic
-      run: semantic-release
+      run: |
+        # Set outputs based on semantic-release results
+        if semantic-release; then
+          echo "new-release-published=true" >> $GITHUB_OUTPUT
+          # Get the latest tag as the new version
+          NEW_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
+          echo "new-release-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Release $NEW_VERSION published successfully"
+        else
+          echo "new-release-published=false" >> $GITHUB_OUTPUT
+          echo "ℹ️ No release was published"
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
