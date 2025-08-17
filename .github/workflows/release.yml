@@ -55,7 +55,7 @@ jobs:
             [
               "@semantic-release/exec",
               {
-                "prepareCmd": "sed -i 's/version = \".*\"/version = \"${nextRelease.version}\"/' typeset/Cargo.toml typeset-parser/Cargo.toml && sed -i 's/typeset = { version = \".*\", path = \"..\/typeset\" }/typeset = { version = \"${nextRelease.version}\", path = \"..\/typeset\" }/' typeset-parser/Cargo.toml"
+                "prepareCmd": "./scripts/update-version.sh ${nextRelease.version}"
               }
             ],
             [
