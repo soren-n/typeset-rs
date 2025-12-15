@@ -74,7 +74,7 @@ jobs:
       run: cargo audit --json > audit-results.json
 
     - name: Upload audit results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: security-audit-results
         path: audit-results.json
