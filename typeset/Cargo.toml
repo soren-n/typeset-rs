@@ -1,24 +1,24 @@
 [package]
 name = "typeset"
 description = "A DSL for defining source code pretty printers"
-version = "3.1.0"
-edition = "2021"
-rust-version = "1.89.0"
-authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
 homepage = "https://docs.rs/typeset/latest/typeset/"
 repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset"
 documentation = "https://docs.rs/typeset/latest/typeset/"
 keywords = ["dsl", "pretty", "printer"]
-categories = ["compilers", "template-engine"]
-license-file = "LICENSE"
+categories.workspace = true
+license-file.workspace = true
 readme = "README.md"
 
 [dependencies]
-bumpalo = "3.17.0"
+bumpalo.workspace = true
 
 [dev-dependencies]
-typeset-parser = { version = "3.1.0", path = "../typeset-parser" }
-criterion = { version = "0.5", features = ["html_reports"] }
+typeset-parser.workspace = true
+criterion.workspace = true
 
 [[bench]]
 name = "layout_performance"

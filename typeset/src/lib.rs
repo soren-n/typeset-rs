@@ -150,13 +150,6 @@ mod order;
 mod util;
 
 pub use self::compiler::{
-    // Core compilation functions
-    compile,
-    compile_safe,
-    compile_safe_with_depth,
-
-    // Rendering
-    render,
     // Error handling
     CompilerError,
     // Core types
@@ -164,6 +157,13 @@ pub use self::compiler::{
     Layout,
 
     TwoBufferBumpAllocator,
+    // Core compilation functions
+    compile,
+    compile_safe,
+    compile_safe_with_depth,
+
+    // Rendering
+    render,
 };
 
 // Re-export constructor functions

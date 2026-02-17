@@ -4,8 +4,8 @@
 //! and produces the same results as the original monolithic implementation.
 
 use typeset::{
-    comp, compile, compile_safe, compile_safe_with_depth, grp, line, nest, pack, render, seq, text,
-    CompilerError,
+    CompilerError, comp, compile, compile_safe, compile_safe_with_depth, grp, line, nest, pack,
+    render, seq, text,
 };
 
 /// Test basic compilation functionality

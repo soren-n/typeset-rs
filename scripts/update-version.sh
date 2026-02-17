@@ -13,20 +13,15 @@ NEW_VERSION="$1"
 
 echo "Updating version to $NEW_VERSION"
 
-# Update typeset/Cargo.toml
-sed -i.bak "s/^version = \".*\"/version = \"$NEW_VERSION\"/" typeset/Cargo.toml
-rm -f typeset/Cargo.toml.bak
+# Update workspace version in root Cargo.toml
+sed -i.bak "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+rm -f Cargo.toml.bak
 
-# Update typeset-parser/Cargo.toml
-sed -i.bak "s/^version = \".*\"/version = \"$NEW_VERSION\"/" typeset-parser/Cargo.toml
-rm -f typeset-parser/Cargo.toml.bak
+# Update inter-workspace dependency versions in root Cargo.toml
+sed -i.bak "s/typeset = { version = \".*\", path = \"typeset\" }/typeset = { version = \"$NEW_VERSION\", path = \"typeset\" }/" Cargo.toml
+rm -f Cargo.toml.bak
 
-# Update typeset dependency version in typeset-parser/Cargo.toml
-sed -i.bak "s/typeset = { version = \".*\", path = \"..\/typeset\" }/typeset = { version = \"$NEW_VERSION\", path = \"..\/typeset\" }/" typeset-parser/Cargo.toml
-rm -f typeset-parser/Cargo.toml.bak
-
-# Update typeset-parser dependency version in typeset/Cargo.toml
-sed -i.bak "s/typeset-parser = { version = \".*\", path = \"..\/typeset-parser\" }/typeset-parser = { version = \"$NEW_VERSION\", path = \"..\/typeset-parser\" }/" typeset/Cargo.toml
-rm -f typeset/Cargo.toml.bak
+sed -i.bak "s/typeset-parser = { version = \".*\", path = \"typeset-parser\" }/typeset-parser = { version = \"$NEW_VERSION\", path = \"typeset-parser\" }/" Cargo.toml
+rm -f Cargo.toml.bak
 
 echo "Successfully updated version to $NEW_VERSION"

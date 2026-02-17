@@ -1,25 +1,25 @@
 [package]
 name = "typeset-parser"
 description = "Compile time macro parser for typeset"
-version = "3.1.0"
-edition = "2021"
-rust-version = "1.89.0"
-authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
 homepage = "https://docs.rs/typeset-parser/latest/typeset-parser/"
 repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset-parser"
 documentation = "https://docs.rs/typeset-parser/latest/typeset-parser/"
 keywords = ["dsl", "pretty", "printer", "parser", "macro"]
-categories = ["compilers", "template-engine"]
-license-file = "LICENSE"
+categories.workspace = true
+license-file.workspace = true
 readme = "README.md"
 
 [dependencies]
-proc-macro2 = "1.0.94"
-quote = "1.0.40"
-syn = { version = "2.0.100", features = [ "full" ] }
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
 
 [dev-dependencies]
-typeset = { version = "3.1.0", path = "../typeset" }
+typeset.workspace = true
 
 [lib]
 proc-macro = true

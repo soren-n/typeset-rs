@@ -4,9 +4,9 @@ use quote::quote;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use syn::{
-    parenthesized,
-    parse::{discouraged::Speculative, Parse, ParseStream, Result},
-    parse_macro_input, Error, Ident, LitStr,
+    Error, Ident, LitStr, parenthesized,
+    parse::{Parse, ParseStream, Result, discouraged::Speculative},
+    parse_macro_input,
 };
 
 fn _parsed<T: Parse>(input: ParseStream) -> Result<T> {

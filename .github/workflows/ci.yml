@@ -44,59 +44,6 @@ jobs:
     - name: Run Rust tests
       run: cargo test --all --all-features
 
-  # test-ocaml:
-  #   name: OCaml Tests
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - name: Checkout
-  #     uses: actions/checkout@v6
-
-  #   - name: Install system dependencies
-  #     run: |
-  #       sudo apt-get update
-  #       sudo apt-get install -y build-essential bubblewrap g++-multilib gcc-multilib mercurial musl-tools rsync
-
-  #   - name: Install OCaml
-  #     uses: ocaml/setup-ocaml@v2
-  #     with:
-  #       ocaml-compiler: '5.2.0'
-  #       opam-local-packages: |
-  #         tests/tester/
-  #       opam-depext: false
-
-  #   - name: Install dependencies
-  #     run: |
-  #       opam install qcheck --yes
-  #       opam install . --deps-only --yes
-  #     working-directory: tests/tester
-
-  #   - name: Build OCaml tests
-  #     run: |
-  #       cd tests/tester && dune build
-  #       cd tests && ./build.sh
-
-  #   - name: Run OCaml tests
-  #     run: cd tests && ./run.sh
-
-  # security:
-  #   name: Security Audit
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - name: Checkout
-  #     uses: actions/checkout@v6
-
-  #   - name: Install Rust toolchain
-  #     uses: dtolnay/rust-toolchain@stable
-
-  #   - name: Install cargo-audit
-  #     run: cargo install cargo-audit
-
-  #   - name: Run security audit
-  #     run: cargo audit
-
-  #   - name: Run cargo-deny
-  #     uses: EmbarkStudios/cargo-deny-action@v1
-
   build:
     name: Build and Test
     needs: [check]
@@ -106,7 +53,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@nightly
+      uses: dtolnay/rust-toolchain@stable
 
     - name: Setup Rust cache
       uses: Swatinem/rust-cache@v2

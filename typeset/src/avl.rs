@@ -6,8 +6,8 @@ use std::fmt::Debug;
 use bumpalo::Bump;
 
 use crate::{
-    list::{cons, nil, List},
-    order::{total, Order},
+    list::{List, cons, nil},
+    order::{Order, total},
     util::compose,
 };
 
