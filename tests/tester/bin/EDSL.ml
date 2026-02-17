@@ -47,19 +47,19 @@ let rec _gen_eDSL n =
       (_gen_eDSL (n / 2))
   in
   let _gen_eDSL_binary =
-    frequency
+    oneof_weighted
     [ 1, _gen_eDSL_line
     ; 2, _gen_eDSL_comp
     ]
   in
-  frequency
+  oneof_weighted
   [ 1, _gen_eDSL_unary
   ; 2, _gen_eDSL_binary
   ]
 
 let gen_eDSL =
   let open QCheck.Gen in
-  small_nat >>= _gen_eDSL
+  nat_small >>= _gen_eDSL
 
 let shrink_eDSL eDSL =
   let open QCheck.Iter in

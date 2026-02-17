@@ -13,7 +13,7 @@ let word_char_gen state =
 
 let gen_word =
   let open QCheck.Gen in
-  small_nat >>= fun n ->
+  nat_small >>= fun n ->
   string_size ~gen:word_char_gen (1--(n + 1))
 
 let shrink_word word yield =
