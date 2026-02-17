@@ -18,7 +18,7 @@ bumpalo = "3.17.0"
 
 [dev-dependencies]
 typeset-parser = { version = "3.1.0", path = "../typeset-parser" }
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "layout_performance"
