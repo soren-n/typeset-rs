@@ -12,11 +12,20 @@ env:
 
 jobs:
   check:
-    name: Quality Gates
+    name: Quality Gates (${{ matrix.rust }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust: [stable, nightly]
+        include:
+          - rust: stable
+            check_fmt: true
+            check_clippy: true
+          - rust: nightly
+            check_fmt: false
+            check_clippy: false
+          - rust: "1.89.0"
+            check_fmt: false
+            check_clippy: false
     steps:
     - name: Checkout
       uses: actions/checkout@v6
@@ -25,7 +34,7 @@ jobs:
       uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
-        components: rustfmt, clippy
+        components: ${{ matrix.check_fmt && 'rustfmt, clippy' || '' }}
 
     - name: Setup Rust cache
       uses: Swatinem/rust-cache@v2
@@ -33,9 +42,11 @@ jobs:
         key: ${{ matrix.rust }}
 
     - name: Check formatting
+      if: matrix.check_fmt
       run: cargo fmt --all --check
 
     - name: Run clippy
+      if: matrix.check_clippy
       run: cargo clippy --all-targets --all-features -- -D warnings
 
     - name: Type checking
@@ -43,6 +54,13 @@ jobs:
 
     - name: Run Rust tests
       run: cargo test --all --all-features
+
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: EmbarkStudios/cargo-deny-action@v2
 
   build:
     name: Build and Test
