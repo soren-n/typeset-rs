@@ -16,6 +16,12 @@ authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
 license-file = "LICENSE"
 categories = ["compilers", "template-engine"]
 
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
 [workspace.dependencies]
 bumpalo = "3.19"
 proc-macro2 = "1.0"

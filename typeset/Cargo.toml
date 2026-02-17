@@ -13,6 +13,9 @@ categories.workspace = true
 license-file.workspace = true
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [dependencies]
 bumpalo.workspace = true
 
