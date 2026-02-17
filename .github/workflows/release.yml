@@ -85,10 +85,10 @@ jobs:
           # Get the latest tag as the new version
           NEW_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
           echo "new-release-version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "✅ Release $NEW_VERSION published successfully"
+          echo "Release $NEW_VERSION published successfully"
         else
           echo "new-release-published=false" >> $GITHUB_OUTPUT
-          echo "ℹ️ No release was published"
+          echo "No release was published"
         fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -144,11 +144,11 @@ jobs:
         tag_name: v${{ needs.semantic-release.outputs.new-release-version }}
         name: v${{ needs.semantic-release.outputs.new-release-version }}
         body: |
-          🎉 **Release v${{ needs.semantic-release.outputs.new-release-version }}**
+          **Release v${{ needs.semantic-release.outputs.new-release-version }}**
           
           This release was automatically generated based on conventional commits.
           
-          ### 📦 Published Crates
+          ### Published Crates
           - `typeset` v${{ needs.semantic-release.outputs.new-release-version }}
           - `typeset-parser` v${{ needs.semantic-release.outputs.new-release-version }}
           

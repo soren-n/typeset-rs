@@ -38,7 +38,7 @@ jobs:
         commit-message: 'chore(deps): update Rust dependencies'
         title: 'chore(deps): Update Rust dependencies'
         body: |
-          ## 📦 Dependency Updates
+          ## Dependency Updates
           
           This PR updates Rust dependencies to their latest versions.
           
@@ -47,8 +47,8 @@ jobs:
           - Upgraded dependencies to latest versions where possible
           
           ### Verification
-          - ✅ Tests pass
-          - ✅ Type checking passes
+          - Tests pass
+          - Type checking passes
           
           This is an automated PR created by the dependencies workflow.
         branch: chore/update-rust-dependencies
@@ -83,9 +83,9 @@ jobs:
     - name: Check for vulnerabilities
       run: |
         if cargo audit --quiet; then
-          echo "✅ No security vulnerabilities found"
+          echo "No security vulnerabilities found"
         else
-          echo "❌ Security vulnerabilities detected!"
+          echo "Security vulnerabilities detected!"
           cargo audit
           exit 1
         fi

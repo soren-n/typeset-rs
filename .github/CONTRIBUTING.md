@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing! This guide will help you understand our development process and automated workflows.
 
-## 🔧 Development Setup
+## Development Setup
 
 1. **Prerequisites**
    - Rust (stable toolchain, MSRV 1.89.0)
@@ -18,7 +18,7 @@ Thank you for your interest in contributing! This guide will help you understand
 3. **Install git hooks**
    Git hooks are automatically installed and will run quality checks before commits.
 
-## 📝 Commit Message Format
+## Commit Message Format
 
 We use [Conventional Commits](https://conventionalcommits.org/) for automatic semantic versioning and changelog generation.
 
@@ -52,32 +52,32 @@ docs: update README with installation instructions
 feat!: change API for layout composition
 ```
 
-## 🚀 CI/CD Workflows
+## CI/CD Workflows
 
 ### 1. CI Workflow (`.github/workflows/ci.yml`)
 **Triggers:** Every push and PR to main
-- ✅ Code formatting (`cargo fmt`)
-- 🔍 Linting (`cargo clippy`)
-- 🧪 Rust tests (`cargo test`)
-- 🐫 OCaml tests (property-based testing)
-- 🔒 Security audit (`cargo audit`, `cargo deny`)
-- 🏗️ Build verification
+- Code formatting (`cargo fmt`)
+- Linting (`cargo clippy`)
+- Rust tests (`cargo test`)
+- OCaml tests (property-based testing)
+- Security audit (`cargo audit`, `cargo deny`)
+- Build verification
 
 ### 2. Release Workflow (`.github/workflows/release.yml`)
 **Triggers:** Push to main with releasable commits
-- 🏷️ **Semantic versioning**: Automatically determines version based on commit messages
-- 📝 **Changelog generation**: Creates/updates CHANGELOG.md
-- 🔄 **Version bumping**: Updates Cargo.toml files automatically
-- 📦 **Crate publishing**: Publishes to crates.io in correct order
-- 🎉 **GitHub releases**: Creates release with generated notes
+- **Semantic versioning**: Automatically determines version based on commit messages
+- **Changelog generation**: Creates/updates CHANGELOG.md
+- **Version bumping**: Updates Cargo.toml files automatically
+- **Crate publishing**: Publishes to crates.io in correct order
+- **GitHub releases**: Creates release with generated notes
 
 ### 3. Dependencies Workflow (`.github/workflows/dependencies.yml`)
 **Triggers:** Weekly schedule + manual dispatch
-- 📦 Updates Rust dependencies
-- 🔒 Security vulnerability scanning
-- 🔄 Creates automated PRs for dependency updates
+- Updates Rust dependencies
+- Security vulnerability scanning
+- Creates automated PRs for dependency updates
 
-## 🧪 Testing
+## Testing
 
 ### Local Testing
 ```bash
@@ -98,13 +98,13 @@ cd tests && ./build.sh && ./run.sh
 - **OCaml tests**: Property-based tests in `tests/tester/`
 - **Integration**: Both test suites verify the same functionality
 
-## 🔒 Security
+## Security
 
 - **Dependency scanning**: Automated vulnerability detection
 - **License compliance**: Only approved licenses allowed
 - **Supply chain**: Dependencies verified and audited
 
-## 📋 Pull Request Process
+## Pull Request Process
 
 1. **Create feature branch**: `git checkout -b feat/your-feature`
 2. **Make changes** with conventional commit messages
@@ -113,7 +113,7 @@ cd tests && ./build.sh && ./run.sh
 5. **Review process**: Maintainer review required
 6. **Merge**: Squash and merge with conventional commit message
 
-## 🏷️ Release Process (Automated)
+## Release Process (Automated)
 
 Releases are **fully automated** based on commit messages:
 
@@ -132,7 +132,7 @@ git commit --allow-empty -m "feat: trigger release"
 git push origin main
 ```
 
-## 💡 Tips
+## Tips
 
 - Use conventional commits for automatic versioning
 - Pre-commit hooks catch issues early
@@ -141,7 +141,7 @@ git push origin main
 - Dependency updates are automated weekly
 - Security scanning runs on every change
 
-## 🆘 Getting Help
+## Getting Help
 
 - Create an issue for bugs or feature requests
 - Check existing issues and PRs
