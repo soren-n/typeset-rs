@@ -1,4 +1,5 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use typeset::{comp, compile, compile_safe, grp, nest, text};
 
 fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
