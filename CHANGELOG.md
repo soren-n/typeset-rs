@@ -1,3 +1,10 @@
+## [3.1.2](https://github.com/soren-n/typeset-rs/compare/v3.1.1...v3.1.2) (2026-02-17)
+
+
+### Bug Fixes
+
+* correct version mismatch and remove dead code ([a20b197](https://github.com/soren-n/typeset-rs/commit/a20b1976bc70d0fb6830685ff4009d172fd82cdc))
+
 ## [3.1.1](https://github.com/soren-n/typeset-rs/compare/v3.1.0...v3.1.1) (2026-02-17)
 
 
