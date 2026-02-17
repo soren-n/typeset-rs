@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 pest = "2.7.9"
 pest_derive = "2.7.9"
-typeset = { version = "3.0.5", path = "../../typeset" }
+typeset = { version = "3.1.1", path = "../../typeset" }

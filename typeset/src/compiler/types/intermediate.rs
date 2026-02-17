@@ -1,5 +1,5 @@
 use super::layout::Attr;
-use crate::{list::List, map::Map};
+use crate::list::List;
 use std::cell::Cell;
 use std::fmt;
 
@@ -249,15 +249,6 @@ pub enum DenullTerm<'a> {
     Pack(u64, &'a DenullTerm<'a>),
 }
 
-// Counter for identities optimization
-#[derive(Debug, Copy, Clone)]
-#[allow(dead_code)]
-pub enum Count {
-    Zero,
-    One,
-    Many,
-}
-
 // Eighth intermediate representation: FinalDoc
 #[derive(Debug)]
 pub enum FinalDoc<'a> {
@@ -284,20 +275,10 @@ pub enum FinalDocObjFix<'a> {
     Comp(&'a FinalDocObjFix<'a>, &'a FinalDocObjFix<'a>, bool),
 }
 
-#[derive(Debug, Copy, Clone)]
-#[allow(dead_code)]
-pub enum Prop {
-    Nest,
-    Pack(u64),
-}
-
 // Type aliases for complex function signatures
 pub type GraphTermList<'b> = &'b List<'b, &'b GraphTerm<'b>>;
 pub type U64List<'b> = &'b List<'b, u64>;
 pub type PropertyListList<'b> = &'b List<'b, &'b List<'b, Property<()>>>;
-#[allow(dead_code)]
-pub type GraphNodeList<'b> = &'b List<'b, &'b GraphNode<'b>>;
-
 pub type TermTransformer<'b> =
     &'b dyn Fn(&'b bumpalo::Bump, GraphTermList<'b>) -> GraphTermList<'b>;
 pub type U64Transformer<'b> = &'b dyn Fn(&'b bumpalo::Bump, U64List<'b>) -> U64List<'b>;
@@ -305,9 +286,3 @@ pub type PropertyTransformer<'b> =
     &'b dyn Fn(&'b bumpalo::Bump, PropertyListList<'b>) -> PropertyListList<'b>;
 
 pub type TopologyResult<'b> = (GraphTermList<'b>, U64List<'b>, PropertyListList<'b>);
-#[allow(dead_code)]
-pub type GraphResult<'b> = (
-    &'b dyn Fn(&'b bumpalo::Bump, GraphNodeList<'b>) -> GraphNodeList<'b>,
-    &'b dyn Fn(&'b bumpalo::Bump, U64List<'b>) -> U64List<'b>,
-    &'b Map<'b, u64, Property<(u64, Option<u64>)>>,
-);
