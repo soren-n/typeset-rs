@@ -1,3 +1,10 @@
+## [3.1.1](https://github.com/soren-n/typeset-rs/compare/v3.1.0...v3.1.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* **tests:** replace deprecated QCheck.Gen APIs in OCaml tester ([9ce6c81](https://github.com/soren-n/typeset-rs/commit/9ce6c81966141e3c34a5a82dd0e78242e0573858))
+
 # [3.1.0](https://github.com/soren-n/typeset-rs/compare/v3.0.5...v3.1.0) (2025-08-17)
 
 
