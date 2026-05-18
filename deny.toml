@@ -1,11 +1,10 @@
 # Configuration for cargo-deny
 # See: https://embarkstudios.github.io/cargo-deny/
+# Migrated to cargo-deny v2 schema (v1 lint-level fields removed upstream).
 
 [graph]
 # If true, metadata will be collected with `--all-features`
 all-features = true
-# If set, these feature will be enabled when collecting metadata. If `--all-features` is specified, this is ignored
-# features = []
 
 [output]
 feature-depth = 1
@@ -15,24 +14,19 @@ feature-depth = 1
 db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The lint level for when a crate version requirement is vulnerable
-vulnerability = "deny"
-# The lint level for when a crate version requirement is unmaintained
-unmaintained = "warn"
-# The lint level for when a crate version requirement is yanked
+# Behaviour for yanked crate versions: "deny" | "warn" | "allow"
 yanked = "warn"
-# The lint level for when a crate version requirement is in a notice
-notice = "warn"
-# A list of advisory IDs to ignore. Note that ignored advisories will still
-# output a note when they are encountered.
-ignore = [
-    # Allows you to skip certain advisories by ID
-]
+# Scope of unmaintained-advisory checks: "all" | "workspace" | "transitive" | "none".
+# v1 used `unmaintained = "warn"` (non-failing); "none" preserves that
+# non-failing behaviour (vulnerabilities/unsound now always error in v2).
+unmaintained = "none"
+# A list of advisory IDs to ignore.
+ignore = []
 
 [licenses]
-# The lint level for when unlicensed crates are encountered
-unlicensed = "deny"
-# List of explicitly allowed licenses
+# v2 is allow-only: anything not listed here is denied (the old explicit
+# `deny`/`unlicensed` keys were removed upstream; GPL/AGPL remain denied
+# implicitly by not being in `allow`).
 allow = [
     "MIT",
     "Apache-2.0",
@@ -42,48 +36,28 @@ allow = [
     "ISC",
     "Unicode-DFS-2016",
 ]
-# List of explicitly disallowed licenses
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-1.0",
-    "AGPL-3.0",
-]
-# Lint level for when a crate version does not have a detectable license
 confidence-threshold = 0.8
-# Allow 1 or more licenses on a per-crate basis, so that particular licenses aren't accepted for every possible crate as with the normal allow list
-exceptions = [
-    # Each entry is the crate and version constraint, and its the license
-    # { allow = ["Zlib"], name = "adler32" },
-]
+# Per-crate license exceptions, e.g. { allow = ["Zlib"], name = "adler32" }
+exceptions = []
 
 [bans]
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "warn"
 # Lint level for when a crate version requirement is wildcarded
 wildcards = "allow"
-# Lint level for when a banned crate is encountered
-deny = [
-    # Each entry the name of a crate and a version range. If version is not specified, all versions will be banned
-    # { name = "ansi_term", version = "*" },
-]
-# Certain crates/versions that will be skipped when doing duplicate detection
-skip = [
-    # Each entry is a crate name and version range
-    # { name = "ansi_term", version = "=0.11.0" },
-]
-# Similarly to `skip` allows you to skip certain crates from being checked for licensing
-skip-tree = [
-    # Each entry is a crate name and version range
-    # { name = "ansi_term", version = "=0.11.0" },
-]
+# Crates to ban entirely
+deny = []
+# Crates skipped during duplicate detection
+skip = []
+# Crate trees skipped during duplicate detection
+skip-tree = []
 
 [sources]
-# Lint level for when a crate from a crate registry that is not in the allow list is encountered
+# Lint level for an unknown crate registry
 unknown-registry = "warn"
-# Lint level for when a crate from a git repository that is not in the allow list is encountered
+# Lint level for an unknown git source
 unknown-git = "warn"
-# List of allowed crate registries, only crates.io is allowed by default
+# Allowed crate registries (crates.io only by default)
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# List of allowed Git repositories
+# Allowed git repositories
 allow-git = []
