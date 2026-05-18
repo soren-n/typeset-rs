@@ -1,3 +1,10 @@
+## [3.1.4](https://github.com/soren-n/typeset-rs/compare/v3.1.3...v3.1.4) (2026-05-18)
+
+
+### Bug Fixes
+
+* **ci:** allow Unicode-3.0 + first-party GPL crates in cargo-deny ([1eb5d20](https://github.com/soren-n/typeset-rs/commit/1eb5d2053ab1fff8a580d036d15e39f1bc3d03c8))
+
 ## [3.1.3](https://github.com/soren-n/typeset-rs/compare/v3.1.2...v3.1.3) (2026-05-18)
 
 
