@@ -1,0 +1,44 @@
+name: Dependabot auto-merge
+
+# Merges grouped Dependabot PRs only after "CI" passes.
+# This repo has no branch protection, so CI is gated here via workflow_run
+# (a native --auto merge would not wait for CI).
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find the Dependabot PR for this branch
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          num=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head "${{ github.event.workflow_run.head_branch }}" \
+            --state open --json number,author \
+            --jq '.[] | select(.author.login=="app/dependabot") | .number' | head -n1)
+          if [ -z "$num" ]; then
+            echo "No open Dependabot PR for this branch; nothing to do."
+          else
+            echo "number=$num" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Squash-merge
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge --repo "$GITHUB_REPOSITORY" \
+            --squash --delete-branch "${{ steps.pr.outputs.number }}"
