@@ -139,7 +139,7 @@ jobs:
       run: cargo publish --token ${{ secrets.CRATES_API_TOKEN }} -p typeset
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: v${{ needs.semantic-release.outputs.new-release-version }}
         name: v${{ needs.semantic-release.outputs.new-release-version }}
