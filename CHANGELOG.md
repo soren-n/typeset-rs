@@ -1,3 +1,10 @@
+## [3.1.3](https://github.com/soren-n/typeset-rs/compare/v3.1.2...v3.1.3) (2026-05-18)
+
+
+### Bug Fixes
+
+* **ci:** migrate deny.toml to cargo-deny v2 schema ([d3c6080](https://github.com/soren-n/typeset-rs/commit/d3c6080c7e7b7ab4f0bca2c7224bc5d84cf5f386))
+
 ## [3.1.2](https://github.com/soren-n/typeset-rs/compare/v3.1.1...v3.1.2) (2026-02-17)
 
 
