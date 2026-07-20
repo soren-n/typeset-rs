@@ -122,3 +122,109 @@ impl<'b, 'a: 'b, T: Copy + Clone + Debug> List<'a, T> {
         }
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Build a `List` from a slice, preserving order (`xs[0]` at the head).
+    fn list_of<'a>(mem: &'a Bump, xs: &[i64]) -> &'a List<'a, i64> {
+        let mut acc = nil(mem);
+        for &x in xs.iter().rev() {
+            acc = cons(mem, x, acc);
+        }
+        acc
+    }
+
+    /// Flatten a `List` back into a `Vec` for comparison against the model.
+    fn to_vec<'a>(list: &'a List<'a, i64>) -> Vec<i64> {
+        let mut out = Vec::new();
+        let mut cur = list;
+        while let List::Cons(_, x, rest) = cur {
+            out.push(*x);
+            cur = rest;
+        }
+        out
+    }
+
+    proptest! {
+        /// `list_of` round-trips: the model slice and the flattened list agree.
+        #[test]
+        fn build_preserves_order(xs in prop::collection::vec(any::<i64>(), 0..64)) {
+            let mem = Bump::new();
+            prop_assert_eq!(to_vec(list_of(&mem, &xs)), xs);
+        }
+
+        #[test]
+        fn length_matches_model(xs in prop::collection::vec(any::<i64>(), 0..64)) {
+            let mem = Bump::new();
+            prop_assert_eq!(list_of(&mem, &xs).length(), xs.len() as u64);
+        }
+
+        /// The cached length on every cons cell equals the remaining tail length.
+        #[test]
+        fn cached_length_is_consistent(xs in prop::collection::vec(any::<i64>(), 0..64)) {
+            let mem = Bump::new();
+            let mut cur = list_of(&mem, &xs);
+            let mut expected = xs.len() as u64;
+            while let List::Cons(len, _, rest) = cur {
+                prop_assert_eq!(*len, expected);
+                expected -= 1;
+                cur = rest;
+            }
+            prop_assert_eq!(expected, 0);
+        }
+
+        #[test]
+        fn get_matches_model(xs in prop::collection::vec(any::<i64>(), 0..64)) {
+            let mem = Bump::new();
+            let list = list_of(&mem, &xs);
+            // Probe past the end as well, to cover the out-of-bounds None path.
+            for i in 0..xs.len() as u64 + 2 {
+                prop_assert_eq!(list.get(i), xs.get(i as usize).copied());
+            }
+        }
+
+        #[test]
+        fn get_unsafe_matches_model(xs in prop::collection::vec(any::<i64>(), 1..64)) {
+            let mem = Bump::new();
+            let list = list_of(&mem, &xs);
+            for (i, &x) in xs.iter().enumerate() {
+                prop_assert_eq!(list.get_unsafe(i as u64), x);
+            }
+        }
+
+        /// A right fold with `cons` over `nil` reconstructs the original list.
+        #[test]
+        fn fold_with_cons_is_identity(xs in prop::collection::vec(any::<i64>(), 0..64)) {
+            let mem = Bump::new();
+            let list = list_of(&mem, &xs);
+            let rebuilt = list.fold(
+                &mem,
+                nil(&mem),
+                mem.alloc(|mem, x, acc| cons(mem, x, acc)),
+            );
+            prop_assert_eq!(to_vec(rebuilt), xs);
+        }
+
+        /// `fold` is a right fold: it associates as `f x0 (f x1 (... (f xn init)))`.
+        /// Subtraction is not associative or commutative, so this pins the order.
+        #[test]
+        fn fold_folds_from_the_right(xs in prop::collection::vec(-1000i64..1000, 0..48)) {
+            let mem = Bump::new();
+            let list = list_of(&mem, &xs);
+            let got = list.fold(&mem, 0i64, mem.alloc(|_mem, x, acc| x - acc));
+            let want = xs.iter().rev().fold(0i64, |acc, &x| x - acc);
+            prop_assert_eq!(got, want);
+        }
+
+        #[test]
+        fn map_matches_model(xs in prop::collection::vec(any::<i64>(), 0..64)) {
+            let mem = Bump::new();
+            let mapped = list_of(&mem, &xs).map(&mem, mem.alloc(|_mem, x: i64| x.wrapping_mul(3)));
+            let want: Vec<i64> = xs.iter().map(|x| x.wrapping_mul(3)).collect();
+            prop_assert_eq!(to_vec(mapped), want);
+        }
+    }
+}

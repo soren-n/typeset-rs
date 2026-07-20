@@ -22,6 +22,7 @@ bumpalo.workspace = true
 [dev-dependencies]
 typeset-parser.workspace = true
 criterion.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "layout_performance"
