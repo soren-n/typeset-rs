@@ -129,13 +129,22 @@ use crate::compiler::{
 ///
 /// # Panics
 ///
-/// This function panics if compilation encounters any errors:
+/// This function panics on internal compiler errors (unexpected states during
+/// pass execution).
 ///
-/// - **Stack overflow**: When layout nesting exceeds system stack limits (typically >10,000 levels)
-/// - **Memory allocation failure**: When bump allocators cannot allocate memory
-/// - **Internal compiler errors**: Unexpected states during pass execution
+/// # Aborts
 ///
-/// For error handling without panics, use [`compile_safe()`] or [`compile_safe_with_depth()`].
+/// Deeply nested layouts exhaust the native stack, which **aborts the process**
+/// (SIGABRT) rather than panicking. This cannot be caught: `catch_unwind` does
+/// not help, because no unwinding occurs.
+///
+/// The threshold is lower than it may appear. Measured on a debug build with a
+/// 2 MB stack, compilation aborts between 200 and 300 levels of nesting; every
+/// pass recurses over the layout. Release builds and the main thread tolerate
+/// more, but the limit is a property of the stack, not of the library.
+///
+/// If layout depth is not under your control, use [`compile_safe_with_depth()`]
+/// with a limit you have verified on your own target, rather than this function.
 ///
 /// # Performance Notes
 ///
@@ -222,11 +231,13 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
 ///
 /// This function provides safe compilation with comprehensive error handling instead of panics.
 /// It uses the same 10-pass compilation pipeline as [`compile()`] but returns a [`Result`] to
-/// handle errors gracefully. The function uses a default maximum recursion depth of 10,000
-/// to prevent stack overflow on deeply nested layouts.
+/// handle errors gracefully. The function applies a default maximum nesting depth
+/// of 10,000.
 ///
-/// This is the recommended function for applications that need robust error handling,
-/// user-facing compilation, or when processing untrusted layout structures.
+/// That default is nominal, not protective: compilation exhausts the native stack
+/// and aborts well below it (around 200-300 levels on a debug build with a 2 MB
+/// stack). For untrusted input, call [`compile_safe_with_depth()`] with a limit
+/// you have measured on your own target.
 ///
 /// # Arguments
 ///
@@ -243,8 +254,9 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
 /// This function can return the following errors:
 ///
 /// - [`CompilerError::StackOverflow`] - Layout nesting exceeds the default 10,000 level limit
-/// - [`CompilerError::AllocationFailed`] - Memory allocation failed during compilation
-/// - [`CompilerError::InvalidInput`] - Internal state corruption (rare)
+///
+/// [`CompilerError::AllocationFailed`] and [`CompilerError::InvalidInput`] are
+/// never returned by this function.
 ///
 /// # Performance Notes
 ///
@@ -393,11 +405,15 @@ fn _measure_depth(layout: &Layout) -> usize {
 ///
 /// * `layout` - The input layout tree to compile. Can handle arbitrarily complex structures
 ///   within the recursion depth limit.
-/// * `max_depth` - Maximum recursion depth before stack overflow protection activates.
-///   Must be greater than 0. Common values:
-///   - **Conservative** (1,000-5,000): Safe for resource-constrained environments
-///   - **Default** (10,000): Good balance of safety and capability
-///   - **Aggressive** (20,000+): For known deep layouts with sufficient stack space
+/// * `max_depth` - Maximum layout nesting depth accepted. Must be greater than 0.
+///   Layouts deeper than this are rejected with [`CompilerError::StackOverflow`]
+///   before compilation begins.
+///
+///   Choose this below the depth at which your target actually exhausts its
+///   stack, which is lower than intuition suggests: roughly 200-300 levels on a
+///   debug build with a 2 MB stack. A limit above that threshold is accepted but
+///   protects nothing, because compilation aborts before reaching it. Measure on
+///   your own target rather than trusting a nominal figure.
 ///
 /// # Returns
 ///
@@ -408,26 +424,30 @@ fn _measure_depth(layout: &Layout) -> usize {
 ///
 /// This function can return several types of errors:
 ///
-/// - [`CompilerError::InvalidInput`] - If `max_depth` is 0 or other parameter validation fails
-/// - [`CompilerError::StackOverflow`] - If layout nesting exceeds the specified `max_depth`
-/// - [`CompilerError::AllocationFailed`] - If memory allocation fails during any compilation pass
+/// - [`CompilerError::InvalidInput`] - If `max_depth` is 0
+/// - [`CompilerError::StackOverflow`] - If layout nesting exceeds `max_depth`
+///
+/// [`CompilerError::AllocationFailed`] is never returned; bump allocation
+/// failure aborts rather than reporting an error.
 ///
 /// # Performance Notes
 ///
 /// - **Time**: O(n) where n is the number of layout nodes
 /// - **Memory**: Uses 10 temporary bump allocators during compilation
-/// - **Stack Usage**: Proportional to layout nesting depth, limited by `max_depth`
-/// - **Depth Tracking**: Minimal overhead for recursion depth counting
-/// - **Optimal Use**: When you need precise control over compilation resource usage
+/// - **Stack Usage**: Proportional to layout nesting depth
+/// - **Depth Check**: One iterative O(n) walk before compiling
+/// - **Optimal Use**: When layout depth is not under your control
 ///
-/// # Choosing Recursion Depth Limits
+/// # Choosing a Depth Limit
 ///
-/// The optimal `max_depth` depends on your use case:
+/// The limit protects only if it is below where your target exhausts its stack.
+/// Measure that first: build layouts of increasing depth until compilation
+/// aborts, then set the limit comfortably under it. On a debug build with a 2 MB
+/// stack that boundary is around 200-300 levels.
 ///
-/// - **Web Services**: 1,000-5,000 (protect against malicious input)
-/// - **Desktop Applications**: 10,000-15,000 (balance safety and capability)
-/// - **Code Generators**: 20,000+ (handle deeply nested syntax trees)
-/// - **Embedded Systems**: 500-2,000 (limited stack space)
+/// Note that the default used by [`compile_safe()`] is 10,000, which is well
+/// above that boundary and therefore nominal. Pass an explicit limit when you
+/// need real protection against untrusted input.
 ///
 /// # Examples
 ///
@@ -611,12 +631,17 @@ pub fn compile_safe_with_depth(
 ///   - **2**: Compact style, common in web development
 ///   - **4**: Standard style, widely used in many languages  
 ///   - **8**: Traditional tab width, used in system programming
-/// * `width` - Maximum line width for line breaking decisions. The renderer will attempt
-///   to keep lines within this limit while respecting the layout structure. Common values:
+/// * `width` - Maximum line width for line breaking decisions, counted in
+///   **characters**. The renderer will attempt to keep lines within this limit
+///   while respecting the layout structure. Common values:
 ///   - **40-60**: Narrow columns for documentation or mobile display
 ///   - **80**: Traditional terminal width, widely used standard
 ///   - **100-120**: Modern wide displays, good for code review
 ///   - **Unlimited**: Use very large values (e.g., 10000) to disable line wrapping
+///
+///   Width counts `char`s, not display columns. East Asian wide characters and
+///   emoji occupy two terminal columns but count as one here, so text using them
+///   renders wider than the requested width.
 ///
 /// # Returns
 ///

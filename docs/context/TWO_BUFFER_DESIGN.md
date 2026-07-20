@@ -75,9 +75,16 @@ pub fn compile_safe_with_depth(layout: Box<Layout>, max_depth: usize) -> Result<
 
 **Features:**
 - Result-based error handling
-- Configurable stack overflow protection
+- Configurable depth limit, enforced as a pre-check
 - Identical output to original `compile()` function
 - Future-ready for true two-buffer optimization
+
+**Status note:** the depth limit is enforced by measuring the layout before
+compiling, not by tracking recursion during it. Exhausting the native stack
+mid-pass aborts the process and cannot be caught, so the limit must be set below
+the depth at which that happens (roughly 200-300 levels on a debug build with a
+2 MB stack). The 10,000 default used by `compile_safe()` sits above that
+boundary and is therefore nominal. `AllocationFailed` is never constructed.
 
 ## Implementation Challenges & Solutions
 
