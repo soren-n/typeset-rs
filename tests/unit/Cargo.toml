@@ -4,6 +4,6 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-pest = "2.7.9"
-pest_derive = "2.7.9"
-typeset = { version = "3.1.1", path = "../../typeset" }
+pest = "2.8"
+pest_derive = "2.8"
+typeset = { path = "../../typeset" }

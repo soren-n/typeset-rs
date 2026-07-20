@@ -23,10 +23,10 @@ unsafe_code = "deny"
 all = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
-bumpalo = "3.19"
+bumpalo = "3.20"
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "2.0", features = ["full"] }
+syn = { version = "3.0", features = ["full"] }
 typeset = { version = "3.1.4", path = "typeset" }
 typeset-parser = { version = "3.1.4", path = "typeset-parser" }
 criterion = { version = "0.8", features = ["html_reports"] }
