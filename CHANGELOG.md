@@ -1,3 +1,16 @@
+## [3.1.6](https://github.com/soren-n/typeset-rs/compare/v3.1.5...v3.1.6) (2026-07-20)
+
+
+### Bug Fixes
+
+* correct avl remove and get_member; add proptest coverage ([024b1a0](https://github.com/soren-n/typeset-rs/commit/024b1a0ece852fe0d7777717f231e3d0e4bde12a))
+* produce in-order output from avl::to_list ([ffd634e](https://github.com/soren-n/typeset-rs/commit/ffd634e33be25a6d88b539785ddf4e2344f258c0))
+
+
+### Performance Improvements
+
+* drop redundant identity fold over Map::values in structurize ([653941d](https://github.com/soren-n/typeset-rs/commit/653941d6ce989c5d248d77ae20e9a03016a192dd))
+
 ## [3.1.5](https://github.com/soren-n/typeset-rs/compare/v3.1.4...v3.1.5) (2026-07-20)
 
 
