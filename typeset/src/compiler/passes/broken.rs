@@ -56,33 +56,33 @@ pub fn broken<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Edsl<'b> {
                     (false, _text(mem, data1))
                 }
                 Layout::Fix(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1.clone());
+                    let (broken, layout2) = _visit(mem, layout1);
                     (broken, _fix(mem, layout2))
                 }
                 Layout::Grp(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1.clone());
+                    let (broken, layout2) = _visit(mem, layout1);
                     (broken, _grp(mem, layout2))
                 }
                 Layout::Seq(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1.clone());
+                    let (broken, layout2) = _visit(mem, layout1);
                     (broken, _seq(mem, broken, layout2))
                 }
                 Layout::Nest(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1.clone());
+                    let (broken, layout2) = _visit(mem, layout1);
                     (broken, _nest(mem, layout2))
                 }
                 Layout::Pack(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1.clone());
+                    let (broken, layout2) = _visit(mem, layout1);
                     (broken, _pack(mem, layout2))
                 }
                 Layout::Line(left, right) => {
-                    let (_l_broken, left1) = _visit(mem, left.clone());
-                    let (_r_broken, right1) = _visit(mem, right.clone());
+                    let (_l_broken, left1) = _visit(mem, left);
+                    let (_r_broken, right1) = _visit(mem, right);
                     (true, _line(mem, left1, right1))
                 }
                 Layout::Comp(left, right, attr) => {
-                    let (l_broken, left1) = _visit(mem, left.clone());
-                    let (r_broken, right1) = _visit(mem, right.clone());
+                    let (l_broken, left1) = _visit(mem, left);
+                    let (r_broken, right1) = _visit(mem, right);
                     let broken = l_broken || r_broken;
                     (broken, _comp(mem, left1, right1, attr))
                 }
