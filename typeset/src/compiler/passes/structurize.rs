@@ -329,13 +329,9 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                     let (nodes1, pads1, props1) =
                         _visit_obj(mem, obj, 0, scope, nodes, pads, props);
                     let nodes2 = nodes1(mem, _list::nil(mem));
-                    let props2 = props1.values(mem).fold(
-                        mem,
-                        _list::nil(mem),
-                        mem.alloc(|mem, item: Property<(u64, Option<u64>)>, items| {
-                            _list::cons(mem, item, items)
-                        }),
-                    );
+                    // Map::values already yields the properties in key order;
+                    // the reference passes it straight to _transpose.
+                    let props2 = props1.values(mem);
                     _transpose(mem, nodes2, props2);
                     let doc2 = _visit_doc(mem, doc1);
                     _break(mem, nodes2, pads1(mem, _list::nil(mem)), doc2)
