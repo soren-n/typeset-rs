@@ -20,9 +20,6 @@ jobs:
           - rust: stable
             check_fmt: true
             check_clippy: true
-          - rust: nightly
-            check_fmt: false
-            check_clippy: false
           - rust: "1.89.0"
             check_fmt: false
             check_clippy: false
