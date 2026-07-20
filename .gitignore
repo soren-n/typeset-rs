@@ -25,3 +25,5 @@ Cargo.lock
 
 # Claude Code
 .claude/
+# proptest saves failing-case seeds here; regenerated locally as needed
+proptest-regressions/
