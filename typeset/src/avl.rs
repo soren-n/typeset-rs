@@ -247,7 +247,7 @@ pub fn insert<'b, 'a: 'b, T: Copy + Clone + Debug>(
                         mem,
                         inserted,
                         mem.alloc(move |mem, right1| {
-                            let height1 = max(get_height(right) + 1, *height);
+                            let height1 = max(get_height(right1) + 1, *height);
                             _local_rebalance(
                                 mem,
                                 pos,
@@ -629,4 +629,157 @@ pub fn from_list<'b, 'a: 'b, T: Copy + Clone + Debug>(
         items,
         mem.alloc(|_, _, _, result| result),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::order::total;
+
+    /// Recompute height from the structure, ignoring the stored value.
+    fn computed_height<T: Copy + Clone + Debug>(tree: &Avl<T>) -> u64 {
+        match tree {
+            Avl::Null => 0,
+            Avl::Node(_, _, _, left, right) => {
+                1 + max(computed_height(left), computed_height(right))
+            }
+        }
+    }
+
+    fn computed_count<T: Copy + Clone + Debug>(tree: &Avl<T>) -> u64 {
+        match tree {
+            Avl::Null => 0,
+            Avl::Node(_, _, _, left, right) => 1 + computed_count(left) + computed_count(right),
+        }
+    }
+
+    /// Every node's stored height must equal its structural height.
+    fn check_heights<T: Copy + Clone + Debug>(tree: &Avl<T>) -> Result<(), String> {
+        match tree {
+            Avl::Null => Ok(()),
+            Avl::Node(_, height, data, left, right) => {
+                let expected = computed_height(tree);
+                if *height != expected {
+                    return Err(format!(
+                        "node {data:?}: stored height {height} but structural height {expected}"
+                    ));
+                }
+                check_heights(left)?;
+                check_heights(right)
+            }
+        }
+    }
+
+    /// AVL balance: subtree heights differ by at most one.
+    fn check_balance<T: Copy + Clone + Debug>(tree: &Avl<T>) -> Result<(), String> {
+        match tree {
+            Avl::Null => Ok(()),
+            Avl::Node(_, _, data, left, right) => {
+                let l = computed_height(left) as i64;
+                let r = computed_height(right) as i64;
+                if (l - r).abs() > 1 {
+                    return Err(format!("node {data:?}: balance factor {}", l - r));
+                }
+                check_balance(left)?;
+                check_balance(right)
+            }
+        }
+    }
+
+    fn check_counts<T: Copy + Clone + Debug>(tree: &Avl<T>) -> Result<(), String> {
+        match tree {
+            Avl::Null => Ok(()),
+            Avl::Node(count, _, data, left, right) => {
+                let expected = computed_count(tree);
+                if *count != expected {
+                    return Err(format!(
+                        "node {data:?}: stored count {count} but actual {expected}"
+                    ));
+                }
+                check_counts(left)?;
+                check_counts(right)
+            }
+        }
+    }
+
+    fn in_order<'a, T: Copy + Clone + Debug>(tree: &'a Avl<'a, T>, out: &mut Vec<T>) {
+        if let Avl::Node(_, _, data, left, right) = tree {
+            in_order(left, out);
+            out.push(*data);
+            in_order(right, out);
+        }
+    }
+
+    fn check_all(tree: &Avl<u64>, label: &str) {
+        if let Err(e) = check_heights(tree) {
+            panic!("{label}: height invariant violated: {e}");
+        }
+        if let Err(e) = check_balance(tree) {
+            panic!("{label}: balance invariant violated: {e}");
+        }
+        if let Err(e) = check_counts(tree) {
+            panic!("{label}: count invariant violated: {e}");
+        }
+        let mut items = Vec::new();
+        in_order(tree, &mut items);
+        let mut sorted = items.clone();
+        sorted.sort_unstable();
+        assert_eq!(items, sorted, "{label}: in-order traversal not sorted");
+    }
+
+    fn build<'a>(mem: &'a Bump, keys: &[u64]) -> &'a Avl<'a, u64> {
+        let mut tree = null(mem);
+        for k in keys {
+            tree = insert(mem, &total, *k, tree);
+        }
+        tree
+    }
+
+    #[test]
+    fn ascending_inserts_preserve_invariants() {
+        let mem = Bump::new();
+        for n in 1..=64u64 {
+            let keys: Vec<u64> = (0..n).collect();
+            check_all(build(&mem, &keys), &format!("ascending n={n}"));
+        }
+    }
+
+    #[test]
+    fn descending_inserts_preserve_invariants() {
+        let mem = Bump::new();
+        for n in 1..=64u64 {
+            let keys: Vec<u64> = (0..n).rev().collect();
+            check_all(build(&mem, &keys), &format!("descending n={n}"));
+        }
+    }
+
+    /// Deterministic pseudo-random orders, so failures reproduce exactly.
+    #[test]
+    fn shuffled_inserts_preserve_invariants() {
+        let mem = Bump::new();
+        for seed in 0..32u64 {
+            let mut keys: Vec<u64> = (0..64).collect();
+            // Fisher-Yates driven by a small LCG.
+            let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            for i in (1..keys.len()).rev() {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let j = (state >> 33) as usize % (i + 1);
+                keys.swap(i, j);
+            }
+            check_all(build(&mem, &keys), &format!("shuffled seed={seed}"));
+        }
+    }
+
+    #[test]
+    fn all_inserted_keys_are_findable() {
+        let mem = Bump::new();
+        let keys: Vec<u64> = (0..128).collect();
+        let tree = build(&mem, &keys);
+        for k in &keys {
+            assert!(is_member(&total, *k, tree), "key {k} missing after insert");
+        }
+        assert!(!is_member(&total, 999, tree), "absent key reported present");
+    }
 }
