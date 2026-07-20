@@ -514,9 +514,11 @@ pub fn to_list<'b, 'a: 'b, T: Copy + Clone + Debug>(
         match tree {
             Avl::Null => result,
             Avl::Node(_, _, data, left, right) => {
-                let result1 = cons(mem, *data, result);
-                let result2 = _visit(mem, left, result1);
-                _visit(mem, right, result2)
+                // The list is built by prepending, so the traversal runs in
+                // reverse in-order: right subtree, then this node, then left.
+                let result1 = _visit(mem, right, result);
+                let result2 = cons(mem, *data, result1);
+                _visit(mem, left, result2)
             }
         }
     }
@@ -710,6 +712,16 @@ mod tests {
         }
     }
 
+    fn to_vec<'a, T: Copy + Clone + Debug>(list: &'a List<'a, T>) -> Vec<T> {
+        let mut out = Vec::new();
+        let mut cur = list;
+        while let List::Cons(_, item, rest) = cur {
+            out.push(*item);
+            cur = rest;
+        }
+        out
+    }
+
     fn check_all(tree: &Avl<u64>, label: &str) {
         if let Err(e) = check_heights(tree) {
             panic!("{label}: height invariant violated: {e}");
@@ -725,6 +737,15 @@ mod tests {
         let mut sorted = items.clone();
         sorted.sort_unstable();
         assert_eq!(items, sorted, "{label}: in-order traversal not sorted");
+        // to_list is what Map::values (and therefore the structurize pass)
+        // relies on for ordering, so assert it against the direct traversal
+        // rather than only checking the tree shape.
+        let mem = Bump::new();
+        assert_eq!(
+            to_vec(to_list(&mem, tree)),
+            items,
+            "{label}: to_list does not match in-order traversal"
+        );
     }
 
     fn build<'a>(mem: &'a Bump, keys: &[u64]) -> &'a Avl<'a, u64> {

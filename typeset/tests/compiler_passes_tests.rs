@@ -264,3 +264,37 @@ fn test_edge_cases() {
     let output = render(doc, 2, 80);
     assert_eq!(output, "");
 }
+
+/// A `seq` nested directly inside a `grp` must still coordinate every
+/// composition in the sequence: if one breaks, all break.
+///
+/// This regressed because `avl::to_list` did not produce in-order output, so
+/// `Map::values` handed the structurize pass the grp/seq properties in reverse
+/// index order and the rebuilt tree came out as `Seq(Grp(..))` instead of
+/// `Grp(Seq(..))`. The renderer resets the break state at a `Grp`, so the
+/// sequence lost its decision and broke only partially.
+#[test]
+fn test_seq_inside_grp_breaks_all_or_nothing() {
+    let layout = grp(seq(comp(
+        comp(text("a".to_string()), text("b".to_string()), true, false),
+        text("c".to_string()),
+        true,
+        false,
+    )));
+    let output = render(compile(layout), 2, 3);
+    assert_eq!(output, "a\nb\nc", "seq inside grp broke only partially");
+}
+
+/// The inverse nesting has always been correct and must stay that way: a `grp`
+/// inside a `seq` still provides its own fit scope, so "a b" stays joined.
+#[test]
+fn test_grp_inside_seq_keeps_its_own_fit_scope() {
+    let layout = seq(grp(comp(
+        comp(text("a".to_string()), text("b".to_string()), true, false),
+        text("c".to_string()),
+        true,
+        false,
+    )));
+    let output = render(compile(layout), 2, 3);
+    assert_eq!(output, "a b\nc", "grp inside seq lost its fit scope");
+}

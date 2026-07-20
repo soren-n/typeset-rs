@@ -1,4 +1,10 @@
 (executable
  (public_name ref_impl)
  (name main)
+ (modules main EDSL Word)
  (libraries typeset qcheck))
+
+(executable
+ (name oracle)
+ (modules oracle)
+ (libraries typeset))

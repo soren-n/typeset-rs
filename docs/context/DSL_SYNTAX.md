@@ -31,14 +31,6 @@ The typeset-parser crate provides a procedural macro that parses layout DSL synt
 - `grp(layout)`: Group breaking - all elements break together or not at all
 - `seq(layout)`: Sequential breaking - if any element breaks, all break
 
-> **Known bug**: a `seq` directly inside a `grp` is silently dropped, so
-> `grp(seq(x))` renders as if only `grp(x)` had been written and its
-> compositions break independently rather than all together. `seq(x)` and
-> `seq(grp(x))` are unaffected. The compiler passes invert the nesting to
-> `Seq(Grp(x))` during `structurize`, after which the renderer's group handling
-> resets the sequence's breaking decision. Tracked as a divergence from the
-> OCaml reference implementation.
-
 ### Indentation Constructors
 - `nest(n, layout)`: Increase indentation by `n` spaces for nested content
 - `pack(layout)`: Align content to the column position of the first literal
