@@ -350,6 +350,35 @@ pub fn compile_safe(layout: Box<Layout>) -> Result<Box<Doc>, CompilerError> {
     compile_safe_with_depth(layout, 10000)
 }
 
+/// Maximum nesting depth of a layout tree.
+///
+/// Walks iteratively with an explicit stack: a recursive walk would overflow on
+/// exactly the deep inputs this exists to reject.
+fn _measure_depth(layout: &Layout) -> usize {
+    let mut deepest = 0usize;
+    let mut stack: Vec<(&Layout, usize)> = vec![(layout, 1)];
+    while let Some((node, depth)) = stack.pop() {
+        deepest = deepest.max(depth);
+        match node {
+            Layout::Null | Layout::Text(_) => {}
+            Layout::Fix(inner)
+            | Layout::Grp(inner)
+            | Layout::Seq(inner)
+            | Layout::Nest(inner)
+            | Layout::Pack(inner) => stack.push((inner, depth + 1)),
+            Layout::Line(left, right) => {
+                stack.push((left, depth + 1));
+                stack.push((right, depth + 1));
+            }
+            Layout::Comp(left, right, _) => {
+                stack.push((left, depth + 1));
+                stack.push((right, depth + 1));
+            }
+        }
+    }
+    deepest
+}
+
 /// Compiles a layout with custom recursion depth limit and error handling (configurable safe path)
 ///
 /// This function provides the most flexible compilation approach, allowing fine-grained control
@@ -514,6 +543,15 @@ pub fn compile_safe_with_depth(
         return Err(CompilerError::InvalidInput(
             "max_depth must be greater than 0".to_string(),
         ));
+    }
+
+    // Reject over-deep layouts before compiling. Every pass below recurses over
+    // the layout, so exceeding the native stack aborts the process rather than
+    // unwinding — catch_unwind cannot recover from it. Measuring first is the
+    // only way to turn that into a returnable error.
+    let depth = _measure_depth(&layout);
+    if depth > max_depth {
+        return Err(CompilerError::StackOverflow { depth, max_depth });
     }
 
     use bumpalo::Bump;
