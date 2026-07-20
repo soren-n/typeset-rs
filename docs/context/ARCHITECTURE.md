@@ -20,6 +20,20 @@ This is a Rust workspace containing two main crates:
 - `avl.rs`, `list.rs`, `map.rs`: Persistent data structures for layout processing
 - `order.rs`, `util.rs`: Supporting utilities
 
+### Upstream references
+
+Both the compiler and its data-structure layer are ports, and the originals are
+the ground truth when behaviour diverges. If the OCaml packages are installed
+(see TESTING.md) the sources sit at:
+
+- `~/.opam/default/lib/typeset/Typeset.ml` — the compiler passes and renderer
+- `~/.opam/default/.opam-switch/sources/cps_toolbox.0.3/lib/{Avl,Map,List}.ml` —
+  the originals for `avl.rs`, `map.rs`, `list.rs`
+
+Ordering matters in the data-structure layer: `structurize` feeds `Map::values`
+straight into its graph construction, so the in-order guarantee of
+`avl::to_list` is load-bearing for grp/seq nesting, not just a convenience.
+
 ### typeset-parser crate (`typeset-parser/src/`)
 
 - `lib.rs`: Procedural macro implementation for parsing layout DSL syntax

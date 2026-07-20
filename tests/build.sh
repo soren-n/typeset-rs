@@ -8,4 +8,5 @@ mkdir _build
 (cd tester && dune build)
 (cd unit && cargo build)
 cp tester/_build/default/bin/main.exe _build/tester
+cp tester/_build/default/bin/oracle.exe _build/oracle
 cp unit/target/debug/unit _build/unit

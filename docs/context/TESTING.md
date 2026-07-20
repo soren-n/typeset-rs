@@ -32,6 +32,36 @@ The project uses a comprehensive dual-language testing approach combining Rust u
 - Property-based testing using QCheck framework
 - Ensures behavioral compatibility
 
+**Known coverage gap**: the QCheck generator picks constructors close to
+uniformly, so it almost never produces the stacked `grp`/`seq` nestings where
+breaking decisions actually diverge. The `grp(seq(x))` bug fixed in `to_list`
+survived 15 consecutive clean runs of this suite. Passing runs here are not
+evidence that breaking semantics are correct — use the differential tools below
+for that.
+
+### 4. Differential Tools
+
+**Location**: `tests/compare.sh`, `tests/fuzz.py`, `tests/tester/bin/oracle.ml`
+
+`oracle.ml` parses the same DSL grammar as `tests/unit` (see
+`tests/unit/src/layout.pest`) and renders it through the OCaml reference, so a
+single expression can be compared directly instead of waiting for the generator
+to stumble onto it. Both wrappers expect to run from `tests/` after `./build.sh`.
+
+```bash
+cd tests
+./compare.sh 'grp (seq ("a" + ("b" + "c")))' 2 3   # one expression: expr, tab, width
+python3 fuzz.py 2000 7                              # iterations, seed
+```
+
+`fuzz.py` biases generation toward stacked `grp`/`seq` and renders at narrow
+widths, which is what makes breaking divergences show up. It exits non-zero and
+prints both renderings on the first mismatches.
+
+Both the reference and Rust binaries take optional `tab` and `width` arguments
+(defaulting to 2 and 80), so a case can be minimized by shrinking the width
+rather than padding the input with long strings.
+
 ## Running Tests
 
 ### Complete Test Suite
@@ -59,7 +89,7 @@ cargo bench -p typeset
 
 ### Build System
 - `tests/build.sh`: Compiles both Rust unit tests and OCaml tester
-- Output executables placed in `tests/_build/`
+- Output executables placed in `tests/_build/` (`tester`, `oracle`, `unit`)
 - Does a clean rebuild each time (`dune clean` + `cargo clean`)
 
 ### OCaml Setup Requirements
