@@ -2,7 +2,9 @@
 
 ## Overview
 
-The project uses comprehensive pre-commit hooks to enforce code quality and ensure all tests pass before commits are allowed. This prevents broken code from entering the repository and maintains consistency across the codebase.
+The project uses a pre-commit hook to enforce code quality and ensure all tests pass before commits are allowed. This prevents broken code from entering the repository and maintains consistency across the codebase.
+
+The hook is not active in a fresh clone — run `./scripts/install-hooks.sh` once to enable it (see [Hook Installation](#hook-installation)).
 
 ## Configured Hooks
 
@@ -29,8 +31,9 @@ The project uses comprehensive pre-commit hooks to enforce code quality and ensu
 
 5. **OCaml Property-Based Testing**
    - **Requirement**: All OCaml tests must pass (blocking)
-   - **Auto-setup**: Installs missing dependencies automatically
+   - **Setup**: dependencies must be installed manually (see Prerequisites)
    - **Dependencies**: `qcheck`, `typeset` OCaml packages
+   - **Skip**: set `SKIP_OCAML=1` to bypass this step only
 
 ## Prerequisites
 
@@ -39,11 +42,15 @@ The project uses comprehensive pre-commit hooks to enforce code quality and ensu
 - **OCaml**: OCaml compiler and opam package manager
 - **Git**: Version control system with hooks support
 
-### OCaml Dependencies (Auto-Installed)
-The hooks automatically install missing OCaml packages:
+### OCaml Dependencies (Manual)
+Install the OCaml packages the property tests need:
 ```bash
 opam install qcheck typeset
 ```
+
+The hook does not install these for you. If `dune` is missing, or the tester
+fails to build, the hook prints a warning and skips the OCaml suite rather than
+blocking the commit — every other check still runs and still blocks.
 
 If opam or OCaml are not installed, you'll need to install them manually:
 ```bash
@@ -139,11 +146,16 @@ git commit -m "fix: resolve formatting issues"
 ```
 
 ### Hook Installation
-If hooks aren't running, ensure they're properly installed:
+Hooks live in the tracked `.githooks/` directory and are activated by pointing
+git at it. Run once after cloning:
 ```bash
-# Check if pre-commit hook exists and is executable
-ls -la .git/hooks/pre-commit
-
-# If missing, hooks may need to be reinstalled
-# (This is typically handled by the repository setup)
+./scripts/install-hooks.sh
 ```
+
+Verify it took effect:
+```bash
+git config core.hooksPath   # should print: .githooks
+```
+
+To bypass hooks for a single commit, use `git commit --no-verify`. To uninstall,
+run `git config --unset core.hooksPath`.

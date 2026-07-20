@@ -60,19 +60,18 @@ cargo bench -p typeset
 ### Build System
 - `tests/build.sh`: Compiles both Rust unit tests and OCaml tester
 - Output executables placed in `tests/_build/`
-- Handles dependency installation for OCaml components
+- Does a clean rebuild each time (`dune clean` + `cargo clean`)
 
 ### OCaml Setup Requirements
 - **System**: OCaml and opam must be installed
-- **Packages**: Auto-installed by git hooks if missing
+- **Packages**: install manually before the first run:
+  ```bash
+  opam install qcheck typeset
+  ```
   - `qcheck`: Property-based testing framework
   - `typeset`: Reference implementation for comparison
 
-### Git Hook Integration
-Pre-commit hooks automatically run the complete test suite:
-- Installs missing OCaml dependencies if needed
-- Runs both Rust and OCaml tests
-- Blocks commits if any tests fail
+Without these, `tests/build.sh` fails with `Library "qcheck" not found`.
 
 ## Test Development Guidelines
 
@@ -109,7 +108,7 @@ The OCaml tests validate properties like:
 Tests run automatically on:
 - Every commit (via git hooks)
 - Pull requests (via GitHub Actions)  
-- Multiple Rust versions (stable, nightly)
+- Multiple Rust versions (stable, MSRV 1.89.0)
 - Security auditing with additional tools
 
 All tests must pass before code can be merged to main branch.

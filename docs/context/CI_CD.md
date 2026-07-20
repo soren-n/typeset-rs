@@ -16,7 +16,7 @@ The project uses automated GitHub Actions workflows for continuous integration, 
 - **Testing**: Both Rust (`cargo test`) and OCaml property-based tests
 
 **Matrix Testing**:
-- Rust stable and nightly versions
+- Rust stable and MSRV (1.89.0)
 - Multiple OS environments (if configured)
 
 **Security & Compliance**:
@@ -105,12 +105,14 @@ BREAKING CHANGE: The compile function now requires a BumpAllocator parameter
    - Crate publishing (if version changed)
 
 ### Git Hooks (Local Development)
-Pre-commit hooks enforce quality before CI:
+A pre-commit hook enforces quality before CI:
 - Code formatting check
 - Clippy linting  
 - Type checking
 - Complete test suite (including OCaml tests)
-- Auto-installs missing OCaml dependencies
+
+Enable it once per clone with `./scripts/install-hooks.sh`. OCaml dependencies
+are not installed automatically — see [GIT_HOOKS.md](GIT_HOOKS.md).
 
 **Quick fixes**:
 ```bash

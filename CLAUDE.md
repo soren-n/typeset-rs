@@ -23,7 +23,7 @@ cargo run --example <name> -p typeset-parser
 ```
 
 ### Pre-commit Requirements
-All commits must pass: formatting, linting, type checking, Rust tests, and OCaml property-based tests. Git hooks enforce these automatically.
+All commits must pass: formatting, linting, type checking, Rust tests, and OCaml property-based tests. A git hook enforces these — run `./scripts/install-hooks.sh` once per clone to enable it.
 
 ## Detailed Context
 
