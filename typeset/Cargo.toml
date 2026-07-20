@@ -10,7 +10,7 @@ repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset"
 documentation = "https://docs.rs/typeset/latest/typeset/"
 keywords = ["dsl", "pretty", "printer"]
 categories.workspace = true
-license-file.workspace = true
+license.workspace = true
 readme = "README.md"
 
 [lints]
