@@ -47,10 +47,13 @@ let rec _process_output items log =
   | item :: items1 ->
     _process_output items1 (item :: log)
 
+(* Must close with Unix.close_process_in, not In_channel.close: the latter
+   closes the descriptor without reaping the child, so one zombie accumulates
+   per generated case until fork fails with EAGAIN. *)
 let run cmd =
   let channel = Unix.open_process_in cmd in
   let result = In_channel.input_lines channel in
-  In_channel.close channel;
+  ignore (Unix.close_process_in channel);
   _process_output result []
 
 let rust_impl layout_dsl =
@@ -84,7 +87,7 @@ let rust_ocaml_identity =
         false
         end)
 
-let _ =
-  QCheck_runner.run_tests
-  [ rust_ocaml_identity
-  ]
+(* Propagate the runner's status: discarding it made the executable exit 0 even
+   when a property failed, so no caller could detect a failure. *)
+let () =
+  exit (QCheck_runner.run_tests [ rust_ocaml_identity ])
