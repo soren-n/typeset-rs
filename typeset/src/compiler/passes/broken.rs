@@ -3,205 +3,311 @@
 //! This pass transforms Layout into Edsl by tracking and collapsing
 //! broken sequences. It identifies compositions that will need to be
 //! broken into newlines and marks them appropriately.
+//!
+//! Both stages are defunctionalized: rather than recursing on the native
+//! stack (which aborts the process — not a catchable panic — at a few
+//! hundred nesting levels), each stage walks the tree with an explicit
+//! heap-allocated frame stack and a descend/ascend trampoline.
 
 use crate::compiler::types::{Attr, Broken, Edsl, Layout};
-use crate::util::compose;
 use bumpalo::Bump;
 
 /// Transforms Layout into Edsl by collapsing broken sequences
 pub fn broken<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Edsl<'b> {
-    fn _mark<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Broken<'b> {
-        #[allow(clippy::boxed_local)]
-        fn _visit<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> (bool, &'b Broken<'b>) {
-            fn _null<'a>(mem: &'a Bump) -> &'a Broken<'a> {
-                mem.alloc(Broken::Null)
+    let layout1 = _mark(mem, layout);
+    _remove(mem, layout1, false)
+}
+
+/// Frames for the `_mark` fold (Layout → (bool, Broken), bottom-up).
+///
+/// The result carried on ascent is `(bool, &Broken)`: the boolean records
+/// whether the subtree contains a hard line break. Unary frames rebuild the
+/// wrapper; `LineLeft`/`CompLeft` still hold the un-visited right child.
+enum MarkFrame<'b> {
+    Fix,
+    Grp,
+    Seq,
+    Nest,
+    Pack,
+    LineLeft(Box<Layout>),
+    LineRight(&'b Broken<'b>),
+    CompLeft(Box<Layout>, Attr),
+    CompRight(bool, &'b Broken<'b>, Attr),
+}
+
+/// Marks broken sequences: folds Layout into Broken, propagating a "contains a
+/// line break" flag up so `Seq` nodes can record whether they must break.
+fn _mark<'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Broken<'b> {
+    let mut stack: Vec<MarkFrame<'b>> = Vec::new();
+    let mut cur = layout;
+    'descend: loop {
+        // Descend `cur` until we reach a leaf, producing an ascending value.
+        let mut val: (bool, &'b Broken<'b>) = match *cur {
+            Layout::Null => (false, mem.alloc(Broken::Null)),
+            Layout::Text(data) => {
+                let data1 = mem.alloc_str(data.as_str());
+                (false, mem.alloc(Broken::Text(data1)))
             }
-            fn _text<'a>(mem: &'a Bump, data: &'a str) -> &'a Broken<'a> {
-                mem.alloc(Broken::Text(data))
+            Layout::Fix(layout1) => {
+                stack.push(MarkFrame::Fix);
+                cur = layout1;
+                continue 'descend;
             }
-            fn _fix<'a>(mem: &'a Bump, layout: &'a Broken<'a>) -> &'a Broken<'a> {
-                mem.alloc(Broken::Fix(layout))
+            Layout::Grp(layout1) => {
+                stack.push(MarkFrame::Grp);
+                cur = layout1;
+                continue 'descend;
             }
-            fn _grp<'a>(mem: &'a Bump, layout: &'a Broken<'a>) -> &'a Broken<'a> {
-                mem.alloc(Broken::Grp(layout))
+            Layout::Seq(layout1) => {
+                stack.push(MarkFrame::Seq);
+                cur = layout1;
+                continue 'descend;
             }
-            fn _seq<'a>(mem: &'a Bump, broken: bool, layout: &'a Broken<'a>) -> &'a Broken<'a> {
-                mem.alloc(Broken::Seq(broken, layout))
+            Layout::Nest(layout1) => {
+                stack.push(MarkFrame::Nest);
+                cur = layout1;
+                continue 'descend;
             }
-            fn _nest<'a>(mem: &'a Bump, layout: &'a Broken<'a>) -> &'a Broken<'a> {
-                mem.alloc(Broken::Nest(layout))
+            Layout::Pack(layout1) => {
+                stack.push(MarkFrame::Pack);
+                cur = layout1;
+                continue 'descend;
             }
-            fn _pack<'a>(mem: &'a Bump, layout: &'a Broken<'a>) -> &'a Broken<'a> {
-                mem.alloc(Broken::Pack(layout))
+            Layout::Line(left, right) => {
+                stack.push(MarkFrame::LineLeft(right));
+                cur = left;
+                continue 'descend;
             }
-            fn _line<'a>(
-                mem: &'a Bump,
-                left: &'a Broken<'a>,
-                right: &'a Broken<'a>,
-            ) -> &'a Broken<'a> {
-                mem.alloc(Broken::Line(left, right))
+            Layout::Comp(left, right, attr) => {
+                stack.push(MarkFrame::CompLeft(right, attr));
+                cur = left;
+                continue 'descend;
             }
-            fn _comp<'a>(
-                mem: &'a Bump,
-                left: &'a Broken<'a>,
-                right: &'a Broken<'a>,
-                attr: Attr,
-            ) -> &'a Broken<'a> {
-                mem.alloc(Broken::Comp(left, right, attr))
-            }
-            match *layout {
-                Layout::Null => (false, _null(mem)),
-                Layout::Text(data) => {
-                    let data1 = mem.alloc_str(data.as_str());
-                    (false, _text(mem, data1))
+        };
+        // Ascend: apply pending frames to `val` until we must descend again.
+        loop {
+            match stack.pop() {
+                None => return val.1,
+                Some(MarkFrame::Fix) => val = (val.0, mem.alloc(Broken::Fix(val.1))),
+                Some(MarkFrame::Grp) => val = (val.0, mem.alloc(Broken::Grp(val.1))),
+                Some(MarkFrame::Seq) => val = (val.0, mem.alloc(Broken::Seq(val.0, val.1))),
+                Some(MarkFrame::Nest) => val = (val.0, mem.alloc(Broken::Nest(val.1))),
+                Some(MarkFrame::Pack) => val = (val.0, mem.alloc(Broken::Pack(val.1))),
+                Some(MarkFrame::LineLeft(right)) => {
+                    stack.push(MarkFrame::LineRight(val.1));
+                    cur = right;
+                    continue 'descend;
                 }
-                Layout::Fix(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1);
-                    (broken, _fix(mem, layout2))
+                Some(MarkFrame::LineRight(left1)) => {
+                    val = (true, mem.alloc(Broken::Line(left1, val.1)));
                 }
-                Layout::Grp(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1);
-                    (broken, _grp(mem, layout2))
+                Some(MarkFrame::CompLeft(right, attr)) => {
+                    stack.push(MarkFrame::CompRight(val.0, val.1, attr));
+                    cur = right;
+                    continue 'descend;
                 }
-                Layout::Seq(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1);
-                    (broken, _seq(mem, broken, layout2))
-                }
-                Layout::Nest(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1);
-                    (broken, _nest(mem, layout2))
-                }
-                Layout::Pack(layout1) => {
-                    let (broken, layout2) = _visit(mem, layout1);
-                    (broken, _pack(mem, layout2))
-                }
-                Layout::Line(left, right) => {
-                    let (_l_broken, left1) = _visit(mem, left);
-                    let (_r_broken, right1) = _visit(mem, right);
-                    (true, _line(mem, left1, right1))
-                }
-                Layout::Comp(left, right, attr) => {
-                    let (l_broken, left1) = _visit(mem, left);
-                    let (r_broken, right1) = _visit(mem, right);
-                    let broken = l_broken || r_broken;
-                    (broken, _comp(mem, left1, right1, attr))
+                Some(MarkFrame::CompRight(l_broken, left1, attr)) => {
+                    val = (
+                        l_broken || val.0,
+                        mem.alloc(Broken::Comp(left1, val.1, attr)),
+                    );
                 }
             }
         }
-        let (_break, layout) = _visit(mem, layout);
+    }
+}
+
+/// Frames for the `_remove` pass (Broken → Edsl, CPS).
+///
+/// This is the defunctionalized form of the continuation chain the original
+/// built with `compose`. The value carried on ascent is `&Edsl`. `LineLeft`
+/// and `CompLeft` also carry the `broken` flag so the right subtree descends
+/// with the same flag the parent received.
+enum RemoveFrame<'b> {
+    Fix,
+    Grp,
+    Seq,
+    Nest,
+    Pack,
+    LineLeft {
+        right: &'b Broken<'b>,
+        broken: bool,
+    },
+    LineRight {
+        left1: &'b Edsl<'b>,
+    },
+    CompLeft {
+        right: &'b Broken<'b>,
+        broken: bool,
+        attr: Attr,
+    },
+    CompRight {
+        left1: &'b Edsl<'b>,
+        broken: bool,
+        attr: Attr,
+    },
+}
+
+/// Removes broken sequences: rewrites `Broken` into `Edsl`, turning broken
+/// compositions into hard lines and dropping the `Seq` wrapper where the
+/// sequence has already broken.
+fn _remove<'b>(mem: &'b Bump, layout: &'b Broken<'b>, broken: bool) -> &'b Edsl<'b> {
+    let mut stack: Vec<RemoveFrame<'b>> = Vec::new();
+    let mut cur = layout;
+    let mut brk = broken;
+    'descend: loop {
+        let mut val: &'b Edsl<'b> = match cur {
+            Broken::Null => mem.alloc(Edsl::Null),
+            Broken::Text(data) => mem.alloc(Edsl::Text(data)),
+            Broken::Fix(layout1) => {
+                stack.push(RemoveFrame::Fix);
+                cur = layout1;
+                brk = false;
+                continue 'descend;
+            }
+            Broken::Grp(layout1) => {
+                stack.push(RemoveFrame::Grp);
+                cur = layout1;
+                brk = false;
+                continue 'descend;
+            }
+            Broken::Seq(broken1, layout1) => {
+                if *broken1 {
+                    // Already broken: drop the Seq wrapper, descend broken.
+                    cur = layout1;
+                    brk = true;
+                    continue 'descend;
+                } else {
+                    stack.push(RemoveFrame::Seq);
+                    cur = layout1;
+                    brk = false;
+                    continue 'descend;
+                }
+            }
+            Broken::Nest(layout1) => {
+                stack.push(RemoveFrame::Nest);
+                cur = layout1;
+                continue 'descend;
+            }
+            Broken::Pack(layout1) => {
+                stack.push(RemoveFrame::Pack);
+                cur = layout1;
+                continue 'descend;
+            }
+            Broken::Line(left, right) => {
+                stack.push(RemoveFrame::LineLeft { right, broken: brk });
+                cur = left;
+                continue 'descend;
+            }
+            Broken::Comp(left, right, attr) => {
+                stack.push(RemoveFrame::CompLeft {
+                    right,
+                    broken: brk,
+                    attr: *attr,
+                });
+                cur = left;
+                continue 'descend;
+            }
+        };
+        loop {
+            match stack.pop() {
+                None => return val,
+                Some(RemoveFrame::Fix) => val = mem.alloc(Edsl::Fix(val)),
+                Some(RemoveFrame::Grp) => val = mem.alloc(Edsl::Grp(val)),
+                Some(RemoveFrame::Seq) => val = mem.alloc(Edsl::Seq(val)),
+                Some(RemoveFrame::Nest) => val = mem.alloc(Edsl::Nest(val)),
+                Some(RemoveFrame::Pack) => val = mem.alloc(Edsl::Pack(val)),
+                Some(RemoveFrame::LineLeft { right, broken: b }) => {
+                    stack.push(RemoveFrame::LineRight { left1: val });
+                    cur = right;
+                    brk = b;
+                    continue 'descend;
+                }
+                Some(RemoveFrame::LineRight { left1 }) => val = mem.alloc(Edsl::Line(left1, val)),
+                Some(RemoveFrame::CompLeft {
+                    right,
+                    broken: b,
+                    attr,
+                }) => {
+                    stack.push(RemoveFrame::CompRight {
+                        left1: val,
+                        broken: b,
+                        attr,
+                    });
+                    cur = right;
+                    brk = b;
+                    continue 'descend;
+                }
+                Some(RemoveFrame::CompRight {
+                    left1,
+                    broken: b,
+                    attr,
+                }) => {
+                    val = if b && !attr.fix {
+                        mem.alloc(Edsl::Line(left1, val))
+                    } else {
+                        mem.alloc(Edsl::Comp(left1, val, attr))
+                    };
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A depth that a native-stack recursion cannot survive: the recursive
+    /// version of this pass aborts (stack overflow, not a catchable panic)
+    /// around 400 nested compositions on a 2 MB stack. Reaching this depth
+    /// without aborting proves the pass runs iteratively.
+    const DEEP: usize = 50_000;
+
+    fn deep_comp(depth: usize) -> Box<Layout> {
+        let mut layout = Box::new(Layout::Text("x".to_string()));
+        for _ in 0..depth {
+            layout = Box::new(Layout::Comp(
+                layout,
+                Box::new(Layout::Text("y".to_string())),
+                Attr {
+                    pad: false,
+                    fix: false,
+                },
+            ));
+        }
         layout
     }
-    fn _remove<'b, 'a: 'b, R>(
-        mem: &'b Bump,
-        layout: &'a Broken<'a>,
-        broken: bool,
-        cont: &'b dyn Fn(&'b Bump, &'b Edsl<'b>) -> R,
-    ) -> R {
-        fn _null<'a>(mem: &'a Bump) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Null)
+
+    #[test]
+    fn broken_handles_deep_layout_without_overflow() {
+        let mem = Bump::new();
+        let edsl = broken(&mem, deep_comp(DEEP));
+        // Walk the result iteratively to confirm the whole spine was built.
+        let mut count = 0usize;
+        let mut cur = edsl;
+        while let Edsl::Comp(left, _right, _attr) = cur {
+            count += 1;
+            cur = left;
         }
-        fn _text<'a>(mem: &'a Bump, data: &'a str) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Text(data))
-        }
-        fn _fix<'a>(mem: &'a Bump, layout: &'a Edsl<'a>) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Fix(layout))
-        }
-        fn _grp<'a>(mem: &'a Bump, layout: &'a Edsl<'a>) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Grp(layout))
-        }
-        fn _seq<'a>(mem: &'a Bump, layout: &'a Edsl<'a>) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Seq(layout))
-        }
-        fn _nest<'a>(mem: &'a Bump, layout: &'a Edsl<'a>) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Nest(layout))
-        }
-        fn _pack<'a>(mem: &'a Bump, layout: &'a Edsl<'a>) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Pack(layout))
-        }
-        fn _line<'a>(mem: &'a Bump, left: &'a Edsl<'a>, right: &'a Edsl<'a>) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Line(left, right))
-        }
-        fn _comp<'a>(
-            mem: &'a Bump,
-            left: &'a Edsl<'a>,
-            right: &'a Edsl<'a>,
-            attr: Attr,
-        ) -> &'a Edsl<'a> {
-            mem.alloc(Edsl::Comp(left, right, attr))
-        }
-        match layout {
-            Broken::Null => cont(mem, _null(mem)),
-            Broken::Text(data) => cont(mem, _text(mem, data)),
-            Broken::Fix(layout1) => _remove(
-                mem,
-                layout1,
-                false,
-                compose(mem, cont, mem.alloc(|mem, layout1| _fix(mem, layout1))),
-            ),
-            Broken::Grp(layout1) => _remove(
-                mem,
-                layout1,
-                false,
-                compose(mem, cont, mem.alloc(|mem, layout1| _grp(mem, layout1))),
-            ),
-            Broken::Seq(broken, layout1) => {
-                if *broken {
-                    _remove(mem, layout1, true, cont)
-                } else {
-                    _remove(
-                        mem,
-                        layout1,
-                        false,
-                        compose(mem, cont, mem.alloc(|mem, layout2| _seq(mem, layout2))),
-                    )
-                }
-            }
-            Broken::Nest(layout1) => _remove(
-                mem,
-                layout1,
-                broken,
-                compose(mem, cont, mem.alloc(|mem, layout2| _nest(mem, layout2))),
-            ),
-            Broken::Pack(layout1) => _remove(
-                mem,
-                layout1,
-                broken,
-                compose(mem, cont, mem.alloc(|mem, layout2| _pack(mem, layout2))),
-            ),
-            Broken::Line(left, right) => _remove(
-                mem,
-                left,
-                broken,
-                mem.alloc(move |mem, left1| {
-                    _remove(
-                        mem,
-                        right,
-                        broken,
-                        mem.alloc(move |mem, right1| cont(mem, _line(mem, left1, right1))),
-                    )
-                }),
-            ),
-            Broken::Comp(left, right, attr) => _remove(
-                mem,
-                left,
-                broken,
-                mem.alloc(move |mem, left1| {
-                    _remove(
-                        mem,
-                        right,
-                        broken,
-                        mem.alloc(move |mem, right1| {
-                            if broken && !attr.fix {
-                                cont(mem, _line(mem, left1, right1))
-                            } else {
-                                cont(mem, _comp(mem, left1, right1, *attr))
-                            }
-                        }),
-                    )
-                }),
-            ),
-        }
+        assert_eq!(count, DEEP);
     }
-    let layout1 = _mark(mem, layout);
-    _remove(mem, layout1, false, mem.alloc(|_mem, result| result))
+
+    #[test]
+    fn broken_handles_deep_nest_without_overflow() {
+        // Nest exercises the flag-preserving descent path.
+        let mem = Bump::new();
+        let mut layout = Box::new(Layout::Text("x".to_string()));
+        for _ in 0..DEEP {
+            layout = Box::new(Layout::Nest(layout));
+        }
+        let edsl = broken(&mem, layout);
+        let mut count = 0usize;
+        let mut cur = edsl;
+        while let Edsl::Nest(inner) = cur {
+            count += 1;
+            cur = inner;
+        }
+        assert_eq!(count, DEEP);
+    }
 }
