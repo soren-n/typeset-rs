@@ -32,6 +32,15 @@ fn _make_state<'a>(mem: &'a Bump, width: usize, tab: usize) -> State<'a> {
     }
 }
 
+/// Width of a literal in columns.
+///
+/// `String::len` is the UTF-8 byte length, which over-measures any non-ASCII
+/// text and breaks lines far earlier than the requested width. Layout positions
+/// are column counts, so count characters instead.
+fn _text_width(data: &str) -> usize {
+    data.chars().count()
+}
+
 fn _inc_pos<'a>(n: usize, state: State<'a>) -> State<'a> {
     State {
         pos: state.pos + n,
@@ -93,7 +102,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
     fn _measure<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> usize {
         fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> State<'b> {
             match obj {
-                DocObj::Text(data) => _inc_pos(data.len(), state),
+                DocObj::Text(data) => _inc_pos(_text_width(data), state),
                 DocObj::Fix(fix) => _visit_fix(fix, state),
                 DocObj::Grp(obj1) => _visit_obj(mem, obj1, state),
                 DocObj::Seq(obj1) => _visit_obj(mem, obj1, state),
@@ -151,7 +160,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
         }
         fn _visit_fix<'b, 'a: 'b>(fix: &DocObjFix, state: State<'a>) -> State<'a> {
             match fix {
-                DocObjFix::Text(data) => _inc_pos(data.len(), state),
+                DocObjFix::Text(data) => _inc_pos(_text_width(data), state),
                 DocObjFix::Comp(left, right, pad) => {
                     let state1 = _visit_fix(left, state);
                     let state2 = _inc_pos(if *pad { 1 } else { 0 }, state1);
@@ -165,7 +174,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
     fn _next_comp<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> usize {
         fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> State<'b> {
             match obj {
-                DocObj::Text(data) => _inc_pos(data.len(), state),
+                DocObj::Text(data) => _inc_pos(_text_width(data), state),
                 DocObj::Fix(fix) => _visit_fix(mem, fix, state),
                 DocObj::Grp(obj1) => {
                     let head = state.head;
@@ -225,7 +234,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
         #[allow(clippy::only_used_in_recursion)]
         fn _visit_fix<'b, 'a: 'b>(_mem: &'b Bump, fix: &DocObjFix, state: State<'a>) -> State<'a> {
             match fix {
-                DocObjFix::Text(data) => _inc_pos(data.len(), state),
+                DocObjFix::Text(data) => _inc_pos(_text_width(data), state),
                 DocObjFix::Comp(left, right, pad) => {
                     let state1 = _visit_fix(_mem, left, state);
                     let state2 = _inc_pos(if *pad { 1 } else { 0 }, state1);
@@ -279,7 +288,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
     ) -> (State<'b>, String) {
         match obj {
             DocObj::Text(data) => {
-                let state1 = _inc_pos(data.len(), state);
+                let state1 = _inc_pos(_text_width(&data), state);
                 (state1, result.clone() + &data)
             }
             DocObj::Fix(fix) => _visit_fix(mem, *fix, state, result),
@@ -380,7 +389,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
     ) -> (State<'a>, String) {
         match fix {
             DocObjFix::Text(data) => {
-                let state1 = _inc_pos(data.len(), state);
+                let state1 = _inc_pos(_text_width(&data), state);
                 (state1, result.clone() + &data)
             }
             DocObjFix::Comp(left, right, pad) => {
