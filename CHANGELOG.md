@@ -1,3 +1,19 @@
+## [3.1.5](https://github.com/soren-n/typeset-rs/compare/v3.1.4...v3.1.5) (2026-07-20)
+
+
+### Bug Fixes
+
+* enforce the max_depth limit in compile_safe_with_depth ([5f30562](https://github.com/soren-n/typeset-rs/commit/5f305622d6e6a998f65e031c14d5f228ad400eb7))
+* measure text width in characters, not UTF-8 bytes ([df541a1](https://github.com/soren-n/typeset-rs/commit/df541a104eab80015895a04366bf25c1dd738eab))
+* **tests:** parse the @@ operator in the unit test grammar ([1505de2](https://github.com/soren-n/typeset-rs/commit/1505de24eb8e4e96f5dcc4801fb167b589c2c863))
+* **tests:** propagate exit code and reap children in OCaml tester ([5ad7573](https://github.com/soren-n/typeset-rs/commit/5ad75734880fc3ece9c1f3363e9267f678d01c5a))
+* use the post-insert subtree when updating AVL height ([832c538](https://github.com/soren-n/typeset-rs/commit/832c538b69562b911f703ebc5c44c64108f67832))
+
+
+### Performance Improvements
+
+* drop redundant deep clones in the broken pass ([84fb26c](https://github.com/soren-n/typeset-rs/commit/84fb26c0493e85837da9ef3600c32e888a7eeef6))
+
 ## [3.1.4](https://github.com/soren-n/typeset-rs/compare/v3.1.3...v3.1.4) (2026-05-18)
 
 
