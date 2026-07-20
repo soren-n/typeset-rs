@@ -15,6 +15,28 @@ The project uses a comprehensive dual-language testing approach combining Rust u
 - Layout constructor behavior
 - Compiler pass validation
 
+Two flavors of data-structure test live in `avl.rs`, `list.rs`, and `map.rs`:
+
+- Hand-rolled invariant tests (`check_all`) over fixed ascending / descending /
+  shuffled inputs, asserting the full AVL invariants including strict balance.
+- `proptest` property tests (in `#[cfg(test)] mod proptests`) that model each
+  structure against a std reference — `List` against `Vec`, `Map`/`Avl` against
+  `BTreeMap`/`BTreeSet` — and check every public operation. This is the
+  root-cause guard for the class of bug `to_list` was: the earlier invariant
+  tests never exercised the "complete implementation" functions against a model,
+  so a wrong-order `to_list` and a corrupting `remove` both passed unnoticed.
+
+  The adversarial proptests assert the structural contract (exact heights,
+  counts, sorted order, contents, membership) via `check_structural`, not strict
+  AVL balance: this functional-AVL port does not guarantee balance for every
+  insertion/removal order (a performance-only property; ordering and contents
+  stay correct). Strict balance is still asserted by the hand-rolled tests for
+  representative inputs. Run more cases with `PROPTEST_CASES=4096 cargo test`.
+
+**Note**: "property-based testing" in this project refers to two independent
+mechanisms — these Rust `proptest` tests over the data structures, and the
+OCaml QCheck suite (below) that validates rendering against the reference.
+
 ### 2. Rust Integration Tests  
 **Location**: `typeset/tests/` and `tests/unit/`
 

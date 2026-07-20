@@ -34,6 +34,12 @@ Ordering matters in the data-structure layer: `structurize` feeds `Map::values`
 straight into its graph construction, so the in-order guarantee of
 `avl::to_list` is load-bearing for grp/seq nesting, not just a convenience.
 
+The AVL is used only as an ordered map keyed by small integers, and only its
+in-order/lookup behaviour is relied on. It does not guarantee strict AVL balance
+for every insertion/removal order (a known limitation of this functional-AVL
+port; see `avl::check_structural`). That is performance-only — contents and
+ordering are always correct — so rendering is unaffected.
+
 ### typeset-parser crate (`typeset-parser/src/`)
 
 - `lib.rs`: Procedural macro implementation for parsing layout DSL syntax

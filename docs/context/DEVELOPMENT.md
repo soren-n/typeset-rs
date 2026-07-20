@@ -86,6 +86,9 @@ cargo check --all-targets --all-features  # Type checking
 
 ### Development Dependencies
 - `criterion`: Benchmarking framework
+- `proptest`: Property-based testing of the data structures (`avl`, `list`,
+  `map`) against std reference models. Dev-only, so it does not affect the
+  published crate's dependencies.
 - Various test utilities in dev-dependencies sections
 
 ## Project Layout Standards
