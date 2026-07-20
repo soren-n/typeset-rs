@@ -106,9 +106,13 @@ The OCaml tests validate properties like:
 ## Continuous Integration
 
 Tests run automatically on:
-- Every commit (via git hooks)
-- Pull requests (via GitHub Actions)  
+- Every commit (via git hooks, once installed with `./scripts/install-hooks.sh`)
+- Pull requests (via GitHub Actions) — Rust tests only
 - Multiple Rust versions (stable, MSRV 1.89.0)
 - Security auditing with additional tools
+
+Note: the OCaml property tests are not part of CI. They run only through the
+pre-commit hook, so a contributor without OCaml installed will never exercise
+them.
 
 All tests must pass before code can be merged to main branch.

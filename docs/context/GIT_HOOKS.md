@@ -14,8 +14,9 @@ The hook is not active in a fresh clone — run `./scripts/install-hooks.sh` onc
    - **Purpose**: Enforces consistent code style
    - **Auto-fix**: Run `cargo fmt` or `./scripts/fix-code-quality.sh`
 
-2. **Linting**: `cargo clippy --all-targets --all-features`
-   - **Requirement**: Warnings allowed, errors block commits
+2. **Linting**: `cargo clippy --all-targets --all-features -- -D warnings`
+   - **Requirement**: Must pass (blocking); warnings are treated as errors,
+     matching CI
    - **Purpose**: Catches common mistakes and suggests improvements
    - **Auto-fix**: Many issues can be resolved with `./scripts/fix-code-quality.sh`
 
@@ -85,13 +86,18 @@ Some issues require manual intervention:
 ## Hook Workflow
 
 ### Pre-Commit Process
-1. **Staging Check**: Hooks run on staged files only
+1. **Scope**: checks run against the working tree, not the staged snapshot
 2. **Formatting**: Code must be properly formatted
-3. **Linting**: No clippy errors allowed (warnings OK)
+3. **Linting**: No clippy warnings allowed (`-D warnings`)
 4. **Type Check**: All code must compile cleanly
 5. **Rust Tests**: All Rust unit and integration tests must pass
 6. **OCaml Tests**: Property-based tests must pass
 7. **Commit**: Only proceeds if all checks pass
+
+Because the checks read the working tree rather than the index, a commit that
+stages only part of your changes is validated against everything present on
+disk. A partially-staged commit can therefore pass the hook while not building
+in isolation, which matters when bisecting. CI validates each pushed commit.
 
 ### Failure Handling
 If any hook fails:
@@ -107,7 +113,7 @@ In rare cases where hooks must be bypassed:
 git commit --no-verify -m "emergency fix: brief description"
 ```
 
-**⚠️ Important**: 
+**Important**: 
 - Only use in genuine emergencies
 - Follow up immediately with a proper commit that passes all hooks
 - Document the reason in the commit message
@@ -134,7 +140,7 @@ opam install qcheck typeset
 
 **Permission errors on hook scripts**:
 ```bash  
-chmod +x .git/hooks/pre-commit
+chmod +x .githooks/pre-commit
 ```
 
 **Formatting conflicts**:

@@ -15,8 +15,19 @@ Thank you for your interest in contributing! This guide will help you understand
    cd typeset-rs
    ```
 
-3. **Install git hooks**
-   Git hooks are automatically installed and will run quality checks before commits.
+3. **Install the OCaml test dependencies**
+   ```bash
+   opam install qcheck typeset
+   ```
+
+4. **Install git hooks**
+   Hooks are tracked in `.githooks/` but are not active in a fresh clone. Enable
+   them once:
+   ```bash
+   ./scripts/install-hooks.sh
+   ```
+   The pre-commit hook then runs formatting, linting, type checking, and both
+   test suites before each commit.
 
 ## Commit Message Format
 
@@ -136,7 +147,9 @@ git push origin main
 
 - Use conventional commits for automatic versioning
 - Pre-commit hooks catch issues early
-- CI runs the same checks as git hooks
+- CI runs the same Rust checks as the git hooks (formatting, clippy, type
+  checking, `cargo test`), but does **not** run the OCaml property tests — those
+  run locally via the pre-commit hook only
 - OCaml tests provide additional validation
 - Dependency updates are automated weekly
 - Security scanning runs on every change
