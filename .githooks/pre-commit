@@ -1,0 +1,58 @@
+#!/bin/bash
+# Pre-commit quality gate. See docs/context/GIT_HOOKS.md
+#
+# Mirrors the checks in .github/workflows/ci.yml so failures surface locally
+# rather than in CI. Set SKIP_OCAML=1 to skip the (slow) OCaml suite.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+fail() {
+    echo "pre-commit: $1" >&2
+    echo "pre-commit: commit aborted. Run ./scripts/fix-code-quality.sh for fmt/clippy fixes." >&2
+    exit 1
+}
+
+echo "pre-commit: checking formatting..."
+cargo fmt --all --check || fail "formatting check failed"
+
+echo "pre-commit: running clippy..."
+cargo clippy --all-targets --all-features -- -D warnings || fail "clippy reported warnings"
+
+echo "pre-commit: type checking..."
+cargo check --all-targets --all-features || fail "type check failed"
+
+echo "pre-commit: running Rust tests..."
+cargo test --all --all-features || fail "Rust tests failed"
+
+if [ "${SKIP_OCAML:-0}" = "1" ]; then
+    echo "pre-commit: skipping OCaml suite (SKIP_OCAML=1)"
+    echo "pre-commit: all checks passed."
+    exit 0
+fi
+
+# The OCaml suite needs opam, dune, and the qcheck + typeset packages. Treat a
+# missing toolchain as a warning (not everyone has OCaml set up), but a genuine
+# test failure as blocking.
+if ! command -v dune >/dev/null 2>&1; then
+    echo "pre-commit: WARNING - dune not found, skipping OCaml property tests." >&2
+    echo "pre-commit:   install with: opam install qcheck typeset" >&2
+    echo "pre-commit: all other checks passed."
+    exit 0
+fi
+
+echo "pre-commit: building OCaml tester..."
+if ! (cd tests/tester && dune build 2>&1); then
+    echo "pre-commit: WARNING - OCaml tester failed to build, skipping property tests." >&2
+    echo "pre-commit:   missing deps? run: opam install qcheck typeset" >&2
+    echo "pre-commit: all other checks passed."
+    exit 0
+fi
+
+echo "pre-commit: running OCaml property tests..."
+(cd tests && ./build.sh >/dev/null 2>&1) || fail "test harness build failed"
+(cd tests && ./run.sh) || fail "OCaml property tests failed"
+
+echo "pre-commit: all checks passed."
