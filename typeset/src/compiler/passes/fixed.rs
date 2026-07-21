@@ -82,12 +82,16 @@ fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj<
         }
     }
 
-    // Fold the items and separators into a FixedObj (there is always at least
-    // one item, since every LinearObj ends in Last).
-    let last = items.len() - 1;
-    let mut fobj: &'b FixedObj<'b> = mem.alloc(FixedObj::Last(items[last]));
-    for k in (0..last).rev() {
-        fobj = mem.alloc(FixedObj::Next(items[k], seps[k], fobj));
+    // Fold the items and separators into a FixedObj. Every LinearObj ends in a
+    // Last, which pushes an item, so `items` is non-empty and `split_last`
+    // yields the trailing item plus the `seps.len()` leading items — making the
+    // "at least one item" invariant explicit instead of a bare `len() - 1`.
+    let (&last_item, init_items) = items
+        .split_last()
+        .expect("every LinearObj ends in Last, so there is at least one item");
+    let mut fobj: &'b FixedObj<'b> = mem.alloc(FixedObj::Last(last_item));
+    for (&item, &sep) in init_items.iter().zip(seps.iter()).rev() {
+        fobj = mem.alloc(FixedObj::Next(item, sep, fobj));
     }
     fobj
 }
