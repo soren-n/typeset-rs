@@ -1,466 +1,345 @@
-use super::traversal::DismantleTree;
+//! Final document representation - output of the compiler.
+//!
+//! `Doc` is a flat arena, not a `Box`-recursive tree. The document object graph
+//! (the `Comp`/`Grp`/`Nest`/… nodes that used to be a tree of `Box<DocObj>`) is
+//! stored in two flat `Vec`s — one for objects, one for fixed objects — and
+//! children are referenced by arena index rather than by owning box. The spine
+//! (`Empty`/`Break`/`Line`/`Eod`) was already linear and is a `Vec<Row>` in
+//! document order.
+//!
+//! The point of the flat representation is that deep-safety is now *structural*
+//! rather than hand-maintained: dropping or cloning a `Doc` is dropping/cloning
+//! three `Vec`s of shallow records, which never recurses no matter how deeply
+//! nested the document is. So `Clone` and `Drop` are derived, and the ~600 lines
+//! of hand-rolled iterative `Clone`/`Drop` the old `Box`-tree needed are gone.
+//!
+//! `Display` and `Debug` still walk the object graph to print the historical
+//! parenthesized / derived-looking forms, and those walks are driven by an
+//! explicit index stack so that printing a deep document does not recurse on the
+//! native stack either.
+
 use std::fmt;
-use std::mem;
 
-// `Clone`, `Debug`, and `Display` are implemented iteratively below rather than
-// derived: a derived (recursive) impl would overflow the native stack on deep
-// documents, the same hazard the iterative `Drop` and renderer avoid.
+/// Index into a [`Doc`]'s object arena ([`Doc::objs`]).
+pub(crate) type ObjId = u32;
 
-/// Final document representation - output of the compiler
-pub enum Doc {
-    Eod,
-    Empty(Box<Doc>),
-    Break(Box<DocObj>, Box<Doc>),
-    Line(Box<DocObj>),
-}
+/// Index into a [`Doc`]'s fixed-object arena ([`Doc::fixes`]).
+pub(crate) type FixId = u32;
 
-pub enum DocObj {
+/// A node in the object arena. Children are arena indices, not owning boxes, so
+/// a node is a shallow record and the whole arena drops/clones without recursion.
+#[derive(Clone, Debug)]
+pub(crate) enum ObjNode {
     Text(String),
-    Fix(Box<DocObjFix>),
-    Grp(Box<DocObj>),
-    Seq(Box<DocObj>),
-    Nest(Box<DocObj>),
-    Pack(u64, Box<DocObj>),
-    Comp(Box<DocObj>, Box<DocObj>, bool),
+    Fix(FixId),
+    Grp(ObjId),
+    Seq(ObjId),
+    Nest(ObjId),
+    Pack(u64, ObjId),
+    Comp(ObjId, ObjId, bool),
 }
 
-pub enum DocObjFix {
+/// A node in the fixed-object arena (the subset of objects that never break).
+#[derive(Clone, Debug)]
+pub(crate) enum FixNode {
     Text(String),
-    Comp(Box<DocObjFix>, Box<DocObjFix>, bool),
+    Comp(FixId, FixId, bool),
 }
 
-// Iterative destructors
-// ---------------------
-// The default (compiler-generated) drop recurses down the `Box` chain, so a
-// deeply nested document would exhaust the native stack when it is freed — the
-// same failure mode the iterative compiler passes and renderer exist to avoid.
-// Each `Drop` below dismantles its tree onto a heap-allocated worklist instead:
-// every box that actually goes out of scope has already had its same-typed
-// children moved onto the worklist (replaced with leaves), so its own recursive
-// drop terminates in O(1). Cross-type children (a `DocObj`'s `DocObjFix`, a
-// `Doc`'s `DocObj`) are freed by that other type's iterative `Drop`.
-//
-// Implementing `Drop` means these types can no longer be destructured by value
-// (partial moves are forbidden); every consumer borrows instead — see the
-// renderer and the `Display` impl below.
-
-// Each `dismantle` moves the node's same-typed children onto the worklist
-// (moving them out of their `Box`, freeing it, and leaving a leaf placeholder in
-// the parent) and leaves any cross-type child in place to be freed by that
-// type's own iterative `Drop`. The shared worklist driver is [`DismantleTree`].
-
-impl DismantleTree for Doc {
-    fn dismantle(&mut self, stack: &mut Vec<Self>) {
-        match self {
-            Doc::Eod | Doc::Line(_) => {}
-            Doc::Empty(doc1) | Doc::Break(_, doc1) => {
-                stack.push(*mem::replace(doc1, Box::new(Doc::Eod)));
-            }
-        }
-    }
-}
-
-impl Drop for Doc {
-    fn drop(&mut self) {
-        self.drain();
-    }
-}
-
-impl DismantleTree for DocObj {
-    fn dismantle(&mut self, stack: &mut Vec<Self>) {
-        match self {
-            DocObj::Text(_) | DocObj::Fix(_) => {}
-            DocObj::Grp(obj1) | DocObj::Seq(obj1) | DocObj::Nest(obj1) | DocObj::Pack(_, obj1) => {
-                stack.push(*mem::replace(obj1, Box::new(DocObj::Text(String::new()))));
-            }
-            DocObj::Comp(left, right, _) => {
-                stack.push(*mem::replace(left, Box::new(DocObj::Text(String::new()))));
-                stack.push(*mem::replace(right, Box::new(DocObj::Text(String::new()))));
-            }
-        }
-    }
-}
-
-impl Drop for DocObj {
-    fn drop(&mut self) {
-        self.drain();
-    }
-}
-
-impl DismantleTree for DocObjFix {
-    fn dismantle(&mut self, stack: &mut Vec<Self>) {
-        match self {
-            DocObjFix::Text(_) => {}
-            DocObjFix::Comp(left, right, _) => {
-                stack.push(*mem::replace(
-                    left,
-                    Box::new(DocObjFix::Text(String::new())),
-                ));
-                stack.push(*mem::replace(
-                    right,
-                    Box::new(DocObjFix::Text(String::new())),
-                ));
-            }
-        }
-    }
-}
-
-impl Drop for DocObjFix {
-    fn drop(&mut self) {
-        self.drain();
-    }
-}
-
-// Iterative Clone
-// ---------------
-// Deep-copy each tree bottom-up with task/result stacks (the same shape as the
-// `rescope` pass that builds these trees), so cloning a deep document — e.g. the
-// documented `render(doc.clone(), ...)` pattern for re-rendering at multiple
-// widths — runs in constant native stack instead of overflowing.
-
-fn clone_fix(fix: &DocObjFix) -> Box<DocObjFix> {
-    enum Task<'a> {
-        Visit(&'a DocObjFix),
-        Comp(bool),
-    }
-    let mut tasks: Vec<Task> = vec![Task::Visit(fix)];
-    let mut out: Vec<Box<DocObjFix>> = Vec::new();
-    while let Some(task) = tasks.pop() {
-        match task {
-            Task::Visit(f) => match f {
-                DocObjFix::Text(data) => out.push(Box::new(DocObjFix::Text(data.clone()))),
-                DocObjFix::Comp(left, right, pad) => {
-                    tasks.push(Task::Comp(*pad));
-                    tasks.push(Task::Visit(right));
-                    tasks.push(Task::Visit(left));
-                }
-            },
-            Task::Comp(pad) => {
-                let right = out.pop().expect("fix comp: right operand");
-                let left = out.pop().expect("fix comp: left operand");
-                out.push(Box::new(DocObjFix::Comp(left, right, pad)));
-            }
-        }
-    }
-    out.pop().expect("fix clone produced no result")
-}
-
-fn clone_obj(obj: &DocObj) -> Box<DocObj> {
-    enum Task<'a> {
-        Visit(&'a DocObj),
-        Grp,
-        Seq,
-        Nest,
-        Pack(u64),
-        Comp(bool),
-    }
-    let mut tasks: Vec<Task> = vec![Task::Visit(obj)];
-    let mut out: Vec<Box<DocObj>> = Vec::new();
-    while let Some(task) = tasks.pop() {
-        match task {
-            Task::Visit(o) => match o {
-                DocObj::Text(data) => out.push(Box::new(DocObj::Text(data.clone()))),
-                DocObj::Fix(fix) => out.push(Box::new(DocObj::Fix(clone_fix(fix)))),
-                DocObj::Grp(obj1) => {
-                    tasks.push(Task::Grp);
-                    tasks.push(Task::Visit(obj1));
-                }
-                DocObj::Seq(obj1) => {
-                    tasks.push(Task::Seq);
-                    tasks.push(Task::Visit(obj1));
-                }
-                DocObj::Nest(obj1) => {
-                    tasks.push(Task::Nest);
-                    tasks.push(Task::Visit(obj1));
-                }
-                DocObj::Pack(index, obj1) => {
-                    tasks.push(Task::Pack(*index));
-                    tasks.push(Task::Visit(obj1));
-                }
-                DocObj::Comp(left, right, pad) => {
-                    tasks.push(Task::Comp(*pad));
-                    tasks.push(Task::Visit(right));
-                    tasks.push(Task::Visit(left));
-                }
-            },
-            Task::Grp => {
-                let inner = out.pop().expect("grp operand");
-                out.push(Box::new(DocObj::Grp(inner)));
-            }
-            Task::Seq => {
-                let inner = out.pop().expect("seq operand");
-                out.push(Box::new(DocObj::Seq(inner)));
-            }
-            Task::Nest => {
-                let inner = out.pop().expect("nest operand");
-                out.push(Box::new(DocObj::Nest(inner)));
-            }
-            Task::Pack(index) => {
-                let inner = out.pop().expect("pack operand");
-                out.push(Box::new(DocObj::Pack(index, inner)));
-            }
-            Task::Comp(pad) => {
-                let right = out.pop().expect("comp: right operand");
-                let left = out.pop().expect("comp: left operand");
-                out.push(Box::new(DocObj::Comp(left, right, pad)));
-            }
-        }
-    }
-    out.pop().expect("obj clone produced no result")
-}
-
-fn clone_doc(doc: &Doc) -> Box<Doc> {
-    let mut spine: Vec<&Doc> = Vec::new();
-    let mut node = doc;
-    loop {
-        spine.push(node);
-        match node {
-            Doc::Eod | Doc::Line(_) => break,
-            Doc::Empty(doc1) | Doc::Break(_, doc1) => node = doc1,
-        }
-    }
-    let mut acc: Option<Box<Doc>> = None;
-    for node in spine.into_iter().rev() {
-        let built = match node {
-            Doc::Eod => Box::new(Doc::Eod),
-            Doc::Line(obj) => Box::new(Doc::Line(clone_obj(obj))),
-            Doc::Empty(_) => Box::new(Doc::Empty(acc.take().expect("empty: tail"))),
-            Doc::Break(obj, _) => {
-                Box::new(Doc::Break(clone_obj(obj), acc.take().expect("break: tail")))
-            }
-        };
-        acc = Some(built);
-    }
-    acc.expect("empty spine")
-}
-
-impl Clone for Doc {
-    fn clone(&self) -> Self {
-        *clone_doc(self)
-    }
-}
-
-impl Clone for DocObj {
-    fn clone(&self) -> Self {
-        *clone_obj(self)
-    }
-}
-
-impl Clone for DocObjFix {
-    fn clone(&self) -> Self {
-        *clone_fix(self)
-    }
-}
-
-/// Serialize a document object to the parenthesized debug form, iteratively.
+/// One row of the document spine, in document order.
 ///
-/// Borrows the object (a `Drop`-carrying type cannot be moved out of) and walks
-/// it with an explicit task stack so arbitrarily deep objects print without
-/// recursing on the native stack.
-fn print_obj(obj: &DocObj) -> String {
-    enum Task<'a> {
-        Obj(&'a DocObj),
-        Fix(&'a DocObjFix),
-        Lit(&'static str),
-        Owned(String),
+/// A `Line` row is always the last row (nothing follows a line); a document that
+/// ends in `Eod` simply has no `Line` row. The spine is walked front-to-back by
+/// the renderer, stopping at a `Line` or running off the end (`Eod`).
+#[derive(Clone, Debug)]
+pub(crate) enum Row {
+    Empty,
+    Break(ObjId),
+    Line(ObjId),
+}
+
+/// Final document representation - output of the compiler.
+///
+/// A flat arena: the spine is a `Vec<Row>` and the object graph lives in two
+/// index-linked `Vec`s. Callers never construct or inspect a `Doc`; they pass it
+/// to [`render`](crate::render()). `Clone` and `Drop` are derived and structurally
+/// deep-safe (they touch only flat `Vec`s), so no amount of document nesting can
+/// overflow the stack when a `Doc` is cloned or freed.
+#[derive(Clone)]
+pub struct Doc {
+    rows: Vec<Row>,
+    objs: Vec<ObjNode>,
+    fixes: Vec<FixNode>,
+}
+
+impl Doc {
+    /// The spine rows, in document order.
+    pub(crate) fn rows(&self) -> &[Row] {
+        &self.rows
     }
-    let mut out = String::new();
-    let mut stack: Vec<Task> = vec![Task::Obj(obj)];
+
+    /// The object arena.
+    pub(crate) fn objs(&self) -> &[ObjNode] {
+        &self.objs
+    }
+
+    /// The fixed-object arena.
+    pub(crate) fn fixes(&self) -> &[FixNode] {
+        &self.fixes
+    }
+}
+
+/// Appends object arena nodes and returns their indices while lowering into a
+/// [`Doc`].
+///
+/// The final compiler pass ([`rescope`](crate::compiler::passes::rescope)) drives
+/// this: it pushes each object/fixed-object node as it is built (children before
+/// parents, so a parent's child indices always already exist) and collects the
+/// spine rows separately, then calls [`finish`](DocBuilder::finish).
+pub(crate) struct DocBuilder {
+    objs: Vec<ObjNode>,
+    fixes: Vec<FixNode>,
+}
+
+impl DocBuilder {
+    pub(crate) fn new() -> Self {
+        DocBuilder {
+            objs: Vec::new(),
+            fixes: Vec::new(),
+        }
+    }
+
+    /// Append an object node and return its arena index.
+    pub(crate) fn obj(&mut self, node: ObjNode) -> ObjId {
+        let id = self.objs.len() as ObjId;
+        self.objs.push(node);
+        id
+    }
+
+    /// Append a fixed-object node and return its arena index.
+    pub(crate) fn fix(&mut self, node: FixNode) -> FixId {
+        let id = self.fixes.len() as FixId;
+        self.fixes.push(node);
+        id
+    }
+
+    /// Assemble the finished document from the collected spine rows.
+    pub(crate) fn finish(self, rows: Vec<Row>) -> Doc {
+        Doc {
+            rows,
+            objs: self.objs,
+            fixes: self.fixes,
+        }
+    }
+}
+
+// Iterative Display / Debug
+// -------------------------
+// Both print the document object graph in its historical tree-shaped form (the
+// parenthesized form for `Display`, the derived-looking form for `Debug`). A
+// document can be arbitrarily deep, so each object walk is driven by an explicit
+// task stack over arena indices rather than by recursion.
+
+/// A token in an object/fixed-object print walk.
+enum PrintTask {
+    Obj(ObjId),
+    Fix(FixId),
+    Lit(&'static str),
+    Owned(String),
+}
+
+/// Appends the parenthesized (`Display`) form of the object at `root` to `out`.
+fn write_obj_display(out: &mut String, objs: &[ObjNode], fixes: &[FixNode], root: ObjId) {
+    let mut stack: Vec<PrintTask> = vec![PrintTask::Obj(root)];
     while let Some(task) = stack.pop() {
         match task {
-            Task::Lit(s) => out.push_str(s),
-            Task::Owned(s) => out.push_str(&s),
-            Task::Obj(o) => match o {
-                DocObj::Text(data) => out.push_str(&format!("(Text \"{}\")", data)),
-                DocObj::Fix(obj1) => {
-                    stack.push(Task::Lit(")"));
-                    stack.push(Task::Fix(obj1));
-                    stack.push(Task::Lit("(Fix "));
+            PrintTask::Lit(s) => out.push_str(s),
+            PrintTask::Owned(s) => out.push_str(&s),
+            PrintTask::Obj(o) => match &objs[o as usize] {
+                ObjNode::Text(data) => {
+                    out.push_str("(Text \"");
+                    out.push_str(data);
+                    out.push_str("\")");
                 }
-                DocObj::Grp(obj1) => {
-                    stack.push(Task::Lit(")"));
-                    stack.push(Task::Obj(obj1));
-                    stack.push(Task::Lit("(Grp "));
+                ObjNode::Fix(fix) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Fix(*fix));
+                    stack.push(PrintTask::Lit("(Fix "));
                 }
-                DocObj::Seq(obj1) => {
-                    stack.push(Task::Lit(")"));
-                    stack.push(Task::Obj(obj1));
-                    stack.push(Task::Lit("(Seq "));
+                ObjNode::Grp(obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Lit("(Grp "));
                 }
-                DocObj::Nest(obj1) => {
-                    stack.push(Task::Lit(")"));
-                    stack.push(Task::Obj(obj1));
-                    stack.push(Task::Lit("(Nest "));
+                ObjNode::Seq(obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Lit("(Seq "));
                 }
-                DocObj::Pack(index, obj1) => {
-                    stack.push(Task::Lit(")"));
-                    stack.push(Task::Obj(obj1));
-                    stack.push(Task::Owned(format!("(Pack {} ", index)));
+                ObjNode::Nest(obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Lit("(Nest "));
                 }
-                DocObj::Comp(left, right, pad) => {
-                    stack.push(Task::Owned(format!(" {})", pad)));
-                    stack.push(Task::Obj(right));
-                    stack.push(Task::Lit(" "));
-                    stack.push(Task::Obj(left));
-                    stack.push(Task::Lit("(Comp "));
+                ObjNode::Pack(index, obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Owned(format!("(Pack {} ", index)));
+                }
+                ObjNode::Comp(left, right, pad) => {
+                    stack.push(PrintTask::Owned(format!(" {})", pad)));
+                    stack.push(PrintTask::Obj(*right));
+                    stack.push(PrintTask::Lit(" "));
+                    stack.push(PrintTask::Obj(*left));
+                    stack.push(PrintTask::Lit("(Comp "));
                 }
             },
-            Task::Fix(f) => match f {
-                DocObjFix::Text(data) => out.push_str(&format!("(Text \"{}\")", data)),
-                DocObjFix::Comp(left, right, pad) => {
-                    stack.push(Task::Owned(format!(" {})", pad)));
-                    stack.push(Task::Fix(right));
-                    stack.push(Task::Lit(" "));
-                    stack.push(Task::Fix(left));
-                    stack.push(Task::Lit("(Comp "));
+            PrintTask::Fix(x) => match &fixes[x as usize] {
+                FixNode::Text(data) => {
+                    out.push_str("(Text \"");
+                    out.push_str(data);
+                    out.push_str("\")");
+                }
+                FixNode::Comp(left, right, pad) => {
+                    stack.push(PrintTask::Owned(format!(" {})", pad)));
+                    stack.push(PrintTask::Fix(*right));
+                    stack.push(PrintTask::Lit(" "));
+                    stack.push(PrintTask::Fix(*left));
+                    stack.push(PrintTask::Lit("(Comp "));
                 }
             },
         }
     }
-    out
 }
 
 impl fmt::Display for Doc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // The document spine is a linear list, so it prints with a plain loop;
-        // objects print via the iterative `print_obj` above.
+        // The spine is a linear list of rows; each object prints via the
+        // iterative walk above. `Eod` is implicit (no `Line` row), so append it
+        // unless the document ends in a line.
         let mut out = String::new();
-        let mut node = self;
-        loop {
-            match node {
-                Doc::Eod => {
-                    out.push_str("Eod");
-                    break;
-                }
-                Doc::Empty(doc1) => {
-                    out.push_str("Empty\n");
-                    node = doc1;
-                }
-                Doc::Break(obj, doc1) => {
+        let mut line_terminated = false;
+        for (i, row) in self.rows.iter().enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            match row {
+                Row::Empty => out.push_str("Empty"),
+                Row::Break(id) => {
                     out.push_str("Break ");
-                    out.push_str(&print_obj(obj));
-                    out.push('\n');
-                    node = doc1;
+                    write_obj_display(&mut out, &self.objs, &self.fixes, *id);
                 }
-                Doc::Line(obj) => {
+                Row::Line(id) => {
                     out.push_str("Line ");
-                    out.push_str(&print_obj(obj));
-                    break;
+                    write_obj_display(&mut out, &self.objs, &self.fixes, *id);
+                    line_terminated = true;
                 }
+            }
+        }
+        if !line_terminated {
+            if self.rows.is_empty() {
+                out.push_str("Eod");
+            } else {
+                out.push_str("\nEod");
             }
         }
         write!(f, "{}", out)
     }
 }
 
-// Iterative Debug
-// ---------------
-// A derived `Debug` recurses down the `Box` chain and overflows the native stack
-// on deep documents — the same hazard every other trait here avoids. These impls
-// reproduce the derived (non-alternate) output byte-for-byte, driven by an
-// explicit task stack shared across the `Doc`/`DocObj`/`DocObjFix` family. The
-// alternate (`{:#?}`) indented form is not reproduced; it falls back to the same
-// compact form.
-
-enum DebugTask<'a> {
-    Doc(&'a Doc),
-    Obj(&'a DocObj),
-    Fix(&'a DocObjFix),
-    Lit(&'static str),
-    Owned(String),
-}
-
-fn debug_doc_family(f: &mut fmt::Formatter, start: DebugTask) -> fmt::Result {
-    let mut stack: Vec<DebugTask> = vec![start];
+/// Appends the derived-looking (`Debug`) form of the object at `root` to `out`.
+fn write_obj_debug(out: &mut String, objs: &[ObjNode], fixes: &[FixNode], root: ObjId) {
+    let mut stack: Vec<PrintTask> = vec![PrintTask::Obj(root)];
     while let Some(task) = stack.pop() {
         match task {
-            DebugTask::Lit(s) => f.write_str(s)?,
-            DebugTask::Owned(s) => f.write_str(&s)?,
-            DebugTask::Doc(d) => match d {
-                Doc::Eod => f.write_str("Eod")?,
-                Doc::Empty(doc1) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Doc(doc1));
-                    stack.push(DebugTask::Lit("Empty("));
+            PrintTask::Lit(s) => out.push_str(s),
+            PrintTask::Owned(s) => out.push_str(&s),
+            PrintTask::Obj(o) => match &objs[o as usize] {
+                ObjNode::Text(data) => out.push_str(&format!("Text({:?})", data)),
+                ObjNode::Fix(fix) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Fix(*fix));
+                    stack.push(PrintTask::Lit("Fix("));
                 }
-                Doc::Break(obj, doc1) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Doc(doc1));
-                    stack.push(DebugTask::Lit(", "));
-                    stack.push(DebugTask::Obj(obj));
-                    stack.push(DebugTask::Lit("Break("));
+                ObjNode::Grp(obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Lit("Grp("));
                 }
-                Doc::Line(obj) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Obj(obj));
-                    stack.push(DebugTask::Lit("Line("));
+                ObjNode::Seq(obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Lit("Seq("));
                 }
-            },
-            DebugTask::Obj(o) => match o {
-                DocObj::Text(data) => f.write_str(&format!("Text({:?})", data))?,
-                DocObj::Fix(obj1) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Fix(obj1));
-                    stack.push(DebugTask::Lit("Fix("));
+                ObjNode::Nest(obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Lit("Nest("));
                 }
-                DocObj::Grp(obj1) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Obj(obj1));
-                    stack.push(DebugTask::Lit("Grp("));
+                ObjNode::Pack(index, obj1) => {
+                    stack.push(PrintTask::Lit(")"));
+                    stack.push(PrintTask::Obj(*obj1));
+                    stack.push(PrintTask::Owned(format!("Pack({}, ", index)));
                 }
-                DocObj::Seq(obj1) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Obj(obj1));
-                    stack.push(DebugTask::Lit("Seq("));
-                }
-                DocObj::Nest(obj1) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Obj(obj1));
-                    stack.push(DebugTask::Lit("Nest("));
-                }
-                DocObj::Pack(index, obj1) => {
-                    stack.push(DebugTask::Lit(")"));
-                    stack.push(DebugTask::Obj(obj1));
-                    stack.push(DebugTask::Owned(format!("Pack({}, ", index)));
-                }
-                DocObj::Comp(left, right, pad) => {
-                    stack.push(DebugTask::Owned(format!(", {})", pad)));
-                    stack.push(DebugTask::Obj(right));
-                    stack.push(DebugTask::Lit(", "));
-                    stack.push(DebugTask::Obj(left));
-                    stack.push(DebugTask::Lit("Comp("));
+                ObjNode::Comp(left, right, pad) => {
+                    stack.push(PrintTask::Owned(format!(", {})", pad)));
+                    stack.push(PrintTask::Obj(*right));
+                    stack.push(PrintTask::Lit(", "));
+                    stack.push(PrintTask::Obj(*left));
+                    stack.push(PrintTask::Lit("Comp("));
                 }
             },
-            DebugTask::Fix(x) => match x {
-                DocObjFix::Text(data) => f.write_str(&format!("Text({:?})", data))?,
-                DocObjFix::Comp(left, right, pad) => {
-                    stack.push(DebugTask::Owned(format!(", {})", pad)));
-                    stack.push(DebugTask::Fix(right));
-                    stack.push(DebugTask::Lit(", "));
-                    stack.push(DebugTask::Fix(left));
-                    stack.push(DebugTask::Lit("Comp("));
+            PrintTask::Fix(x) => match &fixes[x as usize] {
+                FixNode::Text(data) => out.push_str(&format!("Text({:?})", data)),
+                FixNode::Comp(left, right, pad) => {
+                    stack.push(PrintTask::Owned(format!(", {})", pad)));
+                    stack.push(PrintTask::Fix(*right));
+                    stack.push(PrintTask::Lit(", "));
+                    stack.push(PrintTask::Fix(*left));
+                    stack.push(PrintTask::Lit("Comp("));
                 }
             },
         }
     }
-    Ok(())
 }
 
 impl fmt::Debug for Doc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        debug_doc_family(f, DebugTask::Doc(self))
-    }
-}
-
-impl fmt::Debug for DocObj {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        debug_doc_family(f, DebugTask::Obj(self))
-    }
-}
-
-impl fmt::Debug for DocObjFix {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        debug_doc_family(f, DebugTask::Fix(self))
+        // Reproduce byte-for-byte the output the old `Box`-recursive `Doc`'s
+        // derived `Debug` produced: the spine nests each tail inside its parent
+        // (`Break(obj, Line(obj))`, `Empty(Eod)`, …). The flat spine is walked
+        // in order, opening one paren per `Empty`/`Break` (closed after the
+        // whole tail) and closing `Line` (the terminal row) itself.
+        let mut out = String::new();
+        let mut opens = 0usize;
+        let mut line_terminated = false;
+        for row in &self.rows {
+            match row {
+                Row::Empty => {
+                    out.push_str("Empty(");
+                    opens += 1;
+                }
+                Row::Break(id) => {
+                    out.push_str("Break(");
+                    write_obj_debug(&mut out, &self.objs, &self.fixes, *id);
+                    out.push_str(", ");
+                    opens += 1;
+                }
+                Row::Line(id) => {
+                    out.push_str("Line(");
+                    write_obj_debug(&mut out, &self.objs, &self.fixes, *id);
+                    out.push(')');
+                    line_terminated = true;
+                }
+            }
+        }
+        if !line_terminated {
+            out.push_str("Eod");
+        }
+        for _ in 0..opens {
+            out.push(')');
+        }
+        f.write_str(&out)
     }
 }
 
@@ -468,113 +347,55 @@ impl fmt::Debug for DocObjFix {
 mod tests {
     use super::*;
 
-    // Depth chosen far past where the recursive drop/print aborted (~400-2000).
+    // Depth chosen far past where a recursive drop/print aborted (~400-2000).
     const DEEP: usize = 50_000;
 
-    #[test]
-    fn deep_docobj_drops_without_overflow() {
-        let mut obj = Box::new(DocObj::Text("x".to_string()));
-        for _ in 0..DEEP {
-            obj = Box::new(DocObj::Nest(obj));
+    /// Builds a single-line document whose object is `Nest^depth(Text("x"))`.
+    fn deep_nest_line(depth: usize) -> Doc {
+        let mut b = DocBuilder::new();
+        let mut id = b.obj(ObjNode::Text("x".to_string()));
+        for _ in 0..depth {
+            id = b.obj(ObjNode::Nest(id));
         }
-        drop(obj);
+        b.finish(vec![Row::Line(id)])
     }
 
     #[test]
-    fn deep_docobj_comp_drops_without_overflow() {
-        // Left-deep composition tree exercises the two-child drop path.
-        let mut obj = Box::new(DocObj::Text("x".to_string()));
-        for _ in 0..DEEP {
-            obj = Box::new(DocObj::Comp(
-                obj,
-                Box::new(DocObj::Text("y".to_string())),
-                false,
-            ));
-        }
-        drop(obj);
-    }
-
-    #[test]
-    fn deep_doc_spine_drops_without_overflow() {
-        let mut doc = Box::new(Doc::Eod);
-        for _ in 0..DEEP {
-            doc = Box::new(Doc::Empty(doc));
-        }
+    fn deep_doc_drops_without_overflow() {
+        // Structural now: dropping three `Vec`s never recurses. Kept as a guard.
+        let doc = deep_nest_line(DEEP);
         drop(doc);
     }
 
     #[test]
-    fn deep_docobjfix_drops_without_overflow() {
-        let mut fix = Box::new(DocObjFix::Text("x".to_string()));
-        for _ in 0..DEEP {
-            fix = Box::new(DocObjFix::Comp(
-                fix,
-                Box::new(DocObjFix::Text("y".to_string())),
-                false,
-            ));
-        }
-        drop(fix);
-    }
-
-    #[test]
-    fn deep_clone_is_iterative() {
-        // A Break spine of Nest objects exercises both spine and object cloning.
-        let mut doc = Box::new(Doc::Eod);
-        for _ in 0..DEEP {
-            let mut obj = Box::new(DocObj::Text("x".to_string()));
-            for _ in 0..2 {
-                obj = Box::new(DocObj::Nest(obj));
-            }
-            doc = Box::new(Doc::Break(obj, doc));
-        }
+    fn deep_doc_clones_without_overflow() {
+        let doc = deep_nest_line(DEEP);
         let cloned = doc.clone();
-        // Clone is structurally identical to the original.
-        assert_eq!(format!("{}", *cloned), format!("{}", *doc));
-    }
-
-    #[test]
-    fn deep_object_clone_is_iterative() {
-        let mut obj = Box::new(DocObj::Text("x".to_string()));
-        for _ in 0..DEEP {
-            obj = Box::new(DocObj::Nest(obj));
-        }
-        let cloned = obj.clone();
-        assert_eq!(
-            format!("{}", Doc::Line(cloned)),
-            format!("{}", Doc::Line(obj))
-        );
+        assert_eq!(format!("{}", cloned), format!("{}", doc));
     }
 
     #[test]
     fn clone_matches_original_shape() {
-        let doc = Doc::Break(
-            Box::new(DocObj::Comp(
-                Box::new(DocObj::Text("a".to_string())),
-                Box::new(DocObj::Fix(Box::new(DocObjFix::Comp(
-                    Box::new(DocObjFix::Text("c".to_string())),
-                    Box::new(DocObjFix::Text("d".to_string())),
-                    true,
-                )))),
-                false,
-            )),
-            Box::new(Doc::Line(Box::new(DocObj::Pack(
-                7,
-                Box::new(DocObj::Text("z".to_string())),
-            )))),
-        );
+        // Break(Comp(Text "a", Fix(Comp(Text "c", Text "d", true)), false),
+        //       Line(Pack(7, Text "z")))
+        let mut b = DocBuilder::new();
+        let a = b.obj(ObjNode::Text("a".to_string()));
+        let c = b.fix(FixNode::Text("c".to_string()));
+        let d = b.fix(FixNode::Text("d".to_string()));
+        let fix_comp = b.fix(FixNode::Comp(c, d, true));
+        let fix_obj = b.obj(ObjNode::Fix(fix_comp));
+        let comp = b.obj(ObjNode::Comp(a, fix_obj, false));
+        let z = b.obj(ObjNode::Text("z".to_string()));
+        let pack = b.obj(ObjNode::Pack(7, z));
+        let doc = b.finish(vec![Row::Break(comp), Row::Line(pack)]);
         assert_eq!(format!("{}", doc.clone()), format!("{}", doc));
     }
 
     #[test]
     fn deep_display_is_iterative() {
-        let mut obj = Box::new(DocObj::Text("x".to_string()));
-        for _ in 0..DEEP {
-            obj = Box::new(DocObj::Nest(obj));
-        }
-        let doc = Doc::Line(obj);
+        let doc = deep_nest_line(DEEP);
         let s = format!("{}", doc);
         assert!(s.starts_with("Line (Nest "));
-        // Innermost text, then one closing paren per Nest wrapper.
         assert!(s.contains("(Text \"x\")"));
         assert!(s.ends_with(')'));
         assert_eq!(s.matches("(Nest ").count(), DEEP);
@@ -582,43 +403,48 @@ mod tests {
 
     #[test]
     fn display_format_matches_expected() {
-        let doc = Doc::Break(
-            Box::new(DocObj::Comp(
-                Box::new(DocObj::Text("a".to_string())),
-                Box::new(DocObj::Grp(Box::new(DocObj::Text("b".to_string())))),
-                true,
-            )),
-            Box::new(Doc::Line(Box::new(DocObj::Fix(Box::new(DocObjFix::Comp(
-                Box::new(DocObjFix::Text("c".to_string())),
-                Box::new(DocObjFix::Text("d".to_string())),
-                false,
-            )))))),
-        );
+        // Break(Comp(Text "a", Grp(Text "b"), true),
+        //       Line(Fix(Comp(Text "c", Text "d", false))))
+        let mut b = DocBuilder::new();
+        let a = b.obj(ObjNode::Text("a".to_string()));
+        let bx = b.obj(ObjNode::Text("b".to_string()));
+        let grp = b.obj(ObjNode::Grp(bx));
+        let comp = b.obj(ObjNode::Comp(a, grp, true));
+        let c = b.fix(FixNode::Text("c".to_string()));
+        let d = b.fix(FixNode::Text("d".to_string()));
+        let fix_comp = b.fix(FixNode::Comp(c, d, false));
+        let fix_obj = b.obj(ObjNode::Fix(fix_comp));
+        let doc = b.finish(vec![Row::Break(comp), Row::Line(fix_obj)]);
         let expected = "Break (Comp (Text \"a\") (Grp (Text \"b\")) true)\n\
                         Line (Fix (Comp (Text \"c\") (Text \"d\") false))";
         assert_eq!(format!("{}", doc), expected);
     }
 
     #[test]
+    fn display_eod_terminated_spine() {
+        // Break(Text "a", Empty(Eod)) prints the trailing Eod.
+        let mut b = DocBuilder::new();
+        let a = b.obj(ObjNode::Text("a".to_string()));
+        let doc = b.finish(vec![Row::Break(a), Row::Empty]);
+        assert_eq!(format!("{}", doc), "Break (Text \"a\")\nEmpty\nEod");
+    }
+
+    #[test]
     fn debug_format_matches_derived() {
         // Byte-for-byte the output the old `#[derive(Debug)]` produced.
-        let doc = Doc::Break(
-            Box::new(DocObj::Comp(
-                Box::new(DocObj::Text("a".to_string())),
-                Box::new(DocObj::Pack(
-                    7,
-                    Box::new(DocObj::Fix(Box::new(DocObjFix::Comp(
-                        Box::new(DocObjFix::Text("c".to_string())),
-                        Box::new(DocObjFix::Text("d".to_string())),
-                        true,
-                    )))),
-                )),
-                false,
-            )),
-            Box::new(Doc::Line(Box::new(DocObj::Grp(Box::new(DocObj::Text(
-                "b".to_string(),
-            )))))),
-        );
+        // Break(Comp(Text "a", Pack(7, Fix(Comp(Text "c", Text "d", true))), false),
+        //       Line(Grp(Text "b")))
+        let mut b = DocBuilder::new();
+        let a = b.obj(ObjNode::Text("a".to_string()));
+        let c = b.fix(FixNode::Text("c".to_string()));
+        let d = b.fix(FixNode::Text("d".to_string()));
+        let fix_comp = b.fix(FixNode::Comp(c, d, true));
+        let fix_obj = b.obj(ObjNode::Fix(fix_comp));
+        let pack = b.obj(ObjNode::Pack(7, fix_obj));
+        let comp = b.obj(ObjNode::Comp(a, pack, false));
+        let bx = b.obj(ObjNode::Text("b".to_string()));
+        let grp = b.obj(ObjNode::Grp(bx));
+        let doc = b.finish(vec![Row::Break(comp), Row::Line(grp)]);
         let expected = "Break(Comp(Text(\"a\"), \
                         Pack(7, Fix(Comp(Text(\"c\"), Text(\"d\"), true))), false), \
                         Line(Grp(Text(\"b\"))))";
@@ -627,11 +453,7 @@ mod tests {
 
     #[test]
     fn deep_debug_is_iterative() {
-        let mut obj = Box::new(DocObj::Text("x".to_string()));
-        for _ in 0..DEEP {
-            obj = Box::new(DocObj::Nest(obj));
-        }
-        let doc = Doc::Line(obj);
+        let doc = deep_nest_line(DEEP);
         let s = format!("{:?}", doc);
         assert!(s.starts_with("Line(Nest("));
         assert_eq!(s.matches("Nest(").count(), DEEP);

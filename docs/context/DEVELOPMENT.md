@@ -94,7 +94,10 @@ cargo check --all-targets --all-features  # Type checking
 - Follow Rust naming conventions (snake_case for functions, PascalCase for types)
 - Traverse recursive trees iteratively with explicit heap worklists rather than
   native recursion, so arbitrarily deep inputs cannot overflow the stack (this
-  is why the passes, renderer, and the `Layout`/`Doc` `Clone`/`Drop`/`Debug`
-  impls are all hand-written as loops)
+  is why the passes, renderer, `Layout`'s `Clone`/`Drop`/`Debug`, and `Doc`'s
+  `Display`/`Debug` are all hand-written as loops). Prefer eliminating the
+  recursion structurally where possible: the output `Doc` is a flat arena
+  (`Vec`-backed), so its `Clone`/`Drop` are derived and deep-safe with no
+  hand-written loop at all
 - Use bump allocation for the intermediate representations during compilation
 - Maintain separation between layout construction and compilation phases

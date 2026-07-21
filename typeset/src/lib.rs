@@ -82,8 +82,9 @@
 //!
 //! - Zero-copy transformations using bump allocation
 //! - Optimal line breaking algorithms
-//! - Fully iterative pipeline (passes, heap conversion, renderer, and [`Doc`]
-//!   drop all run in constant native stack, so deep layouts never overflow it)
+//! - Fully iterative pipeline: the passes and renderer run in constant native
+//!   stack, and the output [`Doc`] is a flat `Vec`-backed arena, so cloning or
+//!   freeing it is non-recursive too — deep layouts never overflow the stack
 //!
 //! ## Examples
 //!

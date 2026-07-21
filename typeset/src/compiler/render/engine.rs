@@ -3,12 +3,11 @@
 //! This module contains the rendering logic that transforms compiled Doc
 //! structures into final string output with proper formatting and line breaking.
 //!
-//! Every traversal here is iterative. The document is walked by borrowing
-//! (`&Doc`), never by consuming it, so arbitrarily deep layouts render with a
-//! constant native stack — the descent state lives in heap-allocated frame
-//! stacks (`Vec<...Frame>`) instead of stack frames. Borrowing rather than
-//! moving is also what lets [`Doc`](crate::compiler::types::Doc) carry an
-//! iterative `Drop`.
+//! Every traversal here is iterative. A [`Doc`] is a flat arena, so the renderer
+//! walks it by arena index into the object/fixed-object node slices, never by
+//! consuming or recursing down owning boxes. The descent state lives in
+//! heap-allocated frame stacks (`Vec<...Frame>`) of indices instead of on the
+//! native stack, so arbitrarily deep layouts render with a constant native stack.
 //!
 //! Pack marks are held in a plain owned [`HashMap`] threaded as `&mut`. The
 //! renderer only ever looks a mark up by index or inserts one, never iterating
@@ -19,9 +18,28 @@
 //! them before returning — measurement only ever inserts a mark when the index
 //! is absent, so removing exactly those keys restores the caller's map.
 
-use crate::compiler::types::{Doc, DocObj, DocObjFix};
+use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row};
 use std::cmp::max;
 use std::collections::HashMap;
+
+/// The two node slices of a [`Doc`], passed by value (a pair of slice refs) so
+/// the traversals index objects and fixed objects without carrying the whole
+/// document around.
+#[derive(Copy, Clone)]
+struct Arena<'a> {
+    objs: &'a [ObjNode],
+    fixes: &'a [FixNode],
+}
+
+impl<'a> Arena<'a> {
+    fn obj(&self, id: ObjId) -> &'a ObjNode {
+        &self.objs[id as usize]
+    }
+
+    fn fix(&self, id: FixId) -> &'a FixNode {
+        &self.fixes[id as usize]
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 struct State {
@@ -105,16 +123,16 @@ fn push_spaces(result: &mut String, n: usize) {
 /// These fold a document object into a single position without producing any
 /// output, so a frame only needs to describe the remaining work and any state
 /// field to restore once a child subtree has been folded.
-enum MFrame<'t> {
-    Obj(&'t DocObj),
-    Fix(&'t DocObjFix),
+enum MFrame {
+    Obj(ObjId),
+    Fix(FixId),
     RestoreLvl(usize),
     RestoreHead(bool),
     /// After visiting the left of a `Comp`: pad, drop `head`, visit the right,
     /// then restore `head`.
-    CompMid(&'t DocObj, bool),
+    CompMid(ObjId, bool),
     /// After visiting the left of a fixed `Comp`: pad, then visit the right.
-    FixCompMid(&'t DocObjFix, bool),
+    FixCompMid(FixId, bool),
 }
 
 /// Which look-ahead the state-only fold performs. The two modes share an
@@ -134,35 +152,41 @@ enum Fold {
 /// [`Fold::NextComp`] returns the position of the next composition boundary
 /// reachable from `obj`. Either way, any marks inserted while folding are undone
 /// before returning, so `marks` is left exactly as the caller passed it.
-fn fold<'t>(mode: Fold, obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+fn fold(
+    mode: Fold,
+    arena: Arena,
+    obj: ObjId,
+    state: State,
+    marks: &mut HashMap<usize, usize>,
+) -> usize {
     let mut st = state;
     let mut inserted: Vec<usize> = Vec::new();
-    let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
+    let mut stack: Vec<MFrame> = vec![MFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
         match frame {
-            MFrame::Obj(o) => match o {
-                DocObj::Text(data) => st = inc_pos(text_width(data), st),
-                DocObj::Fix(fix) => stack.push(MFrame::Fix(fix)),
+            MFrame::Obj(o) => match arena.obj(o) {
+                ObjNode::Text(data) => st = inc_pos(text_width(data), st),
+                ObjNode::Fix(fix) => stack.push(MFrame::Fix(*fix)),
                 // The first point of divergence: `Measure` always descends;
                 // `NextComp` folds an already-laid-out group as one opaque block.
-                DocObj::Grp(obj1) => {
+                ObjNode::Grp(obj1) => {
                     if mode == Fold::NextComp && !st.head {
-                        let end = fold(Fold::Measure, obj1, st, marks);
+                        let end = fold(Fold::Measure, arena, *obj1, st, marks);
                         st = State { pos: end, ..st };
                     } else {
-                        stack.push(MFrame::Obj(obj1));
+                        stack.push(MFrame::Obj(*obj1));
                     }
                 }
-                DocObj::Seq(obj1) => stack.push(MFrame::Obj(obj1)),
-                DocObj::Nest(obj1) => {
+                ObjNode::Seq(obj1) => stack.push(MFrame::Obj(*obj1)),
+                ObjNode::Nest(obj1) => {
                     let lvl = st.lvl;
                     let state1 = indent(st.tab, st);
                     let offset = get_offset(state1);
                     st = inc_pos(offset, state1);
                     stack.push(MFrame::RestoreLvl(lvl));
-                    stack.push(MFrame::Obj(obj1));
+                    stack.push(MFrame::Obj(*obj1));
                 }
-                DocObj::Pack(index, obj1) => {
+                ObjNode::Pack(index, obj1) => {
                     let index = *index as usize;
                     let lvl = st.lvl;
                     match marks.get(&index) {
@@ -185,23 +209,23 @@ fn fold<'t>(mode: Fold, obj: &'t DocObj, state: State, marks: &mut HashMap<usize
                         }
                     }
                     stack.push(MFrame::RestoreLvl(lvl));
-                    stack.push(MFrame::Obj(obj1));
+                    stack.push(MFrame::Obj(*obj1));
                 }
                 // The second point of divergence: `Measure` folds both operands
                 // (padding and dropping `head` between them); `NextComp` stops at
                 // the boundary, folding only the left operand.
-                DocObj::Comp(left, right, pad) => {
+                ObjNode::Comp(left, right, pad) => {
                     if mode == Fold::Measure {
-                        stack.push(MFrame::CompMid(right, *pad));
+                        stack.push(MFrame::CompMid(*right, *pad));
                     }
-                    stack.push(MFrame::Obj(left));
+                    stack.push(MFrame::Obj(*left));
                 }
             },
-            MFrame::Fix(f) => match f {
-                DocObjFix::Text(data) => st = inc_pos(text_width(data), st),
-                DocObjFix::Comp(left, right, pad) => {
-                    stack.push(MFrame::FixCompMid(right, *pad));
-                    stack.push(MFrame::Fix(left));
+            MFrame::Fix(f) => match arena.fix(f) {
+                FixNode::Text(data) => st = inc_pos(text_width(data), st),
+                FixNode::Comp(left, right, pad) => {
+                    stack.push(MFrame::FixCompMid(*right, *pad));
+                    stack.push(MFrame::Fix(*left));
                 }
             },
             MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
@@ -226,24 +250,24 @@ fn fold<'t>(mode: Fold, obj: &'t DocObj, state: State, marks: &mut HashMap<usize
 }
 
 /// Position at which `obj` finishes if laid out from `state`.
-fn measure(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
-    fold(Fold::Measure, obj, state, marks)
+fn measure(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+    fold(Fold::Measure, arena, obj, state, marks)
 }
 
 /// Position of the next composition boundary reachable from `obj`.
-fn next_comp(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
-    fold(Fold::NextComp, obj, state, marks)
+fn next_comp(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+    fold(Fold::NextComp, arena, obj, state, marks)
 }
 
-fn will_fit(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
-    measure(obj, state, marks) <= state.width
+fn will_fit(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> bool {
+    measure(arena, obj, state, marks) <= state.width
 }
 
-fn should_break(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
+fn should_break(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> bool {
     if state.broken {
         true
     } else {
-        state.width < next_comp(obj, state, marks)
+        state.width < next_comp(arena, obj, state, marks)
     }
 }
 
@@ -252,16 +276,16 @@ fn should_break(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -
 /// The current [`State`] and the growing output buffer are threaded as mutable
 /// registers; a frame carries only the remaining work and the state field to
 /// restore once a child subtree has been rendered.
-enum RFrame<'t> {
-    Obj(&'t DocObj),
-    Fix(&'t DocObjFix),
+enum RFrame {
+    Obj(ObjId),
+    Fix(FixId),
     RestoreLvl(usize),
     RestoreBreak(bool),
     /// After rendering the left of a `Comp`: decide the break, then render the
     /// right. `state` at this point is the state produced by the left.
-    CompMid(&'t DocObj, bool),
+    CompMid(ObjId, bool),
     /// After rendering the left of a fixed `Comp`: pad, then render the right.
-    FixCompMid(&'t DocObjFix, bool),
+    FixCompMid(FixId, bool),
 }
 
 /// Render one document object into `result`, threading `state` (iterative).
@@ -269,51 +293,52 @@ enum RFrame<'t> {
 /// Unlike the measuring passes, marks inserted here are kept: they accumulate
 /// forward across the whole document exactly as the recursive formulation
 /// threaded them.
-fn render_obj<'t>(
-    obj: &'t DocObj,
+fn render_obj(
+    arena: Arena,
+    obj: ObjId,
     state: &mut State,
     marks: &mut HashMap<usize, usize>,
     result: &mut String,
 ) {
     let mut st = *state;
-    let mut stack: Vec<RFrame<'t>> = vec![RFrame::Obj(obj)];
+    let mut stack: Vec<RFrame> = vec![RFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
         match frame {
-            RFrame::Obj(o) => match o {
-                DocObj::Text(data) => {
+            RFrame::Obj(o) => match arena.obj(o) {
+                ObjNode::Text(data) => {
                     st = inc_pos(text_width(data), st);
                     result.push_str(data);
                 }
-                DocObj::Fix(fix) => stack.push(RFrame::Fix(fix)),
-                DocObj::Grp(obj1) => {
+                ObjNode::Fix(fix) => stack.push(RFrame::Fix(*fix)),
+                ObjNode::Grp(obj1) => {
                     let broken = st.broken;
                     st = State {
                         broken: false,
                         ..st
                     };
                     stack.push(RFrame::RestoreBreak(broken));
-                    stack.push(RFrame::Obj(obj1));
+                    stack.push(RFrame::Obj(*obj1));
                 }
-                DocObj::Seq(obj1) => {
-                    if will_fit(obj1, st, marks) {
-                        stack.push(RFrame::Obj(obj1));
+                ObjNode::Seq(obj1) => {
+                    if will_fit(arena, *obj1, st, marks) {
+                        stack.push(RFrame::Obj(*obj1));
                     } else {
                         let broken = st.broken;
                         st = State { broken: true, ..st };
                         stack.push(RFrame::RestoreBreak(broken));
-                        stack.push(RFrame::Obj(obj1));
+                        stack.push(RFrame::Obj(*obj1));
                     }
                 }
-                DocObj::Nest(obj1) => {
+                ObjNode::Nest(obj1) => {
                     let lvl = st.lvl;
                     let state1 = indent(st.tab, st);
                     let offset = get_offset(state1);
                     st = inc_pos(offset, state1);
                     push_spaces(result, offset);
                     stack.push(RFrame::RestoreLvl(lvl));
-                    stack.push(RFrame::Obj(obj1));
+                    stack.push(RFrame::Obj(*obj1));
                 }
-                DocObj::Pack(index, obj1) => {
+                ObjNode::Pack(index, obj1) => {
                     let index = *index as usize;
                     let lvl = st.lvl;
                     match marks.get(&index) {
@@ -336,21 +361,21 @@ fn render_obj<'t>(
                         }
                     }
                     stack.push(RFrame::RestoreLvl(lvl));
-                    stack.push(RFrame::Obj(obj1));
+                    stack.push(RFrame::Obj(*obj1));
                 }
-                DocObj::Comp(left, right, pad) => {
-                    stack.push(RFrame::CompMid(right, *pad));
-                    stack.push(RFrame::Obj(left));
+                ObjNode::Comp(left, right, pad) => {
+                    stack.push(RFrame::CompMid(*right, *pad));
+                    stack.push(RFrame::Obj(*left));
                 }
             },
-            RFrame::Fix(f) => match f {
-                DocObjFix::Text(data) => {
+            RFrame::Fix(f) => match arena.fix(f) {
+                FixNode::Text(data) => {
                     st = inc_pos(text_width(data), st);
                     result.push_str(data);
                 }
-                DocObjFix::Comp(left, right, pad) => {
-                    stack.push(RFrame::FixCompMid(right, *pad));
-                    stack.push(RFrame::Fix(left));
+                FixNode::Comp(left, right, pad) => {
+                    stack.push(RFrame::FixCompMid(*right, *pad));
+                    stack.push(RFrame::Fix(*left));
                 }
             },
             RFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
@@ -362,7 +387,7 @@ fn render_obj<'t>(
                     head: false,
                     ..inc_pos(if pad { 1 } else { 0 }, state1)
                 };
-                if should_break(right, state3, marks) {
+                if should_break(arena, right, state3, marks) {
                     let state2 = newline(state1);
                     let offset = get_offset(state2);
                     st = inc_pos(offset, state2);
@@ -399,29 +424,27 @@ fn render_obj<'t>(
 /// # Returns
 /// A formatted string representation of the document
 pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
+    let arena = Arena {
+        objs: doc.objs(),
+        fixes: doc.fixes(),
+    };
     let mut st = make_state(width, tab);
     let mut marks: HashMap<usize, usize> = HashMap::new();
     let mut result = String::new();
-    // The document spine (`Empty` / `Break` / `Line` / `Eod`) is a linear list,
-    // so it is walked with a plain loop rather than recursion. `marks` and `lvl`
-    // survive `reset`, so they carry across lines exactly as the recursive
-    // formulation threaded them.
-    let mut node: &Doc = doc;
-    loop {
+    // The document spine is a linear `Vec<Row>` in document order, so it is
+    // walked with a plain loop. `marks` and `lvl` survive `reset`, so they carry
+    // across lines exactly as the recursive formulation threaded them. A `Line`
+    // row (always last) ends the document; `Eod` is running off the end.
+    for row in doc.rows() {
         st = reset(st);
-        match node {
-            Doc::Eod => break,
-            Doc::Empty(doc1) => {
+        match row {
+            Row::Empty => result.push('\n'),
+            Row::Break(obj) => {
+                render_obj(arena, *obj, &mut st, &mut marks, &mut result);
                 result.push('\n');
-                node = doc1;
             }
-            Doc::Break(obj, doc1) => {
-                render_obj(obj, &mut st, &mut marks, &mut result);
-                result.push('\n');
-                node = doc1;
-            }
-            Doc::Line(obj) => {
-                render_obj(obj, &mut st, &mut marks, &mut result);
+            Row::Line(obj) => {
+                render_obj(arena, *obj, &mut st, &mut marks, &mut result);
                 break;
             }
         }

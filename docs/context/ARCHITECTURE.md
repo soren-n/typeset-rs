@@ -87,15 +87,19 @@ Build layout trees using constructors:
 
 **Stack usage:** the entire pipeline runs iteratively — the nine transform
 passes in `passes/` (the last, `rescope`, builds the owned heap `Doc` directly
-from the bump-allocated `DenullDoc`), the renderer, and the `Drop` of `Doc` are
-each a descend/ascend trampoline over a heap-allocated frame stack
-(continuation-passing passes had their continuation chains defunctionalized into
-explicit data). Every
+from the bump-allocated `DenullDoc`) and the renderer are each a descend/ascend
+trampoline over a heap-allocated frame stack (continuation-passing passes had
+their continuation chains defunctionalized into explicit data). Every
 stage therefore uses constant native stack regardless of layout depth, so deep
 layouts never overflow the stack; depth shows up as O(depth) heap instead. The
-tree-walking traits on the public AST types (`Doc`/`DocObj`/`DocObjFix` and
-`Layout`) — `Drop`, `Clone`, `Display`, and `Debug` — are iterative for the same
-reason, so no operation on a deep document recurses on the native stack.
+output `Doc` is a **flat arena** — the spine is a `Vec<Row>` and the object graph
+is two index-linked `Vec`s of shallow nodes (`ObjNode`/`FixNode`) — so its
+`Clone` and `Drop` are derived and deep-safe *structurally*: they touch only flat
+`Vec`s and cannot recurse however deeply the document nests. `Doc`'s `Display`
+and `Debug` still print the historical tree-shaped forms, walked by an explicit
+index stack so printing a deep document does not recurse either. `Layout` (the
+input AST) is still a `Box`-recursive tree, so it keeps the iterative
+`Drop`/`Clone`/`Debug` trampoline (see `types/traversal.rs`).
 `compile()` is therefore infallible and imposes no depth cap; the `max_depth`
 bound in `compile_within_depth` is an opt-in resource limit (capping the
 O(depth) heap an untrusted layout can allocate) rather than a stack-safety

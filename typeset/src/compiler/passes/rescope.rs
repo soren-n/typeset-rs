@@ -6,14 +6,19 @@
 //! individually. The original expressed the object/fix walks as native-stack
 //! tree recursion with `compose`d continuations, aborting on deep inputs.
 //!
-//! This is the last pass, so it builds the owned heap [`Doc`] directly rather
-//! than an arena IR that a separate heap-conversion pass would then copy. The
-//! object and fix walks are descend/ascend trampolines over heap-allocated
-//! frame stacks; the prop helpers (`strip_term`, `common_prefix_len`,
-//! `wrap_props`) and the doc spine are plain loops. Every traversal is
-//! iterative, so a deeply nested layout lowers with a constant native stack.
+//! This is the last pass, so it builds the owned heap [`Doc`] directly. The
+//! [`Doc`] is a flat arena, so building it is pushing object/fixed-object nodes
+//! into a [`DocBuilder`] (children first, so a parent's child indices always
+//! already exist) and returning arena indices. The object and fix walks are
+//! descend/ascend trampolines over heap-allocated frame stacks; the prop helpers
+//! (`strip_term`, `common_prefix_len`, `wrap_props`) and the doc spine are plain
+//! loops. Every traversal is iterative, so a deeply nested layout lowers with a
+//! constant native stack.
 
-use crate::compiler::types::{DenullDoc, DenullFix, DenullObj, DenullTerm, Doc, DocObj, DocObjFix};
+use crate::compiler::types::{
+    DenullDoc, DenullFix, DenullObj, DenullTerm, Doc, DocBuilder, FixId, FixNode, ObjId, ObjNode,
+    Row,
+};
 
 #[derive(Debug, Copy, Clone)]
 enum Prop {
@@ -31,7 +36,7 @@ enum ObjFrame<'a> {
     },
     CompRight {
         l_props: Vec<Prop>,
-        left1: Box<DocObj>,
+        left1: ObjId,
         pad: bool,
     },
 }
@@ -44,65 +49,60 @@ enum FixFrame<'a> {
     },
     CompRight {
         l_props: Vec<Prop>,
-        left1: Box<DocObjFix>,
+        left1: FixId,
         pad: bool,
     },
 }
 
 /// Rescope nest and pack, lowering the arena `DenullDoc` into the heap `Doc`.
 pub fn rescope(doc: &DenullDoc) -> Box<Doc> {
-    // Walk the linear DenullDoc spine into a Vec, rescoping each line's object,
-    // then fold from the tail so each spine node wraps the already-built
-    // remainder. Both halves are plain loops, so a long document uses no native
-    // stack.
-    enum Row {
-        Empty,
-        Break(Box<DocObj>),
-    }
+    // Walk the linear DenullDoc spine, rescoping each line's object into the
+    // shared arena and collecting the spine rows in document order. Both the
+    // spine walk and the object walks are iterative, so a long or deep document
+    // uses no native stack. A `Line`/`Eod` terminates the spine.
+    let mut builder = DocBuilder::new();
     let mut rows: Vec<Row> = Vec::new();
     let mut cur = doc;
-    let terminal: Box<Doc> = loop {
+    loop {
         match cur {
-            DenullDoc::Eod => break Box::new(Doc::Eod),
-            DenullDoc::Line(obj) => break Box::new(Doc::Line(finish_obj(obj))),
+            DenullDoc::Eod => break,
+            DenullDoc::Line(obj) => {
+                let id = finish_obj(&mut builder, obj);
+                rows.push(Row::Line(id));
+                break;
+            }
             DenullDoc::Empty(doc1) => {
                 rows.push(Row::Empty);
                 cur = doc1;
             }
             DenullDoc::Break(obj, doc1) => {
-                rows.push(Row::Break(finish_obj(obj)));
+                let id = finish_obj(&mut builder, obj);
+                rows.push(Row::Break(id));
                 cur = doc1;
             }
         }
-    };
-    let mut acc = terminal;
-    for row in rows.into_iter().rev() {
-        acc = match row {
-            Row::Empty => Box::new(Doc::Empty(acc)),
-            Row::Break(obj) => Box::new(Doc::Break(obj, acc)),
-        };
     }
-    acc
+    Box::new(builder.finish(rows))
 }
 
 /// Rescopes one line's object and re-applies its stripped prop prefix.
-fn finish_obj(obj: &DenullObj) -> Box<DocObj> {
-    let (props, obj1) = visit_obj(obj);
-    wrap_props(&props, obj1)
+fn finish_obj(b: &mut DocBuilder, obj: &DenullObj) -> ObjId {
+    let (props, obj1) = visit_obj(b, obj);
+    wrap_props(b, &props, obj1)
 }
 
-/// Rescopes one object, returning its stripped prop prefix and the rescoped
-/// object.
-fn visit_obj<'a>(obj: &'a DenullObj<'a>) -> (Vec<Prop>, Box<DocObj>) {
+/// Rescopes one object, returning its stripped prop prefix and the arena index
+/// of the rescoped object.
+fn visit_obj<'a>(b: &mut DocBuilder, obj: &'a DenullObj<'a>) -> (Vec<Prop>, ObjId) {
     let mut stack: Vec<ObjFrame<'a>> = Vec::new();
     let mut cur = obj;
     'machine: loop {
-        let mut val: (Vec<Prop>, Box<DocObj>) = loop {
+        let mut val: (Vec<Prop>, ObjId) = loop {
             match cur {
-                DenullObj::Term(term) => break visit_term(term),
+                DenullObj::Term(term) => break visit_term(b, term),
                 DenullObj::Fix(fix) => {
-                    let (props, fix1) = visit_fix(fix);
-                    break (props, Box::new(DocObj::Fix(fix1)));
+                    let (props, fix1) = visit_fix(b, fix);
+                    break (props, b.obj(ObjNode::Fix(fix1)));
                 }
                 DenullObj::Grp(obj1) => {
                     stack.push(ObjFrame::Grp);
@@ -121,8 +121,8 @@ fn visit_obj<'a>(obj: &'a DenullObj<'a>) -> (Vec<Prop>, Box<DocObj>) {
         loop {
             match stack.pop() {
                 None => return val,
-                Some(ObjFrame::Grp) => val = (val.0, Box::new(DocObj::Grp(val.1))),
-                Some(ObjFrame::Seq) => val = (val.0, Box::new(DocObj::Seq(val.1))),
+                Some(ObjFrame::Grp) => val = (val.0, b.obj(ObjNode::Grp(val.1))),
+                Some(ObjFrame::Seq) => val = (val.0, b.obj(ObjNode::Seq(val.1))),
                 Some(ObjFrame::CompLeft { right, pad }) => {
                     stack.push(ObjFrame::CompRight {
                         l_props: val.0,
@@ -142,9 +142,9 @@ fn visit_obj<'a>(obj: &'a DenullObj<'a>) -> (Vec<Prop>, Box<DocObj>) {
                     // apply the leftovers to each operand individually. `l_props`
                     // is reused as the common prefix (truncated in place).
                     let k = common_prefix_len(&l_props, &r_props);
-                    let left2 = wrap_props(&l_props[k..], left1);
-                    let right2 = wrap_props(&r_props[k..], right1);
-                    let comp = Box::new(DocObj::Comp(left2, right2, pad));
+                    let left2 = wrap_props(b, &l_props[k..], left1);
+                    let right2 = wrap_props(b, &r_props[k..], right1);
+                    let comp = b.obj(ObjNode::Comp(left2, right2, pad));
                     l_props.truncate(k);
                     val = (l_props, comp);
                 }
@@ -155,13 +155,13 @@ fn visit_obj<'a>(obj: &'a DenullObj<'a>) -> (Vec<Prop>, Box<DocObj>) {
 
 /// Rescopes a fixed sub-object. A fix composition keeps only its left operand's
 /// props (the right operand's are dropped, matching the original).
-fn visit_fix<'a>(fix: &'a DenullFix<'a>) -> (Vec<Prop>, Box<DocObjFix>) {
+fn visit_fix<'a>(b: &mut DocBuilder, fix: &'a DenullFix<'a>) -> (Vec<Prop>, FixId) {
     let mut stack: Vec<FixFrame<'a>> = Vec::new();
     let mut cur = fix;
     'machine: loop {
-        let mut val: (Vec<Prop>, Box<DocObjFix>) = loop {
+        let mut val: (Vec<Prop>, FixId) = loop {
             match cur {
-                DenullFix::Term(term) => break visit_fix_term(term),
+                DenullFix::Term(term) => break visit_fix_term(b, term),
                 DenullFix::Comp(left, right, pad) => {
                     stack.push(FixFrame::CompLeft { right, pad: *pad });
                     cur = left;
@@ -186,23 +186,24 @@ fn visit_fix<'a>(fix: &'a DenullFix<'a>) -> (Vec<Prop>, Box<DocObjFix>) {
                     pad,
                 }) => {
                     let (_r_props, right1) = val;
-                    val = (l_props, Box::new(DocObjFix::Comp(left1, right1, pad)));
+                    val = (l_props, b.fix(FixNode::Comp(left1, right1, pad)));
                 }
             }
         }
     }
 }
 
-/// Strips a term chain into its prop prefix (index 0 = outermost) and a text obj.
-fn visit_term(term: &DenullTerm) -> (Vec<Prop>, Box<DocObj>) {
+/// Strips a term chain into its prop prefix (index 0 = outermost) and appends a
+/// text object node, returning its arena index.
+fn visit_term(b: &mut DocBuilder, term: &DenullTerm) -> (Vec<Prop>, ObjId) {
     let (props, data) = strip_term(term);
-    (props, Box::new(DocObj::Text(data.to_string())))
+    (props, b.obj(ObjNode::Text(data.to_string())))
 }
 
-/// Strips a fix term chain into its prop prefix and a fixed text obj.
-fn visit_fix_term(term: &DenullTerm) -> (Vec<Prop>, Box<DocObjFix>) {
+/// Strips a fix term chain into its prop prefix and appends a fixed text node.
+fn visit_fix_term(b: &mut DocBuilder, term: &DenullTerm) -> (Vec<Prop>, FixId) {
     let (props, data) = strip_term(term);
-    (props, Box::new(DocObjFix::Text(data.to_string())))
+    (props, b.fix(FixNode::Text(data.to_string())))
 }
 
 /// Collects a term's nest/pack wrappers (outermost first) and its text data.
@@ -243,14 +244,15 @@ fn common_prefix_len(l: &[Prop], r: &[Prop]) -> usize {
     k
 }
 
-/// Wraps a term with its props, index 0 outermost.
-fn wrap_props(props: &[Prop], term: Box<DocObj>) -> Box<DocObj> {
+/// Wraps an object with its props (index 0 outermost), returning the arena index
+/// of the outermost wrapper.
+fn wrap_props(b: &mut DocBuilder, props: &[Prop], term: ObjId) -> ObjId {
     // Apply from the tail so the first prop ends up outermost.
     let mut obj = term;
     for prop in props.iter().rev() {
         obj = match prop {
-            Prop::Nest => Box::new(DocObj::Nest(obj)),
-            Prop::Pack(index) => Box::new(DocObj::Pack(*index, obj)),
+            Prop::Nest => b.obj(ObjNode::Nest(obj)),
+            Prop::Pack(index) => b.obj(ObjNode::Pack(*index, obj)),
         };
     }
     obj
@@ -277,23 +279,28 @@ mod tests {
         mem.alloc(DenullObj::Term(term))
     }
 
+    /// The single object index a one-line document holds.
+    fn line_root(doc: &Doc) -> ObjId {
+        match doc.rows() {
+            [Row::Line(id)] => *id,
+            _ => panic!("expected a single-line document"),
+        }
+    }
+
     #[test]
     fn rescope_handles_deep_nest_term() {
         let mem = Bump::new();
         let obj = obj_term(&mem, nest_text(&mem, DEEP, "x"));
         let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
         let out = rescope(doc);
-        let Doc::Line(result) = &*out else {
-            panic!("expected a line")
-        };
         // The stripped nests are re-applied around the text.
         let mut count = 0usize;
-        let mut cur: &DocObj = result;
-        while let DocObj::Nest(inner) = cur {
+        let mut cur = line_root(&out);
+        while let ObjNode::Nest(inner) = out.objs()[cur as usize] {
             count += 1;
             cur = inner;
         }
-        assert!(matches!(cur, DocObj::Text(_)));
+        assert!(matches!(out.objs()[cur as usize], ObjNode::Text(_)));
         assert_eq!(count, DEEP);
     }
 
@@ -309,22 +316,19 @@ mod tests {
         ));
         let doc: &DenullDoc = mem.alloc(DenullDoc::Line(comp));
         let out = rescope(doc);
-        let Doc::Line(result) = &*out else {
-            panic!("expected a line")
-        };
         let mut count = 0usize;
-        let mut cur: &DocObj = result;
-        while let DocObj::Nest(inner) = cur {
+        let mut cur = line_root(&out);
+        while let ObjNode::Nest(inner) = out.objs()[cur as usize] {
             count += 1;
             cur = inner;
         }
         // The common nests wrap a single composition of the bare texts.
         assert_eq!(count, DEEP);
-        let DocObj::Comp(left, right, _) = cur else {
+        let ObjNode::Comp(left, right, _) = out.objs()[cur as usize] else {
             panic!("expected the lifted comp")
         };
-        assert!(matches!(&**left, DocObj::Text(_)));
-        assert!(matches!(&**right, DocObj::Text(_)));
+        assert!(matches!(out.objs()[left as usize], ObjNode::Text(_)));
+        assert!(matches!(out.objs()[right as usize], ObjNode::Text(_)));
     }
 
     #[test]
@@ -341,12 +345,9 @@ mod tests {
         }
         let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
         let out = rescope(doc);
-        let Doc::Line(result) = &*out else {
-            panic!("expected a line")
-        };
         let mut count = 0usize;
-        let mut cur: &DocObj = result;
-        while let DocObj::Comp(_left, right, _) = cur {
+        let mut cur = line_root(&out);
+        while let ObjNode::Comp(_left, right, _) = out.objs()[cur as usize] {
             count += 1;
             cur = right;
         }
@@ -367,15 +368,12 @@ mod tests {
         let obj: &DenullObj = mem.alloc(DenullObj::Fix(fix));
         let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
         let out = rescope(doc);
-        let Doc::Line(result) = &*out else {
-            panic!("expected a line")
-        };
-        let DocObj::Fix(fix1) = &**result else {
+        let ObjNode::Fix(fix1) = out.objs()[line_root(&out) as usize] else {
             panic!("expected a fix object")
         };
         let mut count = 0usize;
-        let mut cur: &DocObjFix = fix1;
-        while let DocObjFix::Comp(_left, right, _) = cur {
+        let mut cur = fix1;
+        while let FixNode::Comp(_left, right, _) = out.fixes()[cur as usize] {
             count += 1;
             cur = right;
         }
@@ -391,13 +389,13 @@ mod tests {
             doc = mem.alloc(DenullDoc::Break(obj, doc));
         }
         let out = rescope(doc);
-        let mut count = 0usize;
-        let mut cur: &Doc = &out;
-        while let Doc::Break(_, rest) = cur {
-            count += 1;
-            cur = rest;
-        }
-        assert!(matches!(cur, Doc::Eod));
+        // Eod-terminated spine: DEEP Break rows and no Line row.
+        let count = out
+            .rows()
+            .iter()
+            .filter(|r| matches!(r, Row::Break(_)))
+            .count();
+        assert!(!out.rows().iter().any(|r| matches!(r, Row::Line(_))));
         assert_eq!(count, DEEP);
     }
 }
