@@ -10,6 +10,7 @@
 //! enum applied at each leaf, and `cont` is a heap-allocated frame stack. The
 //! doc spine is a plain loop.
 
+use super::walk::map_denull_spine;
 use crate::compiler::types::{DenullDoc, DenullObj};
 use bumpalo::Bump;
 
@@ -33,40 +34,9 @@ enum Frame<'b, 'a> {
     Comp { left: &'a DenullObj<'a>, pad: bool },
 }
 
-/// A doc-spine element with a tail (terminals are handled separately).
-enum DocItem<'b> {
-    Empty,
-    Break(&'b DenullObj<'b>),
-}
-
 /// Reassociate after grp and seq removals
 pub fn reassociate<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    // Walk the linear spine to its terminal (Eod or Line), reassociating each
-    // object, then fold the collected items back on.
-    let mut items: Vec<DocItem<'b>> = Vec::new();
-    let mut cur = doc;
-    let terminal: &'b DenullDoc<'b> = loop {
-        match cur {
-            DenullDoc::Eod => break mem.alloc(DenullDoc::Eod),
-            DenullDoc::Line(obj) => break mem.alloc(DenullDoc::Line(_reassoc_obj(mem, obj))),
-            DenullDoc::Empty(doc1) => {
-                items.push(DocItem::Empty);
-                cur = doc1;
-            }
-            DenullDoc::Break(obj, doc1) => {
-                items.push(DocItem::Break(_reassoc_obj(mem, obj)));
-                cur = doc1;
-            }
-        }
-    };
-    let mut result = terminal;
-    for item in items.iter().rev() {
-        result = match item {
-            DocItem::Empty => mem.alloc(DenullDoc::Empty(result)),
-            DocItem::Break(obj) => mem.alloc(DenullDoc::Break(obj, result)),
-        };
-    }
-    result
+    map_denull_spine(mem, doc, _reassoc_obj)
 }
 
 /// Reassociates a single object, right-associating its compositions.

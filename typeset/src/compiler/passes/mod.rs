@@ -26,6 +26,7 @@ pub mod reassociate;
 pub mod rescope;
 pub mod serialize;
 pub mod structurize;
+mod walk;
 
 // Re-export all pass functions
 pub use broken::broken;

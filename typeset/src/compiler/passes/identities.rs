@@ -7,6 +7,7 @@
 //! `_visit_obj` runs as a descend/ascend trampoline over a heap-allocated frame
 //! stack, and the doc spines are plain loops.
 
+use super::walk::map_denull_spine;
 use crate::compiler::types::{DenullDoc, DenullFix, DenullObj};
 use bumpalo::Bump;
 
@@ -23,12 +24,6 @@ fn _add(left: Count, right: Count) -> Count {
         (_, Count::Zero) => left,
         (Count::Many, _) | (_, Count::Many) | (Count::One, Count::One) => Count::Many,
     }
-}
-
-/// A doc-spine element with a tail (terminals are handled separately).
-enum DocItem<'b> {
-    Empty,
-    Break(&'b DenullObj<'b>),
 }
 
 /// Frames for the seq-elimination object trampoline.
@@ -70,41 +65,8 @@ pub fn identities<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b Denu
     _elim_grps(mem, doc1)
 }
 
-/// Walk a linear doc spine, mapping each object with `obj_fn`, then fold the
-/// collected items back onto the Eod/Line terminal.
-fn _elim_spine<'b, 'a: 'b>(
-    mem: &'b Bump,
-    doc: &'a DenullDoc<'a>,
-    obj_fn: impl Fn(&'b Bump, &'a DenullObj<'a>) -> &'b DenullObj<'b>,
-) -> &'b DenullDoc<'b> {
-    let mut items: Vec<DocItem<'b>> = Vec::new();
-    let mut cur = doc;
-    let terminal: &'b DenullDoc<'b> = loop {
-        match cur {
-            DenullDoc::Eod => break mem.alloc(DenullDoc::Eod),
-            DenullDoc::Line(obj) => break mem.alloc(DenullDoc::Line(obj_fn(mem, obj))),
-            DenullDoc::Empty(doc1) => {
-                items.push(DocItem::Empty);
-                cur = doc1;
-            }
-            DenullDoc::Break(obj, doc1) => {
-                items.push(DocItem::Break(obj_fn(mem, obj)));
-                cur = doc1;
-            }
-        }
-    };
-    let mut result = terminal;
-    for item in items.iter().rev() {
-        result = match item {
-            DocItem::Empty => mem.alloc(DenullDoc::Empty(result)),
-            DocItem::Break(obj) => mem.alloc(DenullDoc::Break(obj, result)),
-        };
-    }
-    result
-}
-
 fn _elim_seqs<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    _elim_spine(mem, doc, |mem, obj| _visit_obj_seqs(mem, obj, false).1)
+    map_denull_spine(mem, doc, |mem, obj| _visit_obj_seqs(mem, obj, false).1)
 }
 
 /// Bottom-up fold eliminating seq wrappers that group fewer than two
@@ -179,7 +141,7 @@ fn _visit_obj_seqs<'b, 'a: 'b>(
 }
 
 fn _elim_grps<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    _elim_spine(mem, doc, |mem, obj| _visit_obj_grps(mem, obj, true).1)
+    map_denull_spine(mem, doc, |mem, obj| _visit_obj_grps(mem, obj, true).1)
 }
 
 /// Bottom-up fold eliminating grp wrappers that group fewer than two

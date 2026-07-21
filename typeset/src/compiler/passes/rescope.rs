@@ -10,6 +10,7 @@
 //! heap-allocated frame stacks; the prop helpers (`_strip_term`,
 //! `_common_prefix_len`, `_wrap_props`) and the doc spine are plain loops.
 
+use super::walk::map_denull_spine;
 use crate::compiler::types::{
     DenullDoc, DenullFix, DenullObj, DenullTerm, FinalDoc, FinalDocObj, FinalDocObjFix,
 };
@@ -19,12 +20,6 @@ use bumpalo::Bump;
 enum Prop {
     Nest,
     Pack(u64),
-}
-
-/// A doc-spine element with a tail (terminals are handled separately).
-enum DocItem<'b> {
-    Empty,
-    Break(&'b FinalDocObj<'b>),
 }
 
 /// Frames for the object trampoline; ascending value is `(props, obj)`.
@@ -57,35 +52,10 @@ enum FixFrame<'b, 'a> {
 
 /// Rescope nest and pack
 pub fn rescope<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b FinalDoc<'b> {
-    // Walk the linear spine to its terminal, rescoping each object.
-    let mut items: Vec<DocItem<'b>> = Vec::new();
-    let mut cur = doc;
-    let terminal: &'b FinalDoc<'b> = loop {
-        match cur {
-            DenullDoc::Eod => break mem.alloc(FinalDoc::Eod),
-            DenullDoc::Line(obj) => {
-                let (props, obj1) = _visit_obj(mem, obj);
-                break mem.alloc(FinalDoc::Line(_wrap_props(mem, &props, obj1)));
-            }
-            DenullDoc::Empty(doc1) => {
-                items.push(DocItem::Empty);
-                cur = doc1;
-            }
-            DenullDoc::Break(obj, doc1) => {
-                let (props, obj1) = _visit_obj(mem, obj);
-                items.push(DocItem::Break(_wrap_props(mem, &props, obj1)));
-                cur = doc1;
-            }
-        }
-    };
-    let mut result = terminal;
-    for item in items.iter().rev() {
-        result = match item {
-            DocItem::Empty => mem.alloc(FinalDoc::Empty(result)),
-            DocItem::Break(obj) => mem.alloc(FinalDoc::Break(obj, result)),
-        };
-    }
-    result
+    map_denull_spine(mem, doc, |mem, obj| {
+        let (props, obj1) = _visit_obj(mem, obj);
+        _wrap_props(mem, &props, obj1)
+    })
 }
 
 /// Rescopes one object, returning its stripped prop prefix and the rescoped
