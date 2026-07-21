@@ -60,6 +60,15 @@ Build layout trees using constructors:
 1. **Compilation**: `compile()` applies optimization passes to layout trees
 2. **Rendering**: `render()` outputs formatted text with proper line breaks and indentation
 
+**Stack usage:** the ten transform passes in `passes/` run iteratively — each is
+a descend/ascend trampoline over a heap-allocated frame stack, and the passes
+that were written in continuation-passing style have had their continuation
+chains defunctionalized into explicit data. They therefore use constant native
+stack regardless of layout depth. Native-stack recursion remains only in pass 10
+(`move_to_heap`, moving the document from the bump allocator to the heap `Doc`),
+in the renderer, and in the recursive `Drop` of `Doc`; those still bound how deep
+a layout can be compiled and rendered (see `TWO_BUFFER_DESIGN.md`).
+
 ## Key Layout Concepts
 
 ### Composition Behavior

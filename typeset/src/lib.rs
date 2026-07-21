@@ -67,18 +67,19 @@
 //!
 //! The library provides both safe and unsafe compilation modes:
 //!
-//! - **[`compile()`]** - Fast compilation (may panic on stack overflow)
+//! - **[`compile()`]** - Fast compilation (aborts the process on stack overflow
+//!   for very deep layouts; see its docs)
 //! - **[`compile_safe()`]** - Safe compilation with error handling
-//! - **[`compile_safe_with_depth()`]** - Safe compilation with custom recursion limits
+//! - **[`compile_safe_with_depth()`]** - Safe compilation with custom depth limits
 //!
 //! ## Performance
 //!
 //! Typeset is designed for high performance:
 //!
 //! - Zero-copy transformations using bump allocation
-//! - Optimal line breaking algorithms  
-//! - Efficient memory management with controlled recursion
-//! - Support for large documents without stack overflow
+//! - Optimal line breaking algorithms
+//! - Iterative compiler passes (transform passes run in constant native stack,
+//!   so deep layouts do not overflow during compilation itself)
 //!
 //! ## Examples
 //!

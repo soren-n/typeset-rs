@@ -80,11 +80,23 @@ pub fn compile_safe_with_depth(layout: Box<Layout>, max_depth: usize) -> Result<
 - Future-ready for true two-buffer optimization
 
 **Status note:** the depth limit is enforced by measuring the layout before
-compiling, not by tracking recursion during it. Exhausting the native stack
-mid-pass aborts the process and cannot be caught, so the limit must be set below
-the depth at which that happens (roughly 200-300 levels on a debug build with a
-2 MB stack). The 10,000 default used by `compile_safe()` sits above that
-boundary and is therefore nominal. `AllocationFailed` is never constructed.
+compiling, not by tracking recursion during it. The ten transform passes
+(`broken` … `structurize`, plus `denull`/`identities`/`reassociate`/`rescope`)
+now run iteratively — as descend/ascend trampolines with heap-allocated frame
+stacks — so they no longer recurse on the native stack. The remaining
+native-stack recursion is in pass 10 (`move_to_heap`, `FinalDoc` → `Doc`), the
+renderer, and the recursive drop of the resulting `Doc`. Exhausting the native
+stack there still aborts the process and cannot be caught, so the limit must be
+set below the depth at which that happens: on a debug build with a 2 MB stack,
+rendering aborts around 1,000-2,000 levels and compilation alone around 15,000.
+The 10,000 default used by `compile_safe()` sits above the rendering boundary,
+so pass an explicit limit when you render untrusted input. `AllocationFailed` is
+never constructed.
+
+Making the whole path deep-safe additionally requires converting
+`move_to_heap` and the renderer to iterate and giving `Doc`/`DocObj`/`DocObjFix`
+an iterative `Drop` (which entails reworking the renderer from consuming `Doc`
+by value to borrowing it).
 
 ## Implementation Challenges & Solutions
 
