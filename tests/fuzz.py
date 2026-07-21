@@ -44,10 +44,14 @@ def main():
     rng = random.Random(seed)
     failures = 0
     for i in range(iterations):
-        expr = gen(rng, rng.randint(2, 5))
-        width = str(rng.choice([3, 5, 8, 12, 20, 40, 80]))
-        ocaml, oc_rc = run(["./_build/oracle", expr, "2", width])
-        rust_raw, rs_rc = run(["./_build/unit", expr, "2", width])
+        # Deeper trees interleave more grp/seq scopes, which is where the two
+        # implementations' breaking decisions can diverge. Depth stays well
+        # under the ~2000-level recursive-parser limit.
+        expr = gen(rng, rng.randint(3, 9))
+        width = str(rng.choice([1, 2, 3, 5, 8, 12, 20, 40, 80]))
+        tab = str(rng.choice([0, 1, 2, 4, 8]))
+        ocaml, oc_rc = run(["./_build/oracle", expr, tab, width])
+        rust_raw, rs_rc = run(["./_build/unit", expr, tab, width])
         if oc_rc != 0 or rs_rc != 0:
             print("ERROR rc oc=%d rs=%d: %s" % (oc_rc, rs_rc, expr))
             failures += 1
@@ -57,7 +61,7 @@ def main():
         if ocaml != rust:
             failures += 1
             print("=" * 60)
-            print("expr:  %s\nwidth: %s" % (expr, width))
+            print("expr:  %s\ntab:   %s\nwidth: %s" % (expr, tab, width))
             print("--- ocaml ---\n%s--- rust ---\n%s" % (ocaml, rust))
             if failures >= 5:
                 print("stopping after 5 mismatches")
