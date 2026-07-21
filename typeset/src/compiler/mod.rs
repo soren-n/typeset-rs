@@ -6,9 +6,8 @@
 //!
 //! ## Architecture
 //!
-//! The compiler uses a multi-pass architecture:
-//! Layout → Edsl → Serial → LinearDoc → FixedDoc → RebuildDoc →
-//! DenullDoc → FinalDoc → Doc → String
+//! The compiler uses a multi-pass architecture; see [`pipeline`] for the
+//! authoritative pass-by-pass description of the intermediate representations.
 //!
 //! ## Module Organization
 //!
@@ -29,10 +28,5 @@ pub mod types;
 pub use error::CompilerError;
 pub use types::{Doc, Layout};
 
-// Re-export the main compilation functions using new modular pipeline
+// Re-export the main compilation and rendering functions.
 pub use pipeline::{compile, compile_safe, compile_safe_with_depth, render, render_ref};
-
-// Re-export constructor functions using new modular types
-// pub use constructors::{
-//     format_layout,
-// };

@@ -43,15 +43,18 @@
 //!
 //! ### Compilation Pipeline
 //!
-//! The library uses a sophisticated multi-pass compiler that transforms layouts through
-//! several intermediate representations:
+//! The library uses a sophisticated multi-pass compiler that transforms layouts
+//! through several intermediate representations, each lowered in a fresh bump
+//! arena:
 //!
 //! ```text
 //! Layout → Edsl → Serial → LinearDoc → FixedDoc → RebuildDoc →
 //! DenullDoc → FinalDoc → Doc → String
 //! ```
 //!
-//! This pipeline ensures optimal layout decisions and efficient memory usage.
+//! The `DenullDoc → DenullDoc` identity-removal and reassociation passes are
+//! elided above for brevity. This pipeline ensures optimal layout decisions and
+//! efficient memory usage.
 //!
 //! ## Architecture Overview
 //!

@@ -24,15 +24,16 @@ use crate::compiler::{
         broken, denull, fixed, identities, linearize, move_to_heap, reassociate, rescope,
         serialize, structurize,
     },
-    render::{render as render_doc, render_ref as render_ref_doc},
+    render::render_ref as render_ref_impl,
     types::{Doc, Layout},
 };
 
-/// Compiles a layout into an optimized document, panicking on internal error.
+/// Compiles a layout into an optimized document.
 ///
-/// The fast path: it runs [`compile_safe`] and unwraps. The pipeline is
-/// iterative, so deep layouts do not overflow the stack; if layout depth is
-/// untrusted, use [`compile_safe_with_depth`] to bound it up front.
+/// The fast path, and infallible: the pipeline is iterative, so no layout is
+/// too deep to compile and there is no depth cap. If layout depth is untrusted
+/// and you want to bound the O(depth) heap it can allocate, use
+/// [`compile_safe_with_depth`] to reject over-deep layouts up front instead.
 ///
 /// # Examples
 ///
@@ -43,10 +44,7 @@ use crate::compiler::{
 /// assert_eq!(render(doc, 2, 80), "Hello, world!");
 /// ```
 pub fn compile(layout: Box<Layout>) -> Box<Doc> {
-    match compile_safe(layout) {
-        Ok(doc) => doc,
-        Err(e) => panic!("Compilation failed: {:?}", e),
-    }
+    run_passes(layout)
 }
 
 /// Compiles a layout, returning a [`Result`] and rejecting layouts deeper than
@@ -71,7 +69,7 @@ pub fn compile_safe(layout: Box<Layout>) -> Result<Box<Doc>, CompilerError> {
 ///
 /// Walks iteratively with an explicit stack: a recursive walk would overflow on
 /// exactly the deep inputs this exists to reject.
-fn _measure_depth(layout: &Layout) -> usize {
+fn measure_depth(layout: &Layout) -> usize {
     let mut deepest = 0usize;
     let mut stack: Vec<(&Layout, usize)> = vec![(layout, 1)];
     while let Some((node, depth)) = stack.pop() {
@@ -128,15 +126,23 @@ pub fn compile_safe_with_depth(
     // bound rather than a stack-safety guard: it caps the O(depth) heap that an
     // untrusted layout can allocate. The walk itself is iterative so measuring a
     // deep layout cannot overflow.
-    let depth = _measure_depth(&layout);
+    let depth = measure_depth(&layout);
     if depth > max_depth {
         return Err(CompilerError::DepthLimitExceeded { depth, max_depth });
     }
 
+    Ok(run_passes(layout))
+}
+
+/// Runs the ten-pass pipeline, lowering [`Layout`] to a heap [`Doc`].
+///
+/// Infallible and iterative: shared by [`compile`] (no depth bound) and
+/// [`compile_safe_with_depth`] (which measures and rejects over-deep layouts
+/// before calling here). Each pass allocates its output in a fresh bump arena,
+/// so every intermediate representation is freed once this returns.
+fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     use bumpalo::Bump;
 
-    // A separate bump arena per pass, so each intermediate representation is
-    // freed once the pipeline returns.
     let mem1 = Bump::new();
     let edsl = broken(&mem1, layout);
 
@@ -165,7 +171,7 @@ pub fn compile_safe_with_depth(
     let final_doc = rescope(&mem9, reassociate_doc);
 
     // Pass 10: FinalDoc → Doc (move to heap; does not use an arena).
-    Ok(move_to_heap(final_doc))
+    move_to_heap(final_doc)
 }
 
 /// Renders a compiled document to a formatted string, consuming it.
@@ -191,7 +197,7 @@ pub fn compile_safe_with_depth(
 /// assert_eq!(render(doc, 2, 80), "hello world");
 /// ```
 pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
-    render_doc(doc, tab, width)
+    render_ref_impl(&doc, tab, width)
 }
 
 /// Renders a compiled document by reference, without consuming it.
@@ -216,7 +222,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
 /// assert_eq!(render_ref(&doc, 2, 80), "hello world");
 /// ```
 pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
-    render_ref_doc(doc, tab, width)
+    render_ref_impl(doc, tab, width)
 }
 
 #[cfg(test)]

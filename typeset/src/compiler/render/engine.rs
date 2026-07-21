@@ -474,20 +474,3 @@ pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
     }
     result
 }
-
-/// Renders a compiled document into a formatted string, consuming it.
-///
-/// Convenience wrapper over [`render_ref`] for the common case of rendering a
-/// document once. When rendering the same document more than once, prefer
-/// [`render_ref`] to avoid moving (or cloning) it.
-///
-/// # Arguments
-/// * `doc` - The compiled document to render
-/// * `tab` - Tab size for indentation
-/// * `width` - Target line width for formatting
-///
-/// # Returns
-/// A formatted string representation of the document
-pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
-    render_ref(&doc, tab, width)
-}
