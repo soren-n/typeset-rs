@@ -4,25 +4,20 @@ use typeset::*;
 fn main() {
     println!("=== Convenience API Demonstration ===\n");
 
-    // Old way vs new way for common patterns
+    // `text` accepts anything convertible into a String, so a &str literal or
+    // an owned String both work without an explicit conversion.
     println!("=== String Handling ===");
 
-    // text_str convenience
-    let old_way = text("Hello".to_string());
-    let new_way = text_str("Hello");
+    let from_str = text("Hello");
+    let from_string = text(String::from("Hello"));
 
-    println!("Old: {}", format_layout(old_way, 2, 40));
-    println!("New: {}", format_layout(new_way, 2, 40));
+    println!("From &str:   {}", format_layout(from_str, 2, 40));
+    println!("From String: {}", format_layout(from_string, 2, 40));
 
     // Joining words with spaces
     println!("\n=== Joining Functions ===");
 
-    let words = vec![
-        text_str("The"),
-        text_str("quick"),
-        text_str("brown"),
-        text_str("fox"),
-    ];
+    let words = vec![text("The"), text("quick"), text("brown"), text("fox")];
 
     // Old way - manual composition
     let manual = pad(
@@ -37,14 +32,14 @@ fn main() {
     println!("With join function: {}", format_layout(with_join, 2, 40));
 
     // Comma-separated list
-    let items = vec![text_str("apple"), text_str("banana"), text_str("cherry")];
+    let items = vec![text("apple"), text("banana"), text("cherry")];
     let comma_list = join_with_commas(items);
     println!("Comma list: {}", format_layout(comma_list, 2, 40));
 
     // Wrapping functions
     println!("\n=== Wrapping Functions ===");
 
-    let content = text_str("content");
+    let content = text("content");
 
     println!(
         "Parentheses: {}",
@@ -59,8 +54,8 @@ fn main() {
     // Composition shortcuts
     println!("\n=== Composition Shortcuts ===");
 
-    let left = text_str("left");
-    let right = text_str("right");
+    let left = text("left");
+    let right = text("right");
 
     println!(
         "Padded: {}",
@@ -82,11 +77,7 @@ fn main() {
     // Line joining
     println!("\n=== Line Functions ===");
 
-    let lines = vec![
-        text_str("First line"),
-        text_str("Second line"),
-        text_str("Third line"),
-    ];
+    let lines = vec![text("First line"), text("Second line"), text("Third line")];
 
     let multiline = join_with_lines(lines);
     println!("Joined lines:\n{}", format_layout(multiline, 2, 40));
@@ -94,8 +85,8 @@ fn main() {
     // Practical example: function call
     println!("\n=== Practical Example: Function Call ===");
 
-    let function_name = text_str("calculate");
-    let args = vec![text_str("x"), text_str("y"), text_str("z")];
+    let function_name = text("calculate");
+    let args = vec![text("x"), text("y"), text("z")];
 
     let function_call = unpad(function_name, parens(join_with_commas(args)));
 
@@ -104,8 +95,7 @@ fn main() {
     // Complex example with nesting
     println!("\n=== Complex Example: JSON-like Object ===");
 
-    let key_value =
-        |key: &str, value: &str| unpad(unpad(text_str(key), text_str(": ")), text_str(value));
+    let key_value = |key: &str, value: &str| unpad(unpad(text(key), text(": ")), text(value));
 
     let object_entries = vec![
         key_value("name", "\"Alice\""),

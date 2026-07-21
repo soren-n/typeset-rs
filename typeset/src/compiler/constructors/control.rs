@@ -6,7 +6,7 @@ use crate::compiler::types::Layout;
 ///
 /// ```rust
 /// use typeset::*;
-/// let expr = fix(comp(text_str("a"), comp(text_str(" + "), text_str("b"), false, false), false, false));
+/// let expr = fix(comp(text("a"), comp(text(" + "), text("b"), false, false), false, false));
 /// // Fixed content stays on one line even when narrower than its width.
 /// assert_eq!(format_layout(expr, 2, 10), "a + b");
 /// ```
@@ -19,7 +19,7 @@ pub fn fix(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let args = grp(join_with_commas(vec![text_str("a"), text_str("b")]));
+/// let args = grp(join_with_commas(vec![text("a"), text("b")]));
 /// // When it fits, the group stays on one line.
 /// assert_eq!(format_layout(args, 2, 80), "a, b");
 /// ```
@@ -32,7 +32,7 @@ pub fn grp(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let stmts = seq(join_with_lines(vec![text_str("a;"), text_str("b;")]));
+/// let stmts = seq(join_with_lines(vec![text("a;"), text("b;")]));
 /// assert_eq!(format_layout(stmts, 2, 80), "a;\nb;");
 /// ```
 pub fn seq(layout: Box<Layout>) -> Box<Layout> {
@@ -44,7 +44,7 @@ pub fn seq(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let call = comp(text_str("f("), comp(nest(text_str("x")), text_str(")"), false, false), false, false);
+/// let call = comp(text("f("), comp(nest(text("x")), text(")"), false, false), false, false);
 /// assert_eq!(format_layout(call, 2, 80), "f(x)");
 /// ```
 pub fn nest(layout: Box<Layout>) -> Box<Layout> {
@@ -57,7 +57,7 @@ pub fn nest(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// assert_eq!(format_layout(pack(text_str("x")), 2, 80), "x");
+/// assert_eq!(format_layout(pack(text("x")), 2, 80), "x");
 /// ```
 pub fn pack(layout: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Pack(layout))

@@ -17,20 +17,13 @@ pub fn null() -> Box<Layout> {
 /// A text literal: the fundamental visible content. Text is a single unit that
 /// never breaks across lines.
 ///
-/// ```rust
-/// use typeset::*;
-/// assert_eq!(format_layout(text("Hello, world!".to_string()), 2, 80), "Hello, world!");
-/// ```
-pub fn text(data: String) -> Box<Layout> {
-    Box::new(Layout::Text(data))
-}
-
-/// [`text`] taking a `&str`, equivalent to `text(s.to_string())`.
+/// Accepts anything convertible into a `String` — a `&str` literal or an owned
+/// `String` both work without an explicit conversion.
 ///
 /// ```rust
 /// use typeset::*;
-/// assert_eq!(format_layout(text_str("Hello"), 2, 80), "Hello");
+/// assert_eq!(format_layout(text("Hello, world!"), 2, 80), "Hello, world!");
 /// ```
-pub fn text_str(s: &str) -> Box<Layout> {
-    text(s.to_string())
+pub fn text(data: impl Into<String>) -> Box<Layout> {
+    Box::new(Layout::Text(data.into()))
 }

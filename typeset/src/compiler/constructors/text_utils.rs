@@ -1,48 +1,48 @@
 //! Convenience constructors for common text elements: spaces, punctuation, and
 //! line breaks.
 
-use super::basic::{null, text_str};
+use super::basic::{null, text};
 use super::composition::line;
 use crate::compiler::types::Layout;
 
-/// A single space, equivalent to `text_str(" ")`.
+/// A single space, equivalent to `text(" ")`.
 ///
 /// ```rust
 /// use typeset::*;
-/// let spaced = comp(text_str("Hello"), comp(space(), text_str("world"), false, false), false, false);
+/// let spaced = comp(text("Hello"), comp(space(), text("world"), false, false), false, false);
 /// assert_eq!(format_layout(spaced, 2, 80), "Hello world");
 /// ```
 pub fn space() -> Box<Layout> {
-    text_str(" ")
+    text(" ")
 }
 
-/// A comma, `text_str(",")`. Usually reached via [`join_with_commas`](crate::join_with_commas).
+/// A comma, `text(",")`. Usually reached via [`join_with_commas`](crate::join_with_commas).
 ///
 /// ```rust
 /// use typeset::*;
-/// let items = join_with_commas(vec![text_str("a"), text_str("b"), text_str("c")]);
+/// let items = join_with_commas(vec![text("a"), text("b"), text("c")]);
 /// assert_eq!(format_layout(items, 2, 80), "a, b, c");
 /// ```
 pub fn comma() -> Box<Layout> {
-    text_str(",")
+    text(",")
 }
 
-/// A semicolon, `text_str(";")`.
+/// A semicolon, `text(";")`.
 ///
 /// ```rust
 /// use typeset::*;
-/// let statement = comp(text_str("let x = 5"), semicolon(), false, false);
+/// let statement = comp(text("let x = 5"), semicolon(), false, false);
 /// assert_eq!(format_layout(statement, 2, 80), "let x = 5;");
 /// ```
 pub fn semicolon() -> Box<Layout> {
-    text_str(";")
+    text(";")
 }
 
 /// A line break with no content on either side, equivalent to `line(null(), null())`.
 ///
 /// ```rust
 /// use typeset::*;
-/// let separated = comp(text_str("First line"), comp(newline(), text_str("Second line"), false, false), false, false);
+/// let separated = comp(text("First line"), comp(newline(), text("Second line"), false, false), false, false);
 /// assert_eq!(format_layout(separated, 2, 80), "First line\nSecond line");
 /// ```
 pub fn newline() -> Box<Layout> {
@@ -53,7 +53,7 @@ pub fn newline() -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let document = comp(text_str("Section 1"), comp(blank_line(), text_str("Section 2"), false, false), false, false);
+/// let document = comp(text("Section 1"), comp(blank_line(), text("Section 2"), false, false), false, false);
 /// assert_eq!(format_layout(document, 2, 80), "Section 1\n\nSection 2");
 /// ```
 pub fn blank_line() -> Box<Layout> {

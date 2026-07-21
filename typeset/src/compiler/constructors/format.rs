@@ -14,7 +14,7 @@ use crate::compiler::types::Layout;
 ///
 /// ```rust
 /// use typeset::*;
-/// assert_eq!(format_layout(text_str("Hello, world!"), 2, 80), "Hello, world!");
+/// assert_eq!(format_layout(text("Hello, world!"), 2, 80), "Hello, world!");
 /// ```
 pub fn format_layout(layout: Box<Layout>, tab: usize, width: usize) -> String {
     use crate::compiler::pipeline;

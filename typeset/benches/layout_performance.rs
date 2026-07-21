@@ -4,25 +4,23 @@ use typeset::*;
 // Benchmark data structures for different complexity levels
 fn create_simple_layout() -> Box<Layout> {
     join_with_spaces(vec![
-        text_str("Hello"),
-        text_str("World"),
-        text_str("from"),
-        text_str("typeset"),
+        text("Hello"),
+        text("World"),
+        text("from"),
+        text("typeset"),
     ])
 }
 
 fn create_nested_layout(depth: usize) -> Box<Layout> {
-    let mut layout = text_str("base");
+    let mut layout = text("base");
     for i in 0..depth {
-        layout = nest(comp(text_str(&format!("level_{}", i)), layout, true, false));
+        layout = nest(comp(text(format!("level_{}", i)), layout, true, false));
     }
     layout
 }
 
 fn create_wide_layout(width: usize) -> Box<Layout> {
-    let items: Vec<_> = (0..width)
-        .map(|i| text_str(&format!("item_{}", i)))
-        .collect();
+    let items: Vec<_> = (0..width).map(|i| text(format!("item_{}", i))).collect();
     join_with_spaces(items)
 }
 
@@ -30,8 +28,8 @@ fn create_json_like_layout(size: usize) -> Box<Layout> {
     let entries: Vec<_> = (0..size)
         .map(|i| {
             unpad(
-                unpad(text_str(&format!("\"key_{}\"", i)), text_str(": ")),
-                text_str(&format!("\"value_{}\"", i)),
+                unpad(text(format!("\"key_{}\"", i)), text(": ")),
+                text(format!("\"value_{}\"", i)),
             )
         })
         .collect();
@@ -195,9 +193,9 @@ fn bench_reuse_efficiency(c: &mut Criterion) {
 fn bench_combinators(c: &mut Criterion) {
     let mut group = c.benchmark_group("combinators");
 
-    let base = text_str("content");
+    let base = text("content");
 
-    group.bench_function("text", |b| b.iter(|| text_str("benchmark text")));
+    group.bench_function("text", |b| b.iter(|| text("benchmark text")));
 
     group.bench_function("comp_padded", |b| {
         b.iter(|| comp(base.clone(), base.clone(), true, false))

@@ -12,7 +12,7 @@ use crate::compiler::types::Layout;
 ///
 /// ```rust
 /// use typeset::*;
-/// let joined = join_with(vec![text_str("a"), text_str("b")], comp(comma(), space(), false, false));
+/// let joined = join_with(vec![text("a"), text("b")], comp(comma(), space(), false, false));
 /// assert_eq!(format_layout(joined, 2, 80), "a, b");
 /// ```
 pub fn join_with(mut layouts: Vec<Box<Layout>>, separator: Box<Layout>) -> Box<Layout> {
@@ -38,7 +38,7 @@ pub fn join_with(mut layouts: Vec<Box<Layout>>, separator: Box<Layout>) -> Box<L
 ///
 /// ```rust
 /// use typeset::*;
-/// let sentence = join_with_spaces(vec![text_str("Hello"), text_str("world")]);
+/// let sentence = join_with_spaces(vec![text("Hello"), text("world")]);
 /// assert_eq!(format_layout(sentence, 2, 80), "Hello world");
 /// ```
 pub fn join_with_spaces(layouts: Vec<Box<Layout>>) -> Box<Layout> {
@@ -49,7 +49,7 @@ pub fn join_with_spaces(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let params = join_with_commas(vec![text_str("x"), text_str("y"), text_str("z")]);
+/// let params = join_with_commas(vec![text("x"), text("y"), text("z")]);
 /// assert_eq!(format_layout(params, 2, 80), "x, y, z");
 /// ```
 pub fn join_with_commas(layouts: Vec<Box<Layout>>) -> Box<Layout> {
@@ -60,7 +60,7 @@ pub fn join_with_commas(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let lines = join_with_lines(vec![text_str("a;"), text_str("b;")]);
+/// let lines = join_with_lines(vec![text("a;"), text("b;")]);
 /// assert_eq!(format_layout(lines, 2, 80), "a;\nb;");
 /// ```
 pub fn join_with_lines(mut layouts: Vec<Box<Layout>>) -> Box<Layout> {

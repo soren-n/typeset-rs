@@ -8,7 +8,7 @@
 //!
 //! The constructor functions create different types of layout nodes:
 //!
-//! - **Basic constructors** - [`null`], [`text`], [`text_str`]
+//! - **Basic constructors** - [`null`], [`text`]
 //! - **Control constructors** - [`fix`], [`grp`], [`seq`], [`nest`], [`pack`]
 //! - **Composition constructors** - [`line()`], [`comp`] and shortcuts [`pad`], [`unpad`], etc.
 //! - **Convenience constructors** - [`space`], [`comma`], [`newline`], etc.
@@ -44,7 +44,7 @@ pub mod text_utils;
 pub mod wrappers;
 
 // Basic constructors
-pub use basic::{null, text, text_str};
+pub use basic::{null, text};
 
 // Control constructors
 pub use control::{fix, grp, nest, pack, seq};

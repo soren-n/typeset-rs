@@ -11,10 +11,10 @@
 //!
 //! // Create a simple layout
 //! let layout = comp(
-//!     text("function".to_string()),
+//!     text("function"),
 //!     nest(comp(
-//!         text("name()".to_string()),
-//!         text("{ body }".to_string()),
+//!         text("name()"),
+//!         text("{ body }"),
 //!         true, false
 //!     )),
 //!     true, false
@@ -94,8 +94,8 @@
 //! use typeset::*;
 //!
 //! let layout = join_with_spaces(vec![
-//!     text("Hello".to_string()),
-//!     text("world!".to_string()),
+//!     text("Hello"),
+//!     text("world!"),
 //! ]);
 //!
 //! let result = format_layout(layout, 2, 80);
@@ -109,8 +109,8 @@
 //!
 //! let json_object = braces(
 //!     join_with_commas(vec![
-//!         comp(text("\"name\"".to_string()), text("\"John\"".to_string()), true, false),
-//!         comp(text("\"age\"".to_string()), text("30".to_string()), true, false),
+//!         comp(text("\"name\""), text("\"John\""), true, false),
+//!         comp(text("\"age\""), text("30"), true, false),
 //!     ])
 //! );
 //!
@@ -195,7 +195,6 @@ pub use self::compiler::constructors::{
     // Convenience constructors
     space,
     text,
-    text_str,
     unpad,
 };
 

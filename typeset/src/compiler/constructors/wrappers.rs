@@ -1,6 +1,6 @@
 //! Constructors that wrap a layout in delimiters: `()`, `[]`, `{}`.
 
-use super::basic::text_str;
+use super::basic::text;
 use super::composition::comp;
 use crate::compiler::types::Layout;
 
@@ -9,8 +9,8 @@ use crate::compiler::types::Layout;
 /// apart from the content (the content may still break internally).
 fn wrap(open: &str, close: &str, layout: Box<Layout>) -> Box<Layout> {
     comp(
-        text_str(open),
-        comp(layout, text_str(close), false, false),
+        text(open),
+        comp(layout, text(close), false, false),
         false,
         false,
     )
@@ -20,7 +20,7 @@ fn wrap(open: &str, close: &str, layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let call = comp(text_str("f"), parens(join_with_commas(vec![text_str("a"), text_str("b")])), false, false);
+/// let call = comp(text("f"), parens(join_with_commas(vec![text("a"), text("b")])), false, false);
 /// assert_eq!(format_layout(call, 2, 80), "f(a, b)");
 /// ```
 pub fn parens(layout: Box<Layout>) -> Box<Layout> {
@@ -31,7 +31,7 @@ pub fn parens(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let array = brackets(join_with_commas(vec![text_str("1"), text_str("2"), text_str("3")]));
+/// let array = brackets(join_with_commas(vec![text("1"), text("2"), text("3")]));
 /// assert_eq!(format_layout(array, 2, 80), "[1, 2, 3]");
 /// ```
 pub fn brackets(layout: Box<Layout>) -> Box<Layout> {
@@ -43,7 +43,7 @@ pub fn brackets(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let block = braces(text_str("body"));
+/// let block = braces(text("body"));
 /// assert_eq!(format_layout(block, 2, 80), "{body}");
 /// ```
 pub fn braces(layout: Box<Layout>) -> Box<Layout> {

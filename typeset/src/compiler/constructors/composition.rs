@@ -8,7 +8,7 @@ use crate::compiler::types::{Attr, Layout};
 ///
 /// ```rust
 /// use typeset::*;
-/// assert_eq!(format_layout(line(text_str("First"), text_str("Second")), 2, 80), "First\nSecond");
+/// assert_eq!(format_layout(line(text("First"), text("Second")), 2, 80), "First\nSecond");
 /// ```
 pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Line(left, right))
@@ -22,7 +22,7 @@ pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let padded = comp(text_str("function"), text_str("name()"), true, false);
+/// let padded = comp(text("function"), text("name()"), true, false);
 /// assert_eq!(format_layout(padded, 2, 80), "function name()");
 /// ```
 pub fn comp(left: Box<Layout>, right: Box<Layout>, pad: bool, fix: bool) -> Box<Layout> {
@@ -33,7 +33,7 @@ pub fn comp(left: Box<Layout>, right: Box<Layout>, pad: bool, fix: bool) -> Box<
 ///
 /// ```rust
 /// use typeset::*;
-/// assert_eq!(format_layout(pad(text_str("Hello"), text_str("world")), 2, 80), "Hello world");
+/// assert_eq!(format_layout(pad(text("Hello"), text("world")), 2, 80), "Hello world");
 /// ```
 pub fn pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, true, false)
@@ -43,7 +43,7 @@ pub fn pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// assert_eq!(format_layout(unpad(text_str("prefix"), text_str("suffix")), 2, 80), "prefixsuffix");
+/// assert_eq!(format_layout(unpad(text("prefix"), text("suffix")), 2, 80), "prefixsuffix");
 /// ```
 pub fn unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, false, false)
@@ -54,7 +54,7 @@ pub fn unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// ```rust
 /// use typeset::*;
 /// // Stays on one line even when narrower than its width.
-/// assert_eq!(format_layout(fix_pad(text_str("!"), text_str("condition")), 2, 5), "! condition");
+/// assert_eq!(format_layout(fix_pad(text("!"), text("condition")), 2, 5), "! condition");
 /// ```
 pub fn fix_pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, true, true)
@@ -65,7 +65,7 @@ pub fn fix_pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// assert_eq!(format_layout(fix_unpad(text_str("-"), text_str(">")), 2, 80), "->");
+/// assert_eq!(format_layout(fix_unpad(text("-"), text(">")), 2, 80), "->");
 /// ```
 pub fn fix_unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, false, true)
