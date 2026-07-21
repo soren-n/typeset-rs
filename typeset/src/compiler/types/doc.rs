@@ -1,3 +1,4 @@
+use super::traversal::DismantleTree;
 use std::fmt;
 use std::mem;
 
@@ -43,76 +44,70 @@ pub enum DocObjFix {
 // (partial moves are forbidden); every consumer borrows instead — see the
 // renderer and the `Display` impl below.
 
-// Each `dismantle_*` moves the node's same-typed children onto the worklist
+// Each `dismantle` moves the node's same-typed children onto the worklist
 // (moving them out of their `Box`, freeing it, and leaving a leaf placeholder in
 // the parent) and leaves any cross-type child in place to be freed by that
-// type's own iterative `Drop`.
+// type's own iterative `Drop`. The shared worklist driver is [`DismantleTree`].
 
-fn dismantle_doc(node: &mut Doc, stack: &mut Vec<Doc>) {
-    match node {
-        Doc::Eod | Doc::Line(_) => {}
-        Doc::Empty(doc1) | Doc::Break(_, doc1) => {
-            stack.push(*mem::replace(doc1, Box::new(Doc::Eod)));
+impl DismantleTree for Doc {
+    fn dismantle(&mut self, stack: &mut Vec<Self>) {
+        match self {
+            Doc::Eod | Doc::Line(_) => {}
+            Doc::Empty(doc1) | Doc::Break(_, doc1) => {
+                stack.push(*mem::replace(doc1, Box::new(Doc::Eod)));
+            }
         }
     }
 }
 
 impl Drop for Doc {
     fn drop(&mut self) {
-        let mut stack: Vec<Doc> = Vec::new();
-        dismantle_doc(self, &mut stack);
-        while let Some(mut node) = stack.pop() {
-            dismantle_doc(&mut node, &mut stack);
-        }
+        self.drain();
     }
 }
 
-fn dismantle_obj(node: &mut DocObj, stack: &mut Vec<DocObj>) {
-    match node {
-        DocObj::Text(_) | DocObj::Fix(_) => {}
-        DocObj::Grp(obj1) | DocObj::Seq(obj1) | DocObj::Nest(obj1) | DocObj::Pack(_, obj1) => {
-            stack.push(*mem::replace(obj1, Box::new(DocObj::Text(String::new()))));
-        }
-        DocObj::Comp(left, right, _) => {
-            stack.push(*mem::replace(left, Box::new(DocObj::Text(String::new()))));
-            stack.push(*mem::replace(right, Box::new(DocObj::Text(String::new()))));
+impl DismantleTree for DocObj {
+    fn dismantle(&mut self, stack: &mut Vec<Self>) {
+        match self {
+            DocObj::Text(_) | DocObj::Fix(_) => {}
+            DocObj::Grp(obj1) | DocObj::Seq(obj1) | DocObj::Nest(obj1) | DocObj::Pack(_, obj1) => {
+                stack.push(*mem::replace(obj1, Box::new(DocObj::Text(String::new()))));
+            }
+            DocObj::Comp(left, right, _) => {
+                stack.push(*mem::replace(left, Box::new(DocObj::Text(String::new()))));
+                stack.push(*mem::replace(right, Box::new(DocObj::Text(String::new()))));
+            }
         }
     }
 }
 
 impl Drop for DocObj {
     fn drop(&mut self) {
-        let mut stack: Vec<DocObj> = Vec::new();
-        dismantle_obj(self, &mut stack);
-        while let Some(mut node) = stack.pop() {
-            dismantle_obj(&mut node, &mut stack);
-        }
+        self.drain();
     }
 }
 
-fn dismantle_fix(node: &mut DocObjFix, stack: &mut Vec<DocObjFix>) {
-    match node {
-        DocObjFix::Text(_) => {}
-        DocObjFix::Comp(left, right, _) => {
-            stack.push(*mem::replace(
-                left,
-                Box::new(DocObjFix::Text(String::new())),
-            ));
-            stack.push(*mem::replace(
-                right,
-                Box::new(DocObjFix::Text(String::new())),
-            ));
+impl DismantleTree for DocObjFix {
+    fn dismantle(&mut self, stack: &mut Vec<Self>) {
+        match self {
+            DocObjFix::Text(_) => {}
+            DocObjFix::Comp(left, right, _) => {
+                stack.push(*mem::replace(
+                    left,
+                    Box::new(DocObjFix::Text(String::new())),
+                ));
+                stack.push(*mem::replace(
+                    right,
+                    Box::new(DocObjFix::Text(String::new())),
+                ));
+            }
         }
     }
 }
 
 impl Drop for DocObjFix {
     fn drop(&mut self) {
-        let mut stack: Vec<DocObjFix> = Vec::new();
-        dismantle_fix(self, &mut stack);
-        while let Some(mut node) = stack.pop() {
-            dismantle_fix(&mut node, &mut stack);
-        }
+        self.drain();
     }
 }
 

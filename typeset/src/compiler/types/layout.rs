@@ -1,3 +1,4 @@
+use super::traversal::DismantleTree;
 use std::fmt;
 use std::mem;
 
@@ -31,27 +32,29 @@ pub enum Layout {
 /// Move a node's children onto the worklist (taking them out of their `Box` and
 /// leaving a `Null` placeholder), so the recursive drop of each box terminates
 /// in O(1) and the tree is freed with a heap-allocated stack instead of the
-/// native one.
-fn dismantle_layout(node: &mut Layout, stack: &mut Vec<Layout>) {
-    match node {
-        Layout::Null | Layout::Text(_) => {}
-        Layout::Fix(l) | Layout::Grp(l) | Layout::Seq(l) | Layout::Nest(l) | Layout::Pack(l) => {
-            stack.push(*mem::take(l));
-        }
-        Layout::Line(left, right) | Layout::Comp(left, right, _) => {
-            stack.push(*mem::take(left));
-            stack.push(*mem::take(right));
+/// native one. See [`DismantleTree`] for the shared driver.
+impl DismantleTree for Layout {
+    fn dismantle(&mut self, stack: &mut Vec<Self>) {
+        match self {
+            Layout::Null | Layout::Text(_) => {}
+            Layout::Fix(l)
+            | Layout::Grp(l)
+            | Layout::Seq(l)
+            | Layout::Nest(l)
+            | Layout::Pack(l) => {
+                stack.push(*mem::take(l));
+            }
+            Layout::Line(left, right) | Layout::Comp(left, right, _) => {
+                stack.push(*mem::take(left));
+                stack.push(*mem::take(right));
+            }
         }
     }
 }
 
 impl Drop for Layout {
     fn drop(&mut self) {
-        let mut stack: Vec<Layout> = Vec::new();
-        dismantle_layout(self, &mut stack);
-        while let Some(mut node) = stack.pop() {
-            dismantle_layout(&mut node, &mut stack);
-        }
+        self.drain();
     }
 }
 
