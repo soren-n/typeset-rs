@@ -60,108 +60,13 @@ fn _apply_rcont<'b>(
     result
 }
 
-// A subtree still to be copied (GraphTerm and GraphFix are mutually nested).
-enum ToCopy<'a> {
-    Term(&'a GraphTerm<'a>),
-    Fix(&'a GraphFix<'a>),
-}
-
-// A copied value ascending through the copy trampoline.
-enum Copied<'b> {
-    Term(&'b GraphTerm<'b>),
-    Fix(&'b GraphFix<'b>),
-}
-
-// Frames for the copy trampoline.
-enum CopyFrame<'b, 'a> {
-    WrapNest,
-    WrapPack(u64),
-    WrapFixTerm,
-    WrapFixLast,
-    FixNextAfterTerm { fix1: &'a GraphFix<'a>, pad: bool },
-    FixNextAfterFix { term: &'b GraphTerm<'b>, pad: bool },
-}
-
-// Deep-copies a graph term between memory regions. GraphTerm and GraphFix are
-// mutually recursive, so this runs as a descend/ascend trampoline over an
-// explicit frame stack rather than native-stack recursion.
-fn copy_graph_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a GraphTerm<'a>) -> &'b GraphTerm<'b> {
-    let mut stack: Vec<CopyFrame<'b, 'a>> = Vec::new();
-    let mut cur = ToCopy::Term(term);
-    'machine: loop {
-        let mut val: Copied<'b> = loop {
-            match cur {
-                ToCopy::Term(GraphTerm::Null) => break Copied::Term(mem.alloc(GraphTerm::Null)),
-                ToCopy::Term(GraphTerm::Text(data)) => {
-                    break Copied::Term(mem.alloc(GraphTerm::Text(data)));
-                }
-                ToCopy::Term(GraphTerm::Nest(term1)) => {
-                    stack.push(CopyFrame::WrapNest);
-                    cur = ToCopy::Term(term1);
-                }
-                ToCopy::Term(GraphTerm::Pack(index, term1)) => {
-                    stack.push(CopyFrame::WrapPack(*index));
-                    cur = ToCopy::Term(term1);
-                }
-                ToCopy::Term(GraphTerm::Fix(fix)) => {
-                    stack.push(CopyFrame::WrapFixTerm);
-                    cur = ToCopy::Fix(fix);
-                }
-                ToCopy::Fix(GraphFix::Last(term1)) => {
-                    stack.push(CopyFrame::WrapFixLast);
-                    cur = ToCopy::Term(term1);
-                }
-                ToCopy::Fix(GraphFix::Next(term1, fix1, pad)) => {
-                    stack.push(CopyFrame::FixNextAfterTerm { fix1, pad: *pad });
-                    cur = ToCopy::Term(term1);
-                }
-            }
-        };
-        loop {
-            match stack.pop() {
-                None => match val {
-                    Copied::Term(term1) => return term1,
-                    Copied::Fix(_) => unreachable!("Invariant"),
-                },
-                Some(CopyFrame::WrapNest) => match val {
-                    Copied::Term(term1) => val = Copied::Term(mem.alloc(GraphTerm::Nest(term1))),
-                    Copied::Fix(_) => unreachable!("Invariant"),
-                },
-                Some(CopyFrame::WrapPack(index)) => match val {
-                    Copied::Term(term1) => {
-                        val = Copied::Term(mem.alloc(GraphTerm::Pack(index, term1)));
-                    }
-                    Copied::Fix(_) => unreachable!("Invariant"),
-                },
-                Some(CopyFrame::WrapFixTerm) => match val {
-                    Copied::Fix(fix1) => val = Copied::Term(mem.alloc(GraphTerm::Fix(fix1))),
-                    Copied::Term(_) => unreachable!("Invariant"),
-                },
-                Some(CopyFrame::WrapFixLast) => match val {
-                    Copied::Term(term1) => val = Copied::Fix(mem.alloc(GraphFix::Last(term1))),
-                    Copied::Fix(_) => unreachable!("Invariant"),
-                },
-                Some(CopyFrame::FixNextAfterTerm { fix1, pad }) => match val {
-                    Copied::Term(term1) => {
-                        stack.push(CopyFrame::FixNextAfterFix { term: term1, pad });
-                        cur = ToCopy::Fix(fix1);
-                        continue 'machine;
-                    }
-                    Copied::Fix(_) => unreachable!("Invariant"),
-                },
-                Some(CopyFrame::FixNextAfterFix { term, pad }) => match val {
-                    Copied::Fix(fix2) => {
-                        val = Copied::Fix(mem.alloc(GraphFix::Next(term, fix2, pad)));
-                    }
-                    Copied::Term(_) => unreachable!("Invariant"),
-                },
-            }
-        }
-    }
-}
-
 pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b RebuildDoc<'b> {
-    fn _topology<'b, 'a: 'b>(mem: &'b Bump, nodes: &'a [&'a GraphNode<'a>]) -> TopologyResult<'b> {
+    // Per-node terms, in-degrees, and out-properties, aligned by node index.
+    // The node terms are read directly (not copied): `GraphTerm`/`GraphFix` are
+    // covariant and `'a: 'b`, so a `&'a GraphTerm<'a>` is already usable as
+    // `&'b GraphTerm<'b>`. `rebuild` only reads them to emit fresh RebuildTerm
+    // nodes, so no defensive copy is needed.
+    fn _topology<'b, 'a: 'b>(nodes: &'a [&'a GraphNode<'a>]) -> TopologyResult<'b> {
         fn _num_ins(node: &GraphNode) -> u64 {
             let mut num = 0u64;
             let mut cur = node.ins_head.get();
@@ -184,7 +89,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         let mut ins: Vec<u64> = Vec::new();
         let mut outs: Vec<Vec<Property<()>>> = Vec::new();
         for &node in nodes {
-            terms.push(copy_graph_term(mem, node.term));
+            terms.push(node.term);
             ins.push(_num_ins(node));
             outs.push(_prop_outs(node));
         }
@@ -243,7 +148,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             match cur {
                 GraphDoc::Eod => break,
                 GraphDoc::Break(nodes, pads, doc1) => {
-                    let (terms, ins, outs) = _topology(mem, nodes);
+                    let (terms, ins, outs) = _topology(nodes);
                     // The initial stack holds one identity continuation (an
                     // empty step list); the initial partial is empty too.
                     let stack: RStack<'b> = vec![Vec::new()];

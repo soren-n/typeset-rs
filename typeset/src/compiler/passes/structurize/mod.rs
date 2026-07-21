@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn structurize_handles_deep_nest_term() {
         let mem = Bump::new();
-        // A deep Nest term exercises _visit_term and copy_graph_term at depth.
+        // A deep Nest term exercises _visit_term at depth in graphify/rebuild.
         let mut term: &FixedTerm = mem.alloc(FixedTerm::Text("x"));
         for _ in 0..DEEP {
             term = mem.alloc(FixedTerm::Nest(term));
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn structurize_handles_deep_fix_group() {
         let mem = Bump::new();
-        // A deep fixed group exercises the fix trampolines and copy_graph_fix.
+        // A deep fixed group exercises the fix trampolines in graphify/rebuild.
         let mut fix: &FixedFix = mem.alloc(FixedFix::Last(mem.alloc(FixedTerm::Text("z"))));
         for _ in 0..DEEP {
             fix = mem.alloc(FixedFix::Next(
