@@ -62,12 +62,13 @@ pub enum SerialComp<'a> {
     Comp(Attr, &'a [Scope], &'a [Scope]),
 }
 
-// Fourth intermediate representation: LinearDoc
-#[derive(Debug)]
-pub enum LinearDoc<'a> {
-    Nil,
-    Cons(&'a LinearObj<'a>, &'a LinearDoc<'a>),
-}
+// Fourth intermediate representation: LinearDoc.
+//
+// The document spine is a flat slice of line objects in document order. (It was
+// once a `Cons`/`Nil` cons-list, but the spine has no structural sharing — it is
+// built from a `Vec` and walked linearly — so a slice is the honest shape.) The
+// per-line term/comp chain (`LinearObj`) stays a cons-list.
+pub type LinearDoc<'a> = &'a [&'a LinearObj<'a>];
 
 #[derive(Debug)]
 pub enum LinearObj<'a> {

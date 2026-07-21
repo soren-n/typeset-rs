@@ -13,18 +13,11 @@ use crate::compiler::types::{
 };
 use bumpalo::Bump;
 
-pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: &'a LinearDoc<'a>) -> &'b FixedDoc<'b> {
+pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: LinearDoc<'a>) -> &'b FixedDoc<'b> {
     // Walk the linear spine, coalescing each object, then fold onto Eod.
     let mut objs: Vec<&'b FixedObj<'b>> = Vec::new();
-    let mut cur = doc;
-    loop {
-        match cur {
-            LinearDoc::Nil => break,
-            LinearDoc::Cons(obj, doc1) => {
-                objs.push(visit_obj(mem, obj));
-                cur = doc1;
-            }
-        }
+    for obj in doc {
+        objs.push(visit_obj(mem, obj));
     }
     let mut fdoc: &'b FixedDoc<'b> = mem.alloc(FixedDoc::Eod);
     for obj in objs.iter().rev() {
@@ -159,7 +152,7 @@ mod tests {
     fn fixed_coalesces_deep_fixed_run() {
         let mem = Bump::new();
         let obj = linear_obj_chain(&mem, DEEP, true);
-        let doc: &LinearDoc = mem.alloc(LinearDoc::Cons(obj, mem.alloc(LinearDoc::Nil)));
+        let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
         let out = fixed(&mem, doc);
         // All comps fixed: the whole object collapses to one Fix item.
         let FixedDoc::Break(fobj, _) = out else {
@@ -182,7 +175,7 @@ mod tests {
     fn fixed_handles_deep_nonfixed_run() {
         let mem = Bump::new();
         let obj = linear_obj_chain(&mem, DEEP, false);
-        let doc: &LinearDoc = mem.alloc(LinearDoc::Cons(obj, mem.alloc(LinearDoc::Nil)));
+        let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
         let out = fixed(&mem, doc);
         // No fixed comps: DEEP Next items then a Last, all plain Terms.
         let FixedDoc::Break(fobj, _) = out else {
@@ -202,11 +195,11 @@ mod tests {
     #[test]
     fn fixed_handles_long_doc_spine() {
         let mem = Bump::new();
-        let mut doc: &LinearDoc = mem.alloc(LinearDoc::Nil);
+        let mut objs: Vec<&LinearObj> = Vec::new();
         for _ in 0..DEEP {
-            let obj: &LinearObj = mem.alloc(LinearObj::Last(mem.alloc(Term::Text("x"))));
-            doc = mem.alloc(LinearDoc::Cons(obj, doc));
+            objs.push(mem.alloc(LinearObj::Last(mem.alloc(Term::Text("x")))));
         }
+        let doc: LinearDoc = mem.alloc_slice_copy(&objs);
         let out = fixed(&mem, doc);
         let mut count = 0usize;
         let mut cur = out;
@@ -226,7 +219,7 @@ mod tests {
             term = mem.alloc(Term::Nest(term));
         }
         let obj: &LinearObj = mem.alloc(LinearObj::Last(term));
-        let doc: &LinearDoc = mem.alloc(LinearDoc::Cons(obj, mem.alloc(LinearDoc::Nil)));
+        let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
         let out = fixed(&mem, doc);
         let FixedDoc::Break(FixedObj::Last(FixedItem::Term(t)), _) = out else {
             panic!("expected a single term")

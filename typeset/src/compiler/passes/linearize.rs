@@ -9,7 +9,7 @@ use super::term_chain::map_term_chain;
 use crate::compiler::types::{LinearComp, LinearDoc, LinearObj, Serial, SerialComp, Term};
 use bumpalo::Bump;
 
-pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b LinearDoc<'b> {
+pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> LinearDoc<'b> {
     // Completed line objects, in document order.
     let mut lines: Vec<&'b LinearObj<'b>> = Vec::new();
     // Elements of the line currently being built, in visitation order.
@@ -44,12 +44,9 @@ pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b Linea
         }
     }
 
-    // Fold the completed lines (document order) into a Cons list ending in Nil.
-    let mut doc: &'b LinearDoc<'b> = mem.alloc(LinearDoc::Nil);
-    for obj in lines.iter().rev() {
-        doc = mem.alloc(LinearDoc::Cons(obj, doc));
-    }
-    doc
+    // The completed lines are already in document order; the spine is a flat
+    // slice with no sharing, so copy them straight into the arena.
+    mem.alloc_slice_copy(&lines)
 }
 
 /// Builds one line object: `Next(t0, c0, Next(t1, c1, ... Last(term_last)))`,
@@ -111,13 +108,8 @@ mod tests {
         }
         let doc = linearize(&mem, serial);
         // One line (no Line comps), a Next-chain of DEEP + 1 terms.
-        let obj = match doc {
-            LinearDoc::Cons(obj, rest) => {
-                assert!(matches!(rest, LinearDoc::Nil));
-                *obj
-            }
-            LinearDoc::Nil => panic!("expected one line"),
-        };
+        assert_eq!(doc.len(), 1, "expected one line");
+        let obj = doc[0];
         let mut count = 0usize;
         let mut cur = obj;
         while let LinearObj::Next(_, _, next) = cur {
@@ -155,7 +147,7 @@ mod tests {
         ));
         let doc = linearize(&mem, serial);
         // Confirm the deep term nesting survived.
-        let LinearDoc::Cons(obj, _) = doc else {
+        let [obj, ..] = doc else {
             panic!("expected a line")
         };
         let LinearObj::Next(t, _, _) = obj else {
