@@ -158,8 +158,6 @@ pub use self::compiler::{
     // Core types
     Doc,
     Layout,
-
-    TwoBufferBumpAllocator,
     // Core compilation functions
     compile,
     compile_safe,

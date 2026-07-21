@@ -35,4 +35,3 @@ For comprehensive information, see context documents in `/docs/context/`:
 - **[TESTING.md](docs/context/TESTING.md)**: Test strategy, Rust + OCaml testing, running tests
 - **[CI_CD.md](docs/context/CI_CD.md)**: GitHub workflows, semantic versioning, release process
 - **[GIT_HOOKS.md](docs/context/GIT_HOOKS.md)**: Pre-commit hooks, quality enforcement, troubleshooting
-- **[TWO_BUFFER_DESIGN.md](docs/context/TWO_BUFFER_DESIGN.md)**: Technical design document for layout algorithms

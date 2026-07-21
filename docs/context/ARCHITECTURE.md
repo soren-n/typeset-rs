@@ -82,7 +82,7 @@ tree-walking traits on the public AST types (`Doc`/`DocObj`/`DocObjFix` and
 `Layout`) — `Drop`, `Clone`, `Display`, and `Debug` — are iterative for the same
 reason, so no operation on a deep document recurses on the native stack. The
 `max_depth` bound in `compile_safe_with_depth` is now a resource limit rather
-than a stack-safety guard (see `TWO_BUFFER_DESIGN.md`).
+than a stack-safety guard.
 
 ## Key Layout Concepts
 
