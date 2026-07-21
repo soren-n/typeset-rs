@@ -1,3 +1,6 @@
+// Being removed incrementally; some methods are unused between migration steps.
+#![allow(dead_code)]
+
 use bumpalo::Bump;
 use std::fmt::Debug;
 

@@ -206,7 +206,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
     }
     fn _break<'a>(
         mem: &'a Bump,
-        nodes: &'a List<'a, &'a GraphNode<'a>>,
+        nodes: &'a [&'a GraphNode<'a>],
         pads: &'a List<'a, bool>,
         doc: &'a GraphDoc<'a>,
     ) -> &'a GraphDoc<'a> {
@@ -370,7 +370,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         }
         fn _transpose<'a>(
             mem: &'a Bump,
-            nodes: &'a List<'a, &'a GraphNode<'a>>,
+            nodes: &'a [&'a GraphNode<'a>],
             props: &[Property<(u64, Option<u64>)>],
         ) {
             fn _push_ins<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
@@ -404,8 +404,8 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                 match prop {
                     Property::Grp((from_index, Some(to_index))) => {
                         if from_index != to_index {
-                            let from_node = nodes.get_unsafe(*from_index);
-                            let to_node = nodes.get_unsafe(*to_index);
+                            let from_node = nodes[*from_index as usize];
+                            let to_node = nodes[*to_index as usize];
                             let curr = make_edge(mem, _unit_grp(), from_node, to_node);
                             _push_ins(curr, to_node);
                             _push_outs(curr, from_node);
@@ -413,8 +413,8 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                     }
                     Property::Seq((from_index, Some(to_index))) => {
                         if from_index != to_index {
-                            let from_node = nodes.get_unsafe(*from_index);
-                            let to_node = nodes.get_unsafe(*to_index);
+                            let from_node = nodes[*from_index as usize];
+                            let to_node = nodes[*to_index as usize];
                             let curr = make_edge(mem, _unit_seq(), from_node, to_node);
                             _push_ins(curr, to_node);
                             _push_outs(curr, from_node);
@@ -426,7 +426,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         }
         fn _visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
             // Walk the linear FixedDoc spine, graphifying each line's object.
-            type Line<'b> = (&'b List<'b, &'b GraphNode<'b>>, &'b List<'b, bool>);
+            type Line<'b> = (&'b [&'b GraphNode<'b>], &'b List<'b, bool>);
             let mut breaks: Vec<Line<'b>> = Vec::new();
             let mut cur = doc;
             loop {
@@ -454,7 +454,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         fn _visit_obj<'b, 'a: 'b>(
             mem: &'b Bump,
             obj: &'a FixedObj<'a>,
-        ) -> (&'b List<'b, &'b GraphNode<'b>>, &'b List<'b, bool>, Graph) {
+        ) -> (&'b [&'b GraphNode<'b>], &'b List<'b, bool>, Graph) {
             // Walk the object's item chain, assigning indices and threading the
             // scope stack and the open-scope property map.
             let mut nodes_vec: Vec<&'b GraphNode<'b>> = Vec::new();
@@ -502,7 +502,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                 }
             };
             (
-                _list_of(mem, &nodes_vec),
+                mem.alloc_slice_copy(&nodes_vec),
                 _list_of(mem, &pads_vec),
                 final_props,
             )
@@ -696,14 +696,14 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         }
         fn _visit_doc<'a>(mem: &'a Bump, doc: &'a GraphDoc<'a>) -> &'a GraphDoc<'a> {
             // Walk the linear spine, solving each line's graph in place.
-            type Line<'a> = (&'a List<'a, &'a GraphNode<'a>>, &'a List<'a, bool>);
+            type Line<'a> = (&'a [&'a GraphNode<'a>], &'a List<'a, bool>);
             let mut breaks: Vec<Line<'a>> = Vec::new();
             let mut cur = doc;
             loop {
                 match cur {
                     GraphDoc::Eod => break,
                     GraphDoc::Break(nodes, pads, doc1) => {
-                        _visit_node(nodes.length(), nodes);
+                        _visit_node(nodes);
                         breaks.push((nodes, pads));
                         cur = doc1;
                     }
@@ -715,10 +715,8 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             }
             gdoc
         }
-        fn _visit_node<'a>(count: u64, nodes: &'a List<'a, &'a GraphNode<'a>>) {
-            let mut index = 0u64;
-            while index != count {
-                let node = nodes.get_unsafe(index);
+        fn _visit_node<'a>(nodes: &'a [&'a GraphNode<'a>]) {
+            for node in nodes {
                 match (
                     (node.ins_head.get(), node.ins_tail.get()),
                     (node.outs_head.get(), node.outs_tail.get()),
@@ -735,7 +733,6 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                     | (_, (None, Some(_))) => unreachable!("Invariant"),
                     (_, _) => {}
                 }
-                index += 1;
             }
         }
         _visit_doc(mem, doc)
@@ -782,7 +779,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         }
         fn _topology<'b, 'a: 'b>(
             mem: &'b Bump,
-            nodes: &'a List<'a, &'a GraphNode<'a>>,
+            nodes: &'a [&'a GraphNode<'a>],
         ) -> TopologyResult<'b> {
             fn _num_ins(node: &GraphNode) -> u64 {
                 let mut num = 0u64;
@@ -808,14 +805,10 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             let mut terms: Vec<&'b GraphTerm<'b>> = Vec::new();
             let mut ins: Vec<u64> = Vec::new();
             let mut outs: Vec<&'b List<'b, Property<()>>> = Vec::new();
-            let len = nodes.length();
-            let mut index = 0u64;
-            while index < len {
-                let node = nodes.get_unsafe(index);
+            for &node in nodes {
                 terms.push(copy_graph_term(mem, node.term));
                 ins.push(_num_ins(node));
                 outs.push(_prop_outs(mem, node));
-                index += 1;
             }
             (
                 _list_of(mem, &terms),

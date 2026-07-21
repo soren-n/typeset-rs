@@ -134,7 +134,7 @@ pub enum Property<T> {
 pub enum GraphDoc<'a> {
     Eod,
     Break(
-        &'a List<'a, &'a GraphNode<'a>>,
+        &'a [&'a GraphNode<'a>],
         &'a List<'a, bool>,
         &'a GraphDoc<'a>,
     ),
