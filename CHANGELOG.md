@@ -1,3 +1,23 @@
+# [3.2.0](https://github.com/soren-n/typeset-rs/compare/v3.1.7...v3.2.0) (2026-07-21)
+
+
+### Bug Fixes
+
+* make Doc clone iterative to keep deep documents from overflowing ([c7e7835](https://github.com/soren-n/typeset-rs/commit/c7e78350061cb0759bca1cb1dd2d98c97fe0a3b6))
+* make the Layout AST deep-safe (iterative Drop, Clone, Display) ([399847f](https://github.com/soren-n/typeset-rs/commit/399847f0850b200ee33605faea9549c978854d74))
+
+
+### Features
+
+* add render_ref for rendering a document by reference ([128a986](https://github.com/soren-n/typeset-rs/commit/128a98629a3135f7438e3858217286ae7e845b28))
+
+
+### Performance Improvements
+
+* defunctionalize move_to_heap to remove native-stack recursion ([d67c470](https://github.com/soren-n/typeset-rs/commit/d67c470e9820a0a512752d2239508c1888cf5af3))
+* defunctionalize the renderer to remove native-stack recursion ([102c32a](https://github.com/soren-n/typeset-rs/commit/102c32a524a7ae1102d51d550350f7653b0ac3b8))
+* make Doc drop and Display iterative ([9292e1c](https://github.com/soren-n/typeset-rs/commit/9292e1cb146c830c05a969e16e1e006d7eadce8b))
+
 ## [3.1.7](https://github.com/soren-n/typeset-rs/compare/v3.1.6...v3.1.7) (2026-07-21)
 
 
