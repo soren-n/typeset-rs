@@ -1,8 +1,8 @@
 //! Pass 3: Serial → LinearDoc (lift newlines to spine)
 //!
-//! Serial, Term and SerialComp are all linear (single-child) chains, so
-//! the original CPS recursion is replaced by plain iteration with small
-//! wrapper stacks. This keeps the pass off the native stack, which the
+//! Serial is a flat slice and Term/SerialComp are linear (single-child)
+//! chains, so the original CPS recursion is replaced by plain iteration with
+//! small wrapper stacks. This keeps the pass off the native stack, which the
 //! recursive/continuation version could exhaust on deep inputs.
 
 use super::term_chain::map_term_chain;

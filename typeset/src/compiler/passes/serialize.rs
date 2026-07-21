@@ -1,6 +1,6 @@
 //! Pass 2: Edsl → Serial (serialize in order to normalize)
 //!
-//! Flattens the Edsl tree into a linear Serial spine. The original threaded
+//! Flattens the Edsl tree into a flat Serial slice. The original threaded
 //! four accumulator closures (terms, comps, glue, result) plus counters
 //! through a CPS recursion on the native stack, which aborts on deep inputs.
 //!
@@ -14,8 +14,9 @@
 //! - `glue` (how a leaf's term attaches to what follows: Last, Line, or a
 //!   Comp separator) is carried per work item.
 //!
-//! Each leaf emits one `(glue, term)` entry; the entries, in leaf order, are
-//! folded from the right onto `Past` to build the Serial — byte-identical to
+//! Each leaf emits one `(glue, term)` entry; a final forward pass resolves the
+//! entries (in leaf order) into the `SerialEntry` slice, computing each
+//! composition's scope open/close deltas in the same sweep — byte-identical to
 //! the recursive version.
 
 use crate::compiler::types::{Attr, Edsl, Scope, Serial, SerialComp, SerialEntry, Term};

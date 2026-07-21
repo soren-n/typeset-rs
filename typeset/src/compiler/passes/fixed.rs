@@ -1,7 +1,7 @@
 //! Pass 4: LinearDoc → FixedDoc (coalesce fixed comps)
 //!
-//! LinearDoc (spine), LinearObj (term/comp chain), LinearComp and Term
-//! are all linear structures, so the original CPS recursion becomes plain
+//! LinearDoc is a flat slice, and LinearObj (term/comp chain), LinearComp and
+//! Term are linear structures, so the original CPS recursion becomes plain
 //! iteration. The one piece of state is a run-length grouping: a maximal run
 //! of terms connected by fixed compositions is coalesced into a single
 //! `FixedItem::Fix`. This keeps the pass off the native stack, which the
