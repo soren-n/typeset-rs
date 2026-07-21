@@ -1,7 +1,7 @@
 //! `compile_safe_with_depth` must actually enforce its depth limit.
 //!
 //! The limit was previously validated as non-zero and then ignored, so
-//! `CompilerError::StackOverflow` could never be returned.
+//! `CompilerError::DepthLimitExceeded` could never be returned.
 
 use typeset::*;
 
@@ -17,11 +17,11 @@ fn nested(levels: usize) -> Box<Layout> {
 fn exceeding_max_depth_is_reported() {
     let result = compile_safe_with_depth(nested(100), 10);
     match result {
-        Err(CompilerError::StackOverflow { depth, max_depth }) => {
+        Err(CompilerError::DepthLimitExceeded { depth, max_depth }) => {
             assert_eq!(max_depth, 10);
             assert!(depth > 10, "reported depth {depth} should exceed the limit");
         }
-        Err(other) => panic!("expected StackOverflow, got {other:?}"),
+        Err(other) => panic!("expected DepthLimitExceeded, got {other:?}"),
         Ok(_) => panic!("max_depth was not enforced: 100 levels compiled with a limit of 10"),
     }
 }
