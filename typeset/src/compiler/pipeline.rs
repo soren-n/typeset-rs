@@ -196,9 +196,9 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
 
 /// Renders a compiled document by reference, without consuming it.
 ///
-/// The borrowing counterpart to [`render`]: because rendering only reads the
+/// The borrowing counterpart to [`render()`]: because rendering only reads the
 /// document, this renders the same [`Doc`] repeatedly (e.g. at several widths)
-/// without cloning or recompiling it. See [`render`] for the meaning of `tab`
+/// without cloning or recompiling it. See [`render()`] for the meaning of `tab`
 /// and `width`.
 ///
 /// # Examples

@@ -63,7 +63,6 @@
 //! - **Render** - Final rendering engine that produces formatted strings. Use
 //!   [`render()`] to render a document once, or [`render_ref()`] to render the
 //!   same [`Doc`] repeatedly (e.g. at several widths) without cloning it
-//! - **Memory** - Efficient bump allocation for zero-copy transformations
 //!
 //! ## Error Handling
 //!
@@ -131,20 +130,7 @@
 //!
 //! ## Rust Version Compatibility
 //!
-//! This crate works on stable Rust (MSRV: 1.89.0). The test suite includes some components
-//! that use unstable features like `box_patterns`, but the core library and procedural
-//! macro work perfectly on stable Rust.
-//!
-//! ## Version 2.0 Changes
-//!
-//! Version 2.0 introduced a major architectural refactoring:
-//!
-//! - **Modular compiler passes** - Each compilation phase is now separate and testable
-//! - **Improved error handling** - Better stack overflow protection and error reporting  
-//! - **Enhanced performance** - More efficient memory management and faster compilation
-//! - **Better testing** - Comprehensive test suite with integration and performance tests
-//!
-//! The public API remains unchanged, ensuring seamless migration from v1.x.
+//! This crate builds on stable Rust (MSRV: 1.89.0).
 
 // Keep the doc-comment cross-references honest: a stale intra-doc link is a
 // hard error under `cargo doc`, so broken references cannot silently rot.

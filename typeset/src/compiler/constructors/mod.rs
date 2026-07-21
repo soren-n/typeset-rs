@@ -10,7 +10,7 @@
 //!
 //! - **Basic constructors** - [`null`], [`text`], [`text_str`]
 //! - **Control constructors** - [`fix`], [`grp`], [`seq`], [`nest`], [`pack`]
-//! - **Composition constructors** - [`line`], [`comp`] and shortcuts [`pad`], [`unpad`], etc.
+//! - **Composition constructors** - [`line()`], [`comp`] and shortcuts [`pad`], [`unpad`], etc.
 //! - **Convenience constructors** - [`space`], [`comma`], [`newline`], etc.
 //! - **Joining functions** - [`join_with`], [`join_with_spaces`], etc.
 //! - **Wrapping functions** - [`parens`], [`brackets`], [`braces`]

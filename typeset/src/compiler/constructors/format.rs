@@ -8,7 +8,7 @@ use crate::compiler::types::Layout;
 /// `tab` is the number of spaces per indentation level; `width` is the target
 /// line width for breaking decisions (not a hard limit — fixed content may
 /// exceed it). To format the same layout repeatedly, prefer [`crate::compile`]
-/// once with [`crate::render`] per call. Uses the panicking [`crate::compile`]
+/// once with [`crate::render()`] per call. Uses the panicking [`crate::compile`]
 /// path; the pipeline is iterative, so it does not overflow the stack on deep
 /// input. For fallible compilation use [`crate::compile_safe`].
 ///

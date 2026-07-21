@@ -56,7 +56,7 @@ pub fn join_with_commas(layouts: Vec<Box<Layout>>) -> Box<Layout> {
     join_with(layouts, comp(comma(), space(), false, false))
 }
 
-/// Joins `layouts` with forced [`line`] breaks — one element per line.
+/// Joins `layouts` with forced [`line()`] breaks — one element per line.
 ///
 /// ```rust
 /// use typeset::*;
