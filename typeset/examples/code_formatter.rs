@@ -65,8 +65,8 @@ fn format_expression(expr: &Expression) -> Box<Layout> {
 
         Expression::FunctionCall { name, args } => {
             let name_layout = text(name.clone());
-            let open_paren = text("(".to_string());
-            let close_paren = text(")".to_string());
+            let open_paren = text("(");
+            let close_paren = text(")");
 
             if args.is_empty() {
                 comp(
@@ -106,12 +106,7 @@ fn format_argument_list(args: &[Expression]) -> Box<Layout> {
         } else {
             comp(
                 acc,
-                comp(
-                    text(",".to_string()),
-                    formatted_arg,
-                    Pad::Padded,
-                    Break::Breakable,
-                ),
+                comp(text(","), formatted_arg, Pad::Padded, Break::Breakable),
                 Pad::Unpadded,
                 Break::Breakable,
             )
@@ -127,9 +122,9 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
     match stmt {
         Statement::Assignment { var, expr } => {
             let var_layout = text(var.clone());
-            let assign_op = text(" = ".to_string());
+            let assign_op = text(" = ");
             let expr_layout = format_expression(expr);
-            let semicolon = text(";".to_string());
+            let semicolon = text(";");
 
             comp(
                 var_layout,
@@ -151,31 +146,21 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
             };
             comp(
                 format_expression(&call_expr),
-                text(";".to_string()),
+                text(";"),
                 Pad::Unpadded,
                 Break::Breakable,
             )
         }
 
         Statement::Return(maybe_expr) => {
-            let return_kw = text("return".to_string());
+            let return_kw = text("return");
             match maybe_expr {
-                None => comp(
-                    return_kw,
-                    text(";".to_string()),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                ),
+                None => comp(return_kw, text(";"), Pad::Unpadded, Break::Breakable),
                 Some(expr) => {
                     let expr_layout = format_expression(expr);
                     comp(
                         return_kw,
-                        comp(
-                            expr_layout,
-                            text(";".to_string()),
-                            Pad::Padded,
-                            Break::Breakable,
-                        ),
+                        comp(expr_layout, text(";"), Pad::Padded, Break::Breakable),
                         Pad::Unpadded,
                         Break::Breakable,
                     )
@@ -188,9 +173,9 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
             then_block,
             else_block,
         } => {
-            let if_kw = text("if".to_string());
-            let open_paren = text(" (".to_string());
-            let close_paren = text(") ".to_string());
+            let if_kw = text("if");
+            let open_paren = text(" (");
+            let close_paren = text(") ");
             let condition_layout = format_expression(condition);
 
             let condition_part = comp(
@@ -215,7 +200,7 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
             match else_block {
                 None => comp(condition_part, then_part, Pad::Unpadded, Break::Breakable),
                 Some(else_stmts) => {
-                    let else_kw = text(" else ".to_string());
+                    let else_kw = text(" else ");
                     let else_part = format_block(else_stmts);
                     comp(
                         condition_part,
@@ -233,9 +218,9 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
         }
 
         Statement::While { condition, body } => {
-            let while_kw = text("while".to_string());
-            let open_paren = text(" (".to_string());
-            let close_paren = text(") ".to_string());
+            let while_kw = text("while");
+            let open_paren = text(" (");
+            let close_paren = text(") ");
             let condition_layout = format_expression(condition);
 
             let condition_part = comp(
@@ -263,8 +248,8 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
 
 /// Format a block of statements with proper braces and indentation
 fn format_block(statements: &[Statement]) -> Box<Layout> {
-    let open_brace = text("{".to_string());
-    let close_brace = text("}".to_string());
+    let open_brace = text("{");
+    let close_brace = text("}");
 
     if statements.is_empty() {
         comp(open_brace, close_brace, Pad::Unpadded, Break::Breakable)

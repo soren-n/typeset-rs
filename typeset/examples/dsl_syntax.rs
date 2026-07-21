@@ -7,28 +7,18 @@ fn main() {
     println!("=== DSL Syntax Demonstration ===\n");
 
     // Create some reusable fragments
-    let name = text("Alice".to_string());
-    let age = text("30".to_string());
-    let city = text("New York".to_string());
+    let name = text("Alice");
+    let age = text("30");
+    let city = text("New York");
 
     // Manual constructor approach
     let manual_layout = comp(
-        text("Name:".to_string()),
+        text("Name:"),
         comp(
             name.clone(),
             line(
-                comp(
-                    text("Age:".to_string()),
-                    age.clone(),
-                    Pad::Padded,
-                    Break::Breakable,
-                ),
-                comp(
-                    text("City:".to_string()),
-                    city.clone(),
-                    Pad::Padded,
-                    Break::Breakable,
-                ),
+                comp(text("Age:"), age.clone(), Pad::Padded, Break::Breakable),
+                comp(text("City:"), city.clone(), Pad::Padded, Break::Breakable),
             ),
             Pad::Padded,
             Break::Breakable,
@@ -80,10 +70,10 @@ fn main() {
 
     // Practical example: function signature formatting
     let function_params = [
-        text("param1".to_string()),
-        text("param2".to_string()),
-        text("very_long_parameter_name".to_string()),
-        text("another_param".to_string()),
+        text("param1"),
+        text("param2"),
+        text("very_long_parameter_name"),
+        text("another_param"),
     ];
 
     // Build parameter list manually for comparison
@@ -96,12 +86,7 @@ fn main() {
             } else {
                 comp(
                     acc,
-                    comp(
-                        text(",".to_string()),
-                        param.clone(),
-                        Pad::Padded,
-                        Break::Breakable,
-                    ),
+                    comp(text(","), param.clone(), Pad::Padded, Break::Breakable),
                     Pad::Unpadded,
                     Break::Breakable,
                 )
@@ -109,12 +94,12 @@ fn main() {
         });
 
     let manual_function = comp(
-        text("function".to_string()),
+        text("function"),
         comp(
-            text("(".to_string()),
+            text("("),
             comp(
                 pack(seq(manual_params)),
-                text(")".to_string()),
+                text(")"),
                 Pad::Unpadded,
                 Break::Breakable,
             ),

@@ -16,10 +16,10 @@ fn format_sexpr(expr: &SExpr) -> Box<Layout> {
         SExpr::Atom(s) => text(s.clone()),
         SExpr::List(exprs) => {
             if exprs.is_empty() {
-                text("()".to_string())
+                text("()")
             } else {
-                let open_paren = text("(".to_string());
-                let close_paren = text(")".to_string());
+                let open_paren = text("(");
+                let close_paren = text(")");
 
                 // Format all expressions
                 let first = format_sexpr(&exprs[0]);
@@ -64,10 +64,10 @@ fn format_sexpr_sequence(expr: &SExpr) -> Box<Layout> {
         SExpr::Atom(s) => text(s.clone()),
         SExpr::List(exprs) => {
             if exprs.is_empty() {
-                text("()".to_string())
+                text("()")
             } else {
-                let open_paren = text("(".to_string());
-                let close_paren = text(")".to_string());
+                let open_paren = text("(");
+                let close_paren = text(")");
 
                 // Build sequence of all items
                 let mut items = null();

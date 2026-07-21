@@ -17,17 +17,17 @@ enum JsonValue {
 /// Pretty print a JSON value using typeset combinators
 fn format_json(value: &JsonValue) -> Box<Layout> {
     match value {
-        JsonValue::Null => text("null".to_string()),
+        JsonValue::Null => text("null"),
         JsonValue::Bool(b) => text(b.to_string()),
         JsonValue::Number(n) => text(n.to_string()),
         JsonValue::String(s) => text(format!("\"{}\"", s)),
 
         JsonValue::Array(arr) => {
             if arr.is_empty() {
-                text("[]".to_string())
+                text("[]")
             } else {
-                let opening = text("[".to_string());
-                let closing = text("]".to_string());
+                let opening = text("[");
+                let closing = text("]");
 
                 // Create comma-separated items
                 let items = arr.iter().enumerate().fold(null(), |acc, (i, item)| {
@@ -37,12 +37,7 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
                     } else {
                         comp(
                             acc,
-                            comp(
-                                text(",".to_string()),
-                                formatted_item,
-                                Pad::Padded,
-                                Break::Breakable,
-                            ),
+                            comp(text(","), formatted_item, Pad::Padded, Break::Breakable),
                             Pad::Unpadded,
                             Break::Breakable,
                         )
@@ -64,10 +59,10 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
 
         JsonValue::Object(obj) => {
             if obj.is_empty() {
-                text("{}".to_string())
+                text("{}")
             } else {
-                let opening = text("{".to_string());
-                let closing = text("}".to_string());
+                let opening = text("{");
+                let closing = text("}");
 
                 // Create comma-separated key-value pairs
                 let pairs: Vec<_> = obj.iter().collect();
@@ -76,7 +71,7 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
                     .enumerate()
                     .fold(null(), |acc, (i, (key, value))| {
                         let key_layout = text(format!("\"{}\"", key));
-                        let colon = text(": ".to_string());
+                        let colon = text(": ");
                         let value_layout = format_json(value);
 
                         let pair = comp(
@@ -91,7 +86,7 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
                         } else {
                             comp(
                                 acc,
-                                comp(text(",".to_string()), pair, Pad::Padded, Break::Breakable),
+                                comp(text(","), pair, Pad::Padded, Break::Breakable),
                                 Pad::Unpadded,
                                 Break::Breakable,
                             )

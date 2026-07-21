@@ -22,10 +22,10 @@
 //!
 //! // Build a function definition layout
 //! let layout = comp(
-//!     text("function".to_string()),
+//!     text("function"),
 //!     nest(comp(
-//!         text("name()".to_string()),
-//!         braces(text("body".to_string())),
+//!         text("name()"),
+//!         braces(text("body")),
 //!         Pad::Padded, Break::Breakable
 //!     )),
 //!     Pad::Padded, Break::Breakable
@@ -43,7 +43,7 @@ use crate::compiler::types::{Attr, Break, Layout, Pad};
 ///
 /// ```rust
 /// use typeset::*;
-/// let result = comp(null(), text("content".to_string()), Pad::Padded, Break::Breakable);
+/// let result = comp(null(), text("content"), Pad::Padded, Break::Breakable);
 /// assert_eq!(format_layout(result, 2, 80), "content");
 /// ```
 pub fn null() -> Box<Layout> {

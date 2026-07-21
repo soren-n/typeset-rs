@@ -193,7 +193,7 @@ fn reify_layout(ast: Ast) -> Quoted {
     match ast {
         Ast::Null => quote! { typeset::null() },
         Ast::Variable(name) => quote! { #name.clone() },
-        Ast::Text(data) => quote! { typeset::text(#data.to_string()) },
+        Ast::Text(data) => quote! { typeset::text(#data) },
         Ast::Unary(UnaryOp::Fix, ast1) => {
             let layout = reify_layout(*ast1);
             quote! { typeset::fix(#layout) }

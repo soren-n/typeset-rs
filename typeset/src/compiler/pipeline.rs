@@ -166,8 +166,8 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
 /// use typeset::{compile, render, text, comp, Pad, Break};
 ///
 /// let doc = compile(comp(
-///     text("hello".to_string()),
-///     text("world".to_string()),
+///     text("hello"),
+///     text("world"),
 ///     Pad::Padded, Break::Breakable,
 /// ));
 /// assert_eq!(render(doc, 2, 80), "hello world");
@@ -189,8 +189,8 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
 /// use typeset::{compile, render_ref, text, comp, Pad, Break};
 ///
 /// let doc = compile(comp(
-///     text("hello".to_string()),
-///     text("world".to_string()),
+///     text("hello"),
+///     text("world"),
 ///     Pad::Padded, Break::Breakable,
 /// ));
 /// // Render at several widths without moving the document.
