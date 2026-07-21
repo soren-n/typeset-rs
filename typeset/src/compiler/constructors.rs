@@ -256,6 +256,16 @@ pub fn blank_line() -> Box<Layout> {
 
 // --- Joining: combine a collection with a separator ------------------------
 
+/// Left-folds `layouts` with `combine`, returning [`null`] for an empty vector
+/// and the sole element (untouched) for a singleton. Shared by [`join_with`]
+/// and [`join_with_lines`], which differ only in how adjacent elements combine.
+fn join_reduce(
+    layouts: impl IntoIterator<Item = Box<Layout>>,
+    combine: impl FnMut(Box<Layout>, Box<Layout>) -> Box<Layout>,
+) -> Box<Layout> {
+    layouts.into_iter().reduce(combine).unwrap_or_else(null)
+}
+
 /// Joins `layouts` with `separator` between each pair, via unpadded
 /// compositions (the separator supplies its own spacing). Returns [`null`] for
 /// an empty vector and the sole element for a singleton.
@@ -265,23 +275,15 @@ pub fn blank_line() -> Box<Layout> {
 /// let joined = join_with(vec![text("a"), text("b")], comp(comma(), space(), false, false));
 /// assert_eq!(format_layout(joined, 2, 80), "a, b");
 /// ```
-pub fn join_with(mut layouts: Vec<Box<Layout>>, separator: Box<Layout>) -> Box<Layout> {
-    match layouts.len() {
-        0 => null(),
-        1 => layouts.pop().unwrap(),
-        _ => {
-            let mut result = layouts.remove(0);
-            for layout in layouts {
-                result = comp(
-                    result,
-                    comp(separator.clone(), layout, false, false),
-                    false,
-                    false,
-                );
-            }
-            result
-        }
-    }
+pub fn join_with(layouts: Vec<Box<Layout>>, separator: Box<Layout>) -> Box<Layout> {
+    join_reduce(layouts, move |acc, layout| {
+        comp(
+            acc,
+            comp(separator.clone(), layout, false, false),
+            false,
+            false,
+        )
+    })
 }
 
 /// Joins `layouts` with single spaces — `join_with(layouts, space())`.
@@ -313,18 +315,8 @@ pub fn join_with_commas(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 /// let lines = join_with_lines(vec![text("a;"), text("b;")]);
 /// assert_eq!(format_layout(lines, 2, 80), "a;\nb;");
 /// ```
-pub fn join_with_lines(mut layouts: Vec<Box<Layout>>) -> Box<Layout> {
-    match layouts.len() {
-        0 => null(),
-        1 => layouts.pop().unwrap(),
-        _ => {
-            let mut result = layouts.remove(0);
-            for layout in layouts {
-                result = line(result, layout);
-            }
-            result
-        }
-    }
+pub fn join_with_lines(layouts: Vec<Box<Layout>>) -> Box<Layout> {
+    join_reduce(layouts, line)
 }
 
 // --- Wrappers: enclose a layout in delimiters ------------------------------
