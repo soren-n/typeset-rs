@@ -1,3 +1,10 @@
+## [3.2.1](https://github.com/soren-n/typeset-rs/compare/v3.2.0...v3.2.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* make Doc/DocObj/DocObjFix/Layout Debug iterative ([a4c3fe2](https://github.com/soren-n/typeset-rs/commit/a4c3fe20e2330508897f12a88036d15e3bb52d84))
+
 # [3.2.0](https://github.com/soren-n/typeset-rs/compare/v3.1.7...v3.2.0) (2026-07-21)
 
 
