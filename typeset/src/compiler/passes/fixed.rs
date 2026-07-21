@@ -13,17 +13,14 @@ use crate::compiler::types::{
 };
 use bumpalo::Bump;
 
-pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: LinearDoc<'a>) -> &'b FixedDoc<'b> {
-    // Walk the linear spine, coalescing each object, then fold onto Eod.
+pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: LinearDoc<'a>) -> FixedDoc<'b> {
+    // Walk the linear spine, coalescing each object into a flat slice of lines
+    // in document order.
     let mut objs: Vec<&'b FixedObj<'b>> = Vec::new();
     for obj in doc {
         objs.push(visit_obj(mem, obj));
     }
-    let mut fdoc: &'b FixedDoc<'b> = mem.alloc(FixedDoc::Eod);
-    for obj in objs.iter().rev() {
-        fdoc = mem.alloc(FixedDoc::Break(obj, fdoc));
-    }
-    fdoc
+    mem.alloc_slice_copy(&objs)
 }
 
 /// Coalesces one object's term/comp chain. Terms connected by fixed
@@ -155,8 +152,8 @@ mod tests {
         let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
         let out = fixed(&mem, doc);
         // All comps fixed: the whole object collapses to one Fix item.
-        let FixedDoc::Break(fobj, _) = out else {
-            panic!("expected a break")
+        let [fobj] = out else {
+            panic!("expected a single line")
         };
         let FixedObj::Last(FixedItem::Fix(fix)) = fobj else {
             panic!("expected a single Fix item")
@@ -178,8 +175,8 @@ mod tests {
         let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
         let out = fixed(&mem, doc);
         // No fixed comps: DEEP Next items then a Last, all plain Terms.
-        let FixedDoc::Break(fobj, _) = out else {
-            panic!("expected a break")
+        let [fobj] = out else {
+            panic!("expected a single line")
         };
         let mut count = 0usize;
         let mut cur: &FixedObj = fobj;
@@ -201,14 +198,7 @@ mod tests {
         }
         let doc: LinearDoc = mem.alloc_slice_copy(&objs);
         let out = fixed(&mem, doc);
-        let mut count = 0usize;
-        let mut cur = out;
-        while let FixedDoc::Break(_, rest) = cur {
-            count += 1;
-            cur = rest;
-        }
-        assert!(matches!(cur, FixedDoc::Eod));
-        assert_eq!(count, DEEP);
+        assert_eq!(out.len(), DEEP);
     }
 
     #[test]
@@ -221,7 +211,7 @@ mod tests {
         let obj: &LinearObj = mem.alloc(LinearObj::Last(term));
         let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
         let out = fixed(&mem, doc);
-        let FixedDoc::Break(FixedObj::Last(FixedItem::Term(t)), _) = out else {
+        let [FixedObj::Last(FixedItem::Term(t))] = out else {
             panic!("expected a single term")
         };
         let mut count = 0usize;

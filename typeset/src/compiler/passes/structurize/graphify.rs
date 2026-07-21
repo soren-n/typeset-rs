@@ -114,20 +114,13 @@ fn push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
     }
 }
 
-pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
-    fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
+pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> &'b GraphDoc<'b> {
+    fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> &'b GraphDoc<'b> {
         // Walk the linear FixedDoc spine, graphifying each line's object, then
         // fold the resulting lines into a GraphDoc spine.
         let mut breaks: Vec<GraphLine<'b>> = Vec::new();
-        let mut cur = doc;
-        loop {
-            match cur {
-                FixedDoc::Eod => break,
-                FixedDoc::Break(obj, doc1) => {
-                    breaks.push(visit_obj(mem, obj));
-                    cur = doc1;
-                }
-            }
+        for obj in doc {
+            breaks.push(visit_obj(mem, obj));
         }
         build_graph_doc(mem, &breaks)
     }

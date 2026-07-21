@@ -18,7 +18,7 @@ mod solve;
 use crate::compiler::types::{FixedDoc, RebuildDoc};
 use bumpalo::Bump;
 
-pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b RebuildDoc<'b> {
+pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> &'b RebuildDoc<'b> {
     let doc1 = graphify::graphify(mem, doc);
     let doc2 = solve::solve(mem, doc1);
     rebuild::rebuild(mem, doc2)
@@ -58,7 +58,7 @@ mod tests {
                 obj,
             ));
         }
-        let doc: &FixedDoc = mem.alloc(FixedDoc::Break(obj, mem.alloc(FixedDoc::Eod)));
+        let doc: FixedDoc = mem.alloc_slice_copy(&[obj]);
         let out = structurize(&mem, doc);
         // One line, rebuilt as a right-nested composition spine.
         let RebuildDoc::Break(robj, _) = out else {
@@ -82,7 +82,7 @@ mod tests {
             term = mem.alloc(Term::Nest(term));
         }
         let obj: &FixedObj = mem.alloc(FixedObj::Last(mem.alloc(FixedItem::Term(term))));
-        let doc: &FixedDoc = mem.alloc(FixedDoc::Break(obj, mem.alloc(FixedDoc::Eod)));
+        let doc: FixedDoc = mem.alloc_slice_copy(&[obj]);
         let out = structurize(&mem, doc);
         let RebuildDoc::Break(RebuildObj::Term(t), _) = out else {
             panic!("expected a single term")
@@ -113,7 +113,7 @@ mod tests {
             ));
         }
         let obj: &FixedObj = mem.alloc(FixedObj::Last(mem.alloc(FixedItem::Fix(fix))));
-        let doc: &FixedDoc = mem.alloc(FixedDoc::Break(obj, mem.alloc(FixedDoc::Eod)));
+        let doc: FixedDoc = mem.alloc_slice_copy(&[obj]);
         let out = structurize(&mem, doc);
         let RebuildDoc::Break(RebuildObj::Fix(rfix), _) = out else {
             panic!("expected a fix object")
@@ -131,13 +131,13 @@ mod tests {
     fn structurize_handles_long_doc_spine() {
         let mem = Bump::new();
         // Many document rows exercise the doc-spine walks in all three phases.
-        let mut doc: &FixedDoc = mem.alloc(FixedDoc::Eod);
+        let mut objs: Vec<&FixedObj> = Vec::new();
         for _ in 0..DEEP {
-            let obj: &FixedObj = mem.alloc(FixedObj::Last(
+            objs.push(mem.alloc(FixedObj::Last(
                 mem.alloc(FixedItem::Term(mem.alloc(Term::Text("x")))),
-            ));
-            doc = mem.alloc(FixedDoc::Break(obj, doc));
+            )));
         }
+        let doc: FixedDoc = mem.alloc_slice_copy(&objs);
         let out = structurize(&mem, doc);
         let mut count = 0usize;
         let mut cur = out;

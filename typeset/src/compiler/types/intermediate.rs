@@ -85,12 +85,13 @@ pub struct LinearComp<'a> {
     pub closes: &'a [Scope],
 }
 
-// Fifth intermediate representation: FixedDoc
-#[derive(Debug)]
-pub enum FixedDoc<'a> {
-    Eod,
-    Break(&'a FixedObj<'a>, &'a FixedDoc<'a>),
-}
+// Fifth intermediate representation: FixedDoc.
+//
+// Like `LinearDoc`, the document spine is a flat slice of line objects in
+// document order (formerly an `Eod`/`Break` cons-list, but with no sharing:
+// `fixed` builds it from a `Vec` and `graphify` walks it once). The per-line
+// item chain (`FixedObj`) stays a cons-list.
+pub type FixedDoc<'a> = &'a [&'a FixedObj<'a>];
 
 #[derive(Debug)]
 pub enum FixedObj<'a> {
