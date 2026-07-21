@@ -1,12 +1,12 @@
 //! Pass 3: Serial → LinearDoc (lift newlines to spine)
 //!
-//! Serial, SerialTerm and SerialComp are all linear (single-child) chains, so
+//! Serial, Term and SerialComp are all linear (single-child) chains, so
 //! the original CPS recursion is replaced by plain iteration with small
 //! wrapper stacks. This keeps the pass off the native stack, which the
 //! recursive/continuation version could exhaust on deep inputs.
 
 use super::term_chain::map_term_chain;
-use crate::compiler::types::{LinearComp, LinearDoc, LinearObj, LinearTerm, Serial, SerialComp};
+use crate::compiler::types::{LinearComp, LinearDoc, LinearObj, Serial, SerialComp, Term};
 use bumpalo::Bump;
 
 /// A `SerialComp` wrapper, recorded outermost-first while descending.
@@ -19,7 +19,7 @@ pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b Linea
     // Completed line objects, in document order.
     let mut lines: Vec<&'b LinearObj<'b>> = Vec::new();
     // Elements of the line currently being built, in visitation order.
-    let mut acc: Vec<(&'b LinearTerm<'b>, &'b LinearComp<'b>)> = Vec::new();
+    let mut acc: Vec<(&'b Term<'b>, &'b LinearComp<'b>)> = Vec::new();
 
     let mut cur = serial;
     loop {
@@ -63,8 +63,8 @@ pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b Linea
 /// `term_last` is the line's final term.
 fn build_line<'b>(
     mem: &'b Bump,
-    acc: &[(&'b LinearTerm<'b>, &'b LinearComp<'b>)],
-    term_last: &'b LinearTerm<'b>,
+    acc: &[(&'b Term<'b>, &'b LinearComp<'b>)],
+    term_last: &'b Term<'b>,
 ) -> &'b LinearObj<'b> {
     let mut obj: &'b LinearObj<'b> = mem.alloc(LinearObj::Last(term_last));
     for (term, comp) in acc.iter().rev() {
@@ -103,7 +103,7 @@ fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a SerialComp<'a>) -> &'b Linear
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{Attr, SerialTerm};
+    use crate::compiler::types::{Attr, Term};
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
@@ -118,12 +118,12 @@ mod tests {
         };
         // Build Next(Text, Comp, Next(...)) ending in Last(Text, Past).
         let mut serial: &Serial = mem.alloc(Serial::Last(
-            mem.alloc(SerialTerm::Text("end")),
+            mem.alloc(Term::Text("end")),
             mem.alloc(Serial::Past),
         ));
         for _ in 0..DEEP {
             serial = mem.alloc(Serial::Next(
-                mem.alloc(SerialTerm::Text("x")),
+                mem.alloc(Term::Text("x")),
                 mem.alloc(SerialComp::Comp(attr)),
                 serial,
             ));
@@ -151,9 +151,9 @@ mod tests {
     fn linearize_handles_deep_term_and_comp() {
         let mem = Bump::new();
         // Deep Nest term and deep Grp comp on a single element.
-        let mut term: &SerialTerm = mem.alloc(SerialTerm::Text("x"));
+        let mut term: &Term = mem.alloc(Term::Text("x"));
         for _ in 0..DEEP {
-            term = mem.alloc(SerialTerm::Nest(term));
+            term = mem.alloc(Term::Nest(term));
         }
         let mut comp: &SerialComp = mem.alloc(SerialComp::Comp(Attr {
             pad: false,
@@ -166,7 +166,7 @@ mod tests {
             term,
             comp,
             mem.alloc(Serial::Last(
-                mem.alloc(SerialTerm::Text("end")),
+                mem.alloc(Term::Text("end")),
                 mem.alloc(Serial::Past),
             )),
         ));
@@ -180,7 +180,7 @@ mod tests {
         };
         let mut count = 0usize;
         let mut cur = *t;
-        while let LinearTerm::Nest(inner) = cur {
+        while let Term::Nest(inner) = cur {
             count += 1;
             cur = inner;
         }

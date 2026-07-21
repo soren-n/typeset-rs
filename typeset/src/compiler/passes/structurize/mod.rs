@@ -22,7 +22,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
 mod tests {
     use super::*;
     use crate::compiler::types::{
-        FixedComp, FixedFix, FixedItem, FixedObj, FixedTerm, RebuildFix, RebuildObj, RebuildTerm,
+        FixedComp, FixedFix, FixedItem, FixedObj, RebuildFix, RebuildObj, Term,
     };
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
@@ -38,11 +38,11 @@ mod tests {
         // that is well past the ~400-level overflow threshold but still quick.
         let depth = 20_000usize;
         let mut obj: &FixedObj = mem.alloc(FixedObj::Last(
-            mem.alloc(FixedItem::Term(mem.alloc(FixedTerm::Text("z")))),
+            mem.alloc(FixedItem::Term(mem.alloc(Term::Text("z")))),
         ));
         for _ in 0..depth {
             obj = mem.alloc(FixedObj::Next(
-                mem.alloc(FixedItem::Term(mem.alloc(FixedTerm::Text("y")))),
+                mem.alloc(FixedItem::Term(mem.alloc(Term::Text("y")))),
                 mem.alloc(FixedComp::Comp(false)),
                 obj,
             ));
@@ -66,9 +66,9 @@ mod tests {
     fn structurize_handles_deep_nest_term() {
         let mem = Bump::new();
         // A deep Nest term exercises visit_term at depth in graphify/rebuild.
-        let mut term: &FixedTerm = mem.alloc(FixedTerm::Text("x"));
+        let mut term: &Term = mem.alloc(Term::Text("x"));
         for _ in 0..DEEP {
-            term = mem.alloc(FixedTerm::Nest(term));
+            term = mem.alloc(Term::Nest(term));
         }
         let obj: &FixedObj = mem.alloc(FixedObj::Last(mem.alloc(FixedItem::Term(term))));
         let doc: &FixedDoc = mem.alloc(FixedDoc::Break(obj, mem.alloc(FixedDoc::Eod)));
@@ -77,8 +77,8 @@ mod tests {
             panic!("expected a single term")
         };
         let mut count = 0usize;
-        let mut cur: &RebuildTerm = t;
-        while let RebuildTerm::Nest(inner) = cur {
+        let mut cur: &Term = t;
+        while let Term::Nest(inner) = cur {
             count += 1;
             cur = inner;
         }
@@ -89,10 +89,10 @@ mod tests {
     fn structurize_handles_deep_fix_group() {
         let mem = Bump::new();
         // A deep fixed group exercises the fix trampolines in graphify/rebuild.
-        let mut fix: &FixedFix = mem.alloc(FixedFix::Last(mem.alloc(FixedTerm::Text("z"))));
+        let mut fix: &FixedFix = mem.alloc(FixedFix::Last(mem.alloc(Term::Text("z"))));
         for _ in 0..DEEP {
             fix = mem.alloc(FixedFix::Next(
-                mem.alloc(FixedTerm::Text("y")),
+                mem.alloc(Term::Text("y")),
                 mem.alloc(FixedComp::Comp(false)),
                 fix,
             ));
@@ -119,7 +119,7 @@ mod tests {
         let mut doc: &FixedDoc = mem.alloc(FixedDoc::Eod);
         for _ in 0..DEEP {
             let obj: &FixedObj = mem.alloc(FixedObj::Last(
-                mem.alloc(FixedItem::Term(mem.alloc(FixedTerm::Text("x")))),
+                mem.alloc(FixedItem::Term(mem.alloc(Term::Text("x")))),
             ));
             doc = mem.alloc(FixedDoc::Break(obj, doc));
         }

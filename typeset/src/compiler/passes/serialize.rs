@@ -18,7 +18,7 @@
 //! folded from the right onto `Past` to build the Serial — byte-identical to
 //! the recursive version.
 
-use crate::compiler::types::{Attr, Edsl, Serial, SerialComp, SerialTerm};
+use crate::compiler::types::{Attr, Edsl, Serial, SerialComp, Term};
 use bumpalo::Bump;
 
 /// A nest/pack wrapper accumulated on the path to a term.
@@ -65,7 +65,7 @@ enum Glue<'b> {
 /// One emitted leaf: its term and how it glues to what follows.
 struct Entry<'b> {
     glue: Glue<'b>,
-    term: &'b SerialTerm<'b>,
+    term: &'b Term<'b>,
 }
 
 /// A pending subtree to visit, with its scoped path state. `i`/`j` are global
@@ -106,13 +106,13 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
             Edsl::Null => {
                 entries.push(Entry {
                     glue,
-                    term: apply_terms(mem, terms, mem.alloc(SerialTerm::Null)),
+                    term: apply_terms(mem, terms, mem.alloc(Term::Null)),
                 });
             }
             Edsl::Text(data) => {
                 entries.push(Entry {
                     glue,
-                    term: apply_terms(mem, terms, mem.alloc(SerialTerm::Text(data))),
+                    term: apply_terms(mem, terms, mem.alloc(Term::Text(data))),
                 });
             }
             Edsl::Fix(layout1) => stack.push(Work {
@@ -240,14 +240,14 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
 fn apply_terms<'b>(
     mem: &'b Bump,
     list: Option<&'b TermList<'b>>,
-    base: &'b SerialTerm<'b>,
-) -> &'b SerialTerm<'b> {
+    base: &'b Term<'b>,
+) -> &'b Term<'b> {
     let mut term = base;
     let mut cur = list;
     while let Some(node) = cur {
         term = match node.wrap {
-            TermWrap::Nest => mem.alloc(SerialTerm::Nest(term)),
-            TermWrap::Pack(index) => mem.alloc(SerialTerm::Pack(index, term)),
+            TermWrap::Nest => mem.alloc(Term::Nest(term)),
+            TermWrap::Pack(index) => mem.alloc(Term::Pack(index, term)),
         };
         cur = node.next;
     }
@@ -317,8 +317,8 @@ mod tests {
             panic!("expected Last")
         };
         let mut count = 0usize;
-        let mut cur: &SerialTerm = term;
-        while let SerialTerm::Nest(inner) = cur {
+        let mut cur: &Term = term;
+        while let Term::Nest(inner) = cur {
             count += 1;
             cur = inner;
         }
@@ -339,8 +339,8 @@ mod tests {
         // The outermost Pack is entered first and gets index 0; indices then
         // increase inward.
         let mut expected = 0u64;
-        let mut cur: &SerialTerm = term;
-        while let SerialTerm::Pack(index, inner) = cur {
+        let mut cur: &Term = term;
+        while let Term::Pack(index, inner) = cur {
             assert_eq!(*index, expected);
             expected += 1;
             cur = inner;

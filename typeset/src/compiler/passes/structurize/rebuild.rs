@@ -6,7 +6,7 @@
 use crate::compiler::passes::term_chain::map_term_chain;
 use crate::compiler::types::{
     GraphDoc, GraphFix, GraphNode, GraphTerm, NodeInfo, Property, RebuildDoc, RebuildFix,
-    RebuildObj, RebuildTerm,
+    RebuildObj, Term,
 };
 use bumpalo::Bump;
 
@@ -65,7 +65,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
     // Per-node info in node-index order. The node terms are read directly (not
     // copied): `GraphTerm`/`GraphFix` are covariant and `'a: 'b`, so a
     // `&'a GraphTerm<'a>` is already usable as `&'b GraphTerm<'b>`. `rebuild`
-    // only reads them to emit fresh RebuildTerm nodes, so no defensive copy is
+    // only reads them to emit fresh Term nodes, so no defensive copy is
     // needed.
     fn topology<'b, 'a: 'b>(nodes: &'a [&'a GraphNode<'a>]) -> Vec<NodeInfo<'b>> {
         fn num_ins(node: &GraphNode) -> u64 {
@@ -222,9 +222,9 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
     }
     fn visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a GraphFix<'a>) -> &'b RebuildFix<'b> {
         // Walk the fix chain, then rebuild the RebuildFix bottom-up.
-        let mut recorded: Vec<(&'b RebuildTerm<'b>, bool)> = Vec::new();
+        let mut recorded: Vec<(&'b Term<'b>, bool)> = Vec::new();
         let mut cur = fix;
-        let last: &'b RebuildTerm<'b> = loop {
+        let last: &'b Term<'b> = loop {
             match cur {
                 GraphFix::Last(term) => break map_term_chain(mem, *term),
                 GraphFix::Next(term, fix1, pad) => {

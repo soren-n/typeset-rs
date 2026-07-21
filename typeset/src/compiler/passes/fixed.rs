@@ -1,6 +1,6 @@
 //! Pass 4: LinearDoc → FixedDoc (coalesce fixed comps)
 //!
-//! LinearDoc (spine), LinearObj (term/comp chain), LinearComp and LinearTerm
+//! LinearDoc (spine), LinearObj (term/comp chain), LinearComp and Term
 //! are all linear structures, so the original CPS recursion becomes plain
 //! iteration. The one piece of state is a run-length grouping: a maximal run
 //! of terms connected by fixed compositions is coalesced into a single
@@ -9,7 +9,7 @@
 
 use super::term_chain::map_term_chain;
 use crate::compiler::types::{
-    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, FixedTerm, LinearComp, LinearDoc, LinearObj,
+    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, LinearComp, LinearDoc, LinearObj, Term,
 };
 use bumpalo::Bump;
 
@@ -47,7 +47,7 @@ fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj<
     let mut items: Vec<&'b FixedItem<'b>> = Vec::new();
     let mut seps: Vec<&'b FixedComp<'b>> = Vec::new();
     // The (term, fixed-comp) pairs of the fix run currently being built.
-    let mut fix_run: Vec<(&'b FixedTerm<'b>, &'b FixedComp<'b>)> = Vec::new();
+    let mut fix_run: Vec<(&'b Term<'b>, &'b FixedComp<'b>)> = Vec::new();
     let mut in_fix = false;
 
     let mut cur = obj;
@@ -103,8 +103,8 @@ fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj<
 /// group's final term.
 fn build_fix<'b>(
     mem: &'b Bump,
-    run: &[(&'b FixedTerm<'b>, &'b FixedComp<'b>)],
-    last_term: &'b FixedTerm<'b>,
+    run: &[(&'b Term<'b>, &'b FixedComp<'b>)],
+    last_term: &'b Term<'b>,
 ) -> &'b FixedFix<'b> {
     let mut fix: &'b FixedFix<'b> = mem.alloc(FixedFix::Last(last_term));
     for (term, comp) in run.iter().rev() {
@@ -142,7 +142,7 @@ fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a LinearComp<'a>) -> (bool, &'b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{Attr, LinearTerm};
+    use crate::compiler::types::{Attr, Term};
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
@@ -150,10 +150,10 @@ mod tests {
 
     fn linear_obj_chain<'b>(mem: &'b Bump, len: usize, fix: bool) -> &'b LinearObj<'b> {
         let attr = Attr { pad: false, fix };
-        let mut obj: &LinearObj = mem.alloc(LinearObj::Last(mem.alloc(LinearTerm::Text("z"))));
+        let mut obj: &LinearObj = mem.alloc(LinearObj::Last(mem.alloc(Term::Text("z"))));
         for _ in 0..len {
             obj = mem.alloc(LinearObj::Next(
-                mem.alloc(LinearTerm::Text("y")),
+                mem.alloc(Term::Text("y")),
                 mem.alloc(LinearComp::Comp(attr)),
                 obj,
             ));
@@ -210,7 +210,7 @@ mod tests {
         let mem = Bump::new();
         let mut doc: &LinearDoc = mem.alloc(LinearDoc::Nil);
         for _ in 0..DEEP {
-            let obj: &LinearObj = mem.alloc(LinearObj::Last(mem.alloc(LinearTerm::Text("x"))));
+            let obj: &LinearObj = mem.alloc(LinearObj::Last(mem.alloc(Term::Text("x"))));
             doc = mem.alloc(LinearDoc::Cons(obj, doc));
         }
         let out = fixed(&mem, doc);
@@ -227,9 +227,9 @@ mod tests {
     #[test]
     fn fixed_handles_deep_term_chain() {
         let mem = Bump::new();
-        let mut term: &LinearTerm = mem.alloc(LinearTerm::Text("x"));
+        let mut term: &Term = mem.alloc(Term::Text("x"));
         for _ in 0..DEEP {
-            term = mem.alloc(LinearTerm::Nest(term));
+            term = mem.alloc(Term::Nest(term));
         }
         let obj: &LinearObj = mem.alloc(LinearObj::Last(term));
         let doc: &LinearDoc = mem.alloc(LinearDoc::Cons(obj, mem.alloc(LinearDoc::Nil)));
@@ -238,8 +238,8 @@ mod tests {
             panic!("expected a single term")
         };
         let mut count = 0usize;
-        let mut cur: &FixedTerm = t;
-        while let FixedTerm::Nest(inner) = cur {
+        let mut cur: &Term = t;
+        while let Term::Nest(inner) = cur {
             count += 1;
             cur = inner;
         }

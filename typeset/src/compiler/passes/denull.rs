@@ -8,7 +8,7 @@
 //! inputs no longer overflow.
 
 use crate::compiler::types::{
-    DenullDoc, DenullFix, DenullObj, DenullTerm, RebuildDoc, RebuildFix, RebuildObj, RebuildTerm,
+    DenullDoc, DenullFix, DenullObj, DenullTerm, RebuildDoc, RebuildFix, RebuildObj, Term,
 };
 use bumpalo::Bump;
 
@@ -28,7 +28,7 @@ enum FixRes<'b> {
     NextNone(bool, &'b DenullFix<'b>),
 }
 
-/// A `RebuildTerm` wrapper, recorded outermost-first while descending.
+/// A `Term` wrapper, recorded outermost-first while descending.
 enum TermWrap {
     Nest,
     Pack(u64),
@@ -243,24 +243,24 @@ fn visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a RebuildFix<'a>) -> FixRes<'b> {
 
 /// Denulls a term chain: `Null` and empty text vanish; `Nest`/`Pack` wrappers
 /// are preserved over a surviving term and dropped over nothing.
-fn visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a RebuildTerm<'a>) -> Option<&'b DenullTerm<'b>> {
+fn visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a Term<'a>) -> Option<&'b DenullTerm<'b>> {
     let mut wraps: Vec<TermWrap> = Vec::new();
     let mut cur = term;
     let mut val: Option<&'b DenullTerm<'b>> = loop {
         match cur {
-            RebuildTerm::Null => break None,
-            RebuildTerm::Text(data) => {
+            Term::Null => break None,
+            Term::Text(data) => {
                 break if data.is_empty() {
                     None
                 } else {
                     Some(mem.alloc(DenullTerm::Text(data)))
                 };
             }
-            RebuildTerm::Nest(term1) => {
+            Term::Nest(term1) => {
                 wraps.push(TermWrap::Nest);
                 cur = term1;
             }
-            RebuildTerm::Pack(index, term1) => {
+            Term::Pack(index, term1) => {
                 wraps.push(TermWrap::Pack(*index));
                 cur = term1;
             }
@@ -290,10 +290,10 @@ mod tests {
         let mem = Bump::new();
         // Right-nested Comp chain: Comp(Term, Comp(Term, ... Term)). Each left
         // operand is a surviving Term, so the whole object survives.
-        let mut obj: &RebuildObj = mem.alloc(RebuildObj::Term(mem.alloc(RebuildTerm::Text("z"))));
+        let mut obj: &RebuildObj = mem.alloc(RebuildObj::Term(mem.alloc(Term::Text("z"))));
         for _ in 0..DEEP {
             obj = mem.alloc(RebuildObj::Comp(
-                mem.alloc(RebuildObj::Term(mem.alloc(RebuildTerm::Text("y")))),
+                mem.alloc(RebuildObj::Term(mem.alloc(Term::Text("y")))),
                 obj,
                 false,
             ));
@@ -317,9 +317,9 @@ mod tests {
     #[test]
     fn denull_handles_deep_nest_term() {
         let mem = Bump::new();
-        let mut term: &RebuildTerm = mem.alloc(RebuildTerm::Text("x"));
+        let mut term: &Term = mem.alloc(Term::Text("x"));
         for _ in 0..DEEP {
-            term = mem.alloc(RebuildTerm::Nest(term));
+            term = mem.alloc(Term::Nest(term));
         }
         let obj: &RebuildObj = mem.alloc(RebuildObj::Term(term));
         let doc: &RebuildDoc = mem.alloc(RebuildDoc::Break(obj, mem.alloc(RebuildDoc::Eod)));
@@ -341,7 +341,7 @@ mod tests {
         let mem = Bump::new();
         let mut doc: &RebuildDoc = mem.alloc(RebuildDoc::Eod);
         for _ in 0..DEEP {
-            let obj: &RebuildObj = mem.alloc(RebuildObj::Term(mem.alloc(RebuildTerm::Text("x"))));
+            let obj: &RebuildObj = mem.alloc(RebuildObj::Term(mem.alloc(Term::Text("x"))));
             doc = mem.alloc(RebuildDoc::Break(obj, doc));
         }
         let out = denull(&mem, doc);

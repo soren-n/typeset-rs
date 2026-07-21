@@ -1,13 +1,15 @@
 //! Shared nest/pack term-chain mapping for the linear passes.
 //!
 //! `linearize`, `fixed`, `graphify`, and `rebuild` each rebuild a term into the
-//! next representation, and a term is always a linear chain of `Nest`/`Pack`
-//! wrappers over a `Null`/`Text` leaf. That strip-and-rebuild is identical in
-//! all four modulo the source and destination enums. [`map_term_chain`]
-//! captures the one shape; [`TermChain`] classifies each step of the input and
-//! [`TermSink`] abstracts the four output constructors.
+//! next representation's arena, and a term is always a linear chain of
+//! `Nest`/`Pack` wrappers over a `Null`/`Text` leaf. Most passes keep the shared
+//! [`Term`] type on both sides; graphify/rebuild convert between `Term` and
+//! [`GraphTerm`]. That strip-and-rebuild is identical modulo the source and
+//! destination enums. [`map_term_chain`] captures the one shape; [`TermChain`]
+//! classifies each step of the input and [`TermSink`] abstracts the leaf/wrapper
+//! constructors of the output.
 
-use crate::compiler::types::{FixedTerm, GraphTerm, LinearTerm, RebuildTerm, SerialTerm};
+use crate::compiler::types::{GraphTerm, Term};
 use bumpalo::Bump;
 
 /// One step down a term chain toward its leaf: either the `Null`/`Text` leaf,
@@ -72,35 +74,13 @@ pub fn map_term_chain<'b, 'a: 'b, S: TermChain<'a>, D: TermSink<'b>>(
     val
 }
 
-impl<'a> TermChain<'a> for SerialTerm<'a> {
+impl<'a> TermChain<'a> for Term<'a> {
     fn step(&'a self) -> TermStep<'a, Self> {
         match self {
-            SerialTerm::Null => TermStep::Null,
-            SerialTerm::Text(data) => TermStep::Text(data),
-            SerialTerm::Nest(term1) => TermStep::Nest(term1),
-            SerialTerm::Pack(index, term1) => TermStep::Pack(*index, term1),
-        }
-    }
-}
-
-impl<'a> TermChain<'a> for LinearTerm<'a> {
-    fn step(&'a self) -> TermStep<'a, Self> {
-        match self {
-            LinearTerm::Null => TermStep::Null,
-            LinearTerm::Text(data) => TermStep::Text(data),
-            LinearTerm::Nest(term1) => TermStep::Nest(term1),
-            LinearTerm::Pack(index, term1) => TermStep::Pack(*index, term1),
-        }
-    }
-}
-
-impl<'a> TermChain<'a> for FixedTerm<'a> {
-    fn step(&'a self) -> TermStep<'a, Self> {
-        match self {
-            FixedTerm::Null => TermStep::Null,
-            FixedTerm::Text(data) => TermStep::Text(data),
-            FixedTerm::Nest(term1) => TermStep::Nest(term1),
-            FixedTerm::Pack(index, term1) => TermStep::Pack(*index, term1),
+            Term::Null => TermStep::Null,
+            Term::Text(data) => TermStep::Text(data),
+            Term::Nest(term1) => TermStep::Nest(term1),
+            Term::Pack(index, term1) => TermStep::Pack(*index, term1),
         }
     }
 }
@@ -117,33 +97,18 @@ impl<'a> TermChain<'a> for GraphTerm<'a> {
     }
 }
 
-impl<'b> TermSink<'b> for LinearTerm<'b> {
+impl<'b> TermSink<'b> for Term<'b> {
     fn null(mem: &'b Bump) -> &'b Self {
-        mem.alloc(LinearTerm::Null)
+        mem.alloc(Term::Null)
     }
     fn text(mem: &'b Bump, data: &'b str) -> &'b Self {
-        mem.alloc(LinearTerm::Text(data))
+        mem.alloc(Term::Text(data))
     }
     fn nest(mem: &'b Bump, inner: &'b Self) -> &'b Self {
-        mem.alloc(LinearTerm::Nest(inner))
+        mem.alloc(Term::Nest(inner))
     }
     fn pack(mem: &'b Bump, index: u64, inner: &'b Self) -> &'b Self {
-        mem.alloc(LinearTerm::Pack(index, inner))
-    }
-}
-
-impl<'b> TermSink<'b> for FixedTerm<'b> {
-    fn null(mem: &'b Bump) -> &'b Self {
-        mem.alloc(FixedTerm::Null)
-    }
-    fn text(mem: &'b Bump, data: &'b str) -> &'b Self {
-        mem.alloc(FixedTerm::Text(data))
-    }
-    fn nest(mem: &'b Bump, inner: &'b Self) -> &'b Self {
-        mem.alloc(FixedTerm::Nest(inner))
-    }
-    fn pack(mem: &'b Bump, index: u64, inner: &'b Self) -> &'b Self {
-        mem.alloc(FixedTerm::Pack(index, inner))
+        mem.alloc(Term::Pack(index, inner))
     }
 }
 
@@ -159,20 +124,5 @@ impl<'b> TermSink<'b> for GraphTerm<'b> {
     }
     fn pack(mem: &'b Bump, index: u64, inner: &'b Self) -> &'b Self {
         mem.alloc(GraphTerm::Pack(index, inner))
-    }
-}
-
-impl<'b> TermSink<'b> for RebuildTerm<'b> {
-    fn null(mem: &'b Bump) -> &'b Self {
-        mem.alloc(RebuildTerm::Null)
-    }
-    fn text(mem: &'b Bump, data: &'b str) -> &'b Self {
-        mem.alloc(RebuildTerm::Text(data))
-    }
-    fn nest(mem: &'b Bump, inner: &'b Self) -> &'b Self {
-        mem.alloc(RebuildTerm::Nest(inner))
-    }
-    fn pack(mem: &'b Bump, index: u64, inner: &'b Self) -> &'b Self {
-        mem.alloc(RebuildTerm::Pack(index, inner))
     }
 }

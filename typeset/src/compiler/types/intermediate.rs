@@ -32,17 +32,24 @@ pub enum Edsl<'a> {
 // Third intermediate representation: Serial
 #[derive(Debug)]
 pub enum Serial<'a> {
-    Next(&'a SerialTerm<'a>, &'a SerialComp<'a>, &'a Serial<'a>),
-    Last(&'a SerialTerm<'a>, &'a Serial<'a>),
+    Next(&'a Term<'a>, &'a SerialComp<'a>, &'a Serial<'a>),
+    Last(&'a Term<'a>, &'a Serial<'a>),
     Past,
 }
 
+/// A layout term: a chain of `Nest`/`Pack` wrappers over a `Null`/`Text` leaf.
+///
+/// This shape is invariant across the `Serial`, `LinearDoc`, `FixedDoc`, and
+/// `RebuildDoc` representations — the passes between them rewrite the
+/// surrounding composition structure but leave terms untouched — so a single
+/// type serves all four. (`GraphTerm` additionally carries `Fix`, and
+/// `DenullTerm` drops `Null` post-denulling, so those stay distinct.)
 #[derive(Debug)]
-pub enum SerialTerm<'a> {
+pub enum Term<'a> {
     Null,
     Text(&'a str),
-    Nest(&'a SerialTerm<'a>),
-    Pack(u64, &'a SerialTerm<'a>),
+    Nest(&'a Term<'a>),
+    Pack(u64, &'a Term<'a>),
 }
 
 #[derive(Debug)]
@@ -62,16 +69,8 @@ pub enum LinearDoc<'a> {
 
 #[derive(Debug)]
 pub enum LinearObj<'a> {
-    Next(&'a LinearTerm<'a>, &'a LinearComp<'a>, &'a LinearObj<'a>),
-    Last(&'a LinearTerm<'a>),
-}
-
-#[derive(Debug)]
-pub enum LinearTerm<'a> {
-    Null,
-    Text(&'a str),
-    Nest(&'a LinearTerm<'a>),
-    Pack(u64, &'a LinearTerm<'a>),
+    Next(&'a Term<'a>, &'a LinearComp<'a>, &'a LinearObj<'a>),
+    Last(&'a Term<'a>),
 }
 
 #[derive(Debug)]
@@ -97,15 +96,7 @@ pub enum FixedObj<'a> {
 #[derive(Debug)]
 pub enum FixedItem<'a> {
     Fix(&'a FixedFix<'a>),
-    Term(&'a FixedTerm<'a>),
-}
-
-#[derive(Debug)]
-pub enum FixedTerm<'a> {
-    Null,
-    Text(&'a str),
-    Nest(&'a FixedTerm<'a>),
-    Pack(u64, &'a FixedTerm<'a>),
+    Term(&'a Term<'a>),
 }
 
 #[derive(Debug)]
@@ -117,8 +108,8 @@ pub enum FixedComp<'a> {
 
 #[derive(Debug)]
 pub enum FixedFix<'a> {
-    Next(&'a FixedTerm<'a>, &'a FixedComp<'a>, &'a FixedFix<'a>),
-    Last(&'a FixedTerm<'a>),
+    Next(&'a Term<'a>, &'a FixedComp<'a>, &'a FixedFix<'a>),
+    Last(&'a Term<'a>),
 }
 
 // Property type for graph algorithms
@@ -180,7 +171,7 @@ pub enum RebuildDoc<'a> {
 
 #[derive(Debug)]
 pub enum RebuildObj<'a> {
-    Term(&'a RebuildTerm<'a>),
+    Term(&'a Term<'a>),
     Fix(&'a RebuildFix<'a>),
     Grp(&'a RebuildObj<'a>),
     Seq(&'a RebuildObj<'a>),
@@ -189,16 +180,8 @@ pub enum RebuildObj<'a> {
 
 #[derive(Debug)]
 pub enum RebuildFix<'a> {
-    Term(&'a RebuildTerm<'a>),
+    Term(&'a Term<'a>),
     Comp(&'a RebuildFix<'a>, &'a RebuildFix<'a>, bool),
-}
-
-#[derive(Debug)]
-pub enum RebuildTerm<'a> {
-    Null,
-    Text(&'a str),
-    Nest(&'a RebuildTerm<'a>),
-    Pack(u64, &'a RebuildTerm<'a>),
 }
 
 // Seventh intermediate representation: DenullDoc
