@@ -1,14 +1,14 @@
 //! Pass 9: DenullDoc → FinalDoc (rescope nest and pack)
 //!
-//! Strips each term's nest/pack wrappers into a `Prop` list, then factors the
+//! Strips each term's nest/pack wrappers into a `Vec<Prop>`, then factors the
 //! common prefix shared by a composition's two operands back out around the
 //! composition (rescoping), applying the leftover props to each operand
 //! individually. The original expressed the object/fix walks as native-stack
 //! tree recursion with `compose`d continuations, aborting on deep inputs.
 //!
 //! Here the object and fix walks are descend/ascend trampolines over
-//! heap-allocated frame stacks; the prop-list helpers (strip, join, wrap) and
-//! the doc spine are plain loops.
+//! heap-allocated frame stacks; the prop helpers (`_strip_term`,
+//! `_common_prefix_len`, `_wrap_props`) and the doc spine are plain loops.
 
 use crate::compiler::types::{
     DenullDoc, DenullFix, DenullObj, DenullTerm, FinalDoc, FinalDocObj, FinalDocObjFix,

@@ -17,15 +17,23 @@ This is a Rust workspace containing two main crates:
   - `passes/`: Compilation passes (denull, reassociate, linearize, serialize, etc.)
   - `render/`: Text rendering engine
   - `types/`: Core data structures (Layout, Doc, intermediate representations)
-The compiler passes use standard-library collections throughout — no custom
-data-structure layer remains. Sequences and LIFO working stacks are `Vec<T>`
-(or, when they must outlive a pass in the bump arena, arena slices `&'a [T]`
-built with `alloc_slice_copy`); integer-keyed maps are `HashMap` (the renderer's
-pack marks — point lookup/insert only, no ordering needed) or `BTreeMap`
-(`structurize`'s open-scope property map — see below). The former custom
-`avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
+The compiler passes use standard-library collections throughout — the shared
+custom data-structure layer is gone. Sequences and LIFO working stacks are
+`Vec<T>` (or, when they must outlive a pass in the bump arena, arena slices
+`&'a [T]` built with `alloc_slice_copy`); integer-keyed maps are `HashMap` (the
+renderer's pack marks — point lookup/insert only, no ordering needed) or
+`BTreeMap` (`structurize`'s open-scope property map — see below). The former
+custom `avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
 `cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
 used, have been removed.
+
+The one deliberate exception is `serialize`, which keeps two small local
+cons-list structs (`TermList`/`CompList`) for its nest/pack and grp/seq path
+accumulators. Unlike the removed `List`, these are genuinely persistent: at a
+`Comp`/`Line` node both operands capture the same parent accumulator, and comp
+accumulators are also captured into the emitted entries, so the tails are shared
+across branches. A `Vec` would force a clone at every branch, so the shared
+cons-list is the right structure here and stays.
 
 ### Upstream references
 
