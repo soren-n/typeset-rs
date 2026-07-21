@@ -3,7 +3,7 @@
 //! Reads the solved scope graph per line and rebuilds an explicit composition
 //! spine (grp/seq wrappers and left compositions) as a RebuildDoc.
 
-use super::graph::{GraphDoc, GraphFix, GraphNode, GraphTerm, NodeInfo, Property};
+use super::graph::{GraphDoc, GraphFix, GraphNode, GraphTerm, NodeInfo, Property, graph_lines};
 use crate::compiler::passes::term_chain::map_term_chain;
 use crate::compiler::types::{RebuildDoc, RebuildFix, RebuildObj, Term};
 use bumpalo::Bump;
@@ -137,20 +137,13 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
     fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b RebuildDoc<'b> {
         // Walk the linear spine, rebuilding each line's object.
         let mut objs: Vec<&'b RebuildObj<'b>> = Vec::new();
-        let mut cur = doc;
-        loop {
-            match cur {
-                GraphDoc::Eod => break,
-                GraphDoc::Break(nodes, pads, doc1) => {
-                    let info = topology(nodes);
-                    // The initial stack holds one identity continuation (an
-                    // empty step list); the initial partial is empty too.
-                    let stack: RStack<'b> = vec![Vec::new()];
-                    let partial: RPartial<'b> = Vec::new();
-                    objs.push(visit_line(mem, &info, pads, stack, partial));
-                    cur = doc1;
-                }
-            }
+        for (nodes, pads) in graph_lines(doc) {
+            let info = topology(nodes);
+            // The initial stack holds one identity continuation (an empty step
+            // list); the initial partial is empty too.
+            let stack: RStack<'b> = vec![Vec::new()];
+            let partial: RPartial<'b> = Vec::new();
+            objs.push(visit_line(mem, &info, pads, stack, partial));
         }
         let mut rdoc: &'b RebuildDoc<'b> = mem.alloc(RebuildDoc::Eod);
         for &obj in objs.iter().rev() {

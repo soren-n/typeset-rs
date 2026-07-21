@@ -13,6 +13,36 @@ use crate::compiler::passes::term_chain::{TermChain, TermSink, TermStep};
 use bumpalo::Bump;
 use std::cell::Cell;
 
+/// One line of the graph spine: its nodes in index order and the pad flags
+/// between adjacent nodes (`pads[i]` is the pad between node `i` and `i + 1`).
+pub(super) type GraphLine<'a> = (&'a [&'a GraphNode<'a>], &'a [bool]);
+
+/// Collect the lines of a `GraphDoc` spine, in order, into a `Vec`.
+///
+/// The `Eod`/`Break` spine is linear, so this is a plain loop — the shared
+/// counterpart to [`build_graph_doc`], used by `solve` and `rebuild` to walk the
+/// spine without recursing.
+pub(super) fn graph_lines<'a>(doc: &'a GraphDoc<'a>) -> Vec<GraphLine<'a>> {
+    let mut lines: Vec<GraphLine<'a>> = Vec::new();
+    let mut cur = doc;
+    while let GraphDoc::Break(nodes, pads, rest) = cur {
+        lines.push((nodes, pads));
+        cur = rest;
+    }
+    lines
+}
+
+/// Fold a slice of lines (document order) onto a fresh `Eod` terminal to build a
+/// `GraphDoc` spine. The shared counterpart to [`graph_lines`], used by
+/// `graphify` and `solve` to assemble their output spine.
+pub(super) fn build_graph_doc<'a>(mem: &'a Bump, lines: &[GraphLine<'a>]) -> &'a GraphDoc<'a> {
+    let mut gdoc: &'a GraphDoc<'a> = mem.alloc(GraphDoc::Eod);
+    for &(nodes, pads) in lines.iter().rev() {
+        gdoc = mem.alloc(GraphDoc::Break(nodes, pads, gdoc));
+    }
+    gdoc
+}
+
 /// The kind of a grp or seq scope edge. (`graphify` tracks scope *indices*
 /// while building the graph via the separate `Scope` type from the shared IR;
 /// once an edge is materialized only its kind matters, which is this.)

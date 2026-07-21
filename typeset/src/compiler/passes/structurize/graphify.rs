@@ -9,7 +9,9 @@
 //! linear in the number of scopes, so deeply nested grp/seq no longer cost
 //! O(n^2) (the old full-stack diff did). `solve` and `rebuild` are unchanged.
 
-use super::graph::{GraphDoc, GraphEdge, GraphFix, GraphNode, GraphTerm, Property};
+use super::graph::{
+    GraphDoc, GraphEdge, GraphFix, GraphLine, GraphNode, GraphTerm, Property, build_graph_doc,
+};
 use crate::compiler::passes::term_chain::map_term_chain;
 use crate::compiler::types::{FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, Scope};
 use bumpalo::Bump;
@@ -114,9 +116,9 @@ fn push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
 
 pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
     fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
-        // Walk the linear FixedDoc spine, graphifying each line's object.
-        type Line<'b> = (&'b [&'b GraphNode<'b>], &'b [bool]);
-        let mut breaks: Vec<Line<'b>> = Vec::new();
+        // Walk the linear FixedDoc spine, graphifying each line's object, then
+        // fold the resulting lines into a GraphDoc spine.
+        let mut breaks: Vec<GraphLine<'b>> = Vec::new();
         let mut cur = doc;
         loop {
             match cur {
@@ -127,11 +129,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                 }
             }
         }
-        let mut gdoc: &'b GraphDoc<'b> = mem.alloc(GraphDoc::Eod);
-        for &(nodes2, pads1) in breaks.iter().rev() {
-            gdoc = mem.alloc(GraphDoc::Break(nodes2, pads1, gdoc));
-        }
-        gdoc
+        build_graph_doc(mem, &breaks)
     }
     fn visit_obj<'b, 'a: 'b>(
         mem: &'b Bump,

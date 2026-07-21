@@ -4,7 +4,7 @@
 //! incoming scope edges past any seq edges, leaving a graph the rebuild phase
 //! can walk as a plain composition spine.
 
-use super::graph::{GraphDoc, GraphEdge, GraphNode, Property};
+use super::graph::{GraphDoc, GraphEdge, GraphNode, Property, build_graph_doc, graph_lines};
 use bumpalo::Bump;
 
 fn move_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
@@ -142,23 +142,12 @@ fn visit_node<'a>(nodes: &'a [&'a GraphNode<'a>]) {
 }
 
 pub(super) fn solve<'a>(mem: &'a Bump, doc: &'a GraphDoc<'a>) -> &'a GraphDoc<'a> {
-    // Walk the linear spine, solving each line's graph in place.
-    type Line<'a> = (&'a [&'a GraphNode<'a>], &'a [bool]);
-    let mut breaks: Vec<Line<'a>> = Vec::new();
-    let mut cur = doc;
-    loop {
-        match cur {
-            GraphDoc::Eod => break,
-            GraphDoc::Break(nodes, pads, doc1) => {
-                visit_node(nodes);
-                breaks.push((nodes, pads));
-                cur = doc1;
-            }
-        }
+    // Walk the linear spine, solving each line's graph in place, then reassemble
+    // it (the line payloads are unchanged — `solve` mutates the shared graph
+    // that `nodes` points into rather than rebuilding it).
+    let lines = graph_lines(doc);
+    for &(nodes, _pads) in &lines {
+        visit_node(nodes);
     }
-    let mut gdoc: &'a GraphDoc<'a> = mem.alloc(GraphDoc::Eod);
-    for &(nodes, pads) in breaks.iter().rev() {
-        gdoc = mem.alloc(GraphDoc::Break(nodes, pads, gdoc));
-    }
-    gdoc
+    build_graph_doc(mem, &lines)
 }
