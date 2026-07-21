@@ -1,3 +1,11 @@
+# Changelog
+
+All notable changes are recorded here. This file is maintained by hand: add an
+entry for each release before tagging it (see the release steps in
+[CONTRIBUTING.md](.github/CONTRIBUTING.md)). Versions follow
+[Semantic Versioning](https://semver.org/). Entries below `3.2.1` were generated
+by the previous automated release tooling.
+
 ## [3.2.1](https://github.com/soren-n/typeset-rs/compare/v3.2.0...v3.2.1) (2026-07-21)
 
 
