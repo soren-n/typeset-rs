@@ -57,9 +57,9 @@ fn format_expression(expr: &Expression) -> Box<Layout> {
             // Group the binary operation so it breaks as a unit
             grp(comp(
                 left_layout,
-                comp(op_layout, right_layout, false, false),
-                false,
-                false,
+                comp(op_layout, right_layout, Pad::Unpadded, Break::Breakable),
+                Pad::Unpadded,
+                Break::Breakable,
             ))
         }
 
@@ -71,9 +71,9 @@ fn format_expression(expr: &Expression) -> Box<Layout> {
             if args.is_empty() {
                 comp(
                     name_layout,
-                    comp(open_paren, close_paren, false, false),
-                    false,
-                    false,
+                    comp(open_paren, close_paren, Pad::Unpadded, Break::Breakable),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 )
             } else {
                 let args_layout = format_argument_list(args);
@@ -81,12 +81,12 @@ fn format_expression(expr: &Expression) -> Box<Layout> {
                     name_layout,
                     comp(
                         open_paren,
-                        comp(args_layout, close_paren, false, false),
-                        false,
-                        false,
+                        comp(args_layout, close_paren, Pad::Unpadded, Break::Breakable),
+                        Pad::Unpadded,
+                        Break::Breakable,
                     ),
-                    false,
-                    false,
+                    Pad::Unpadded,
+                    Break::Breakable,
                 )
             }
         }
@@ -106,9 +106,14 @@ fn format_argument_list(args: &[Expression]) -> Box<Layout> {
         } else {
             comp(
                 acc,
-                comp(text(",".to_string()), formatted_arg, true, false),
-                false,
-                false,
+                comp(
+                    text(",".to_string()),
+                    formatted_arg,
+                    Pad::Padded,
+                    Break::Breakable,
+                ),
+                Pad::Unpadded,
+                Break::Breakable,
             )
         }
     });
@@ -130,12 +135,12 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
                 var_layout,
                 comp(
                     assign_op,
-                    comp(expr_layout, semicolon, false, false),
-                    false,
-                    false,
+                    comp(expr_layout, semicolon, Pad::Unpadded, Break::Breakable),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 ),
-                false,
-                false,
+                Pad::Unpadded,
+                Break::Breakable,
             )
         }
 
@@ -147,22 +152,32 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
             comp(
                 format_expression(&call_expr),
                 text(";".to_string()),
-                false,
-                false,
+                Pad::Unpadded,
+                Break::Breakable,
             )
         }
 
         Statement::Return(maybe_expr) => {
             let return_kw = text("return".to_string());
             match maybe_expr {
-                None => comp(return_kw, text(";".to_string()), false, false),
+                None => comp(
+                    return_kw,
+                    text(";".to_string()),
+                    Pad::Unpadded,
+                    Break::Breakable,
+                ),
                 Some(expr) => {
                     let expr_layout = format_expression(expr);
                     comp(
                         return_kw,
-                        comp(expr_layout, text(";".to_string()), true, false),
-                        false,
-                        false,
+                        comp(
+                            expr_layout,
+                            text(";".to_string()),
+                            Pad::Padded,
+                            Break::Breakable,
+                        ),
+                        Pad::Unpadded,
+                        Break::Breakable,
                     )
                 }
             }
@@ -182,18 +197,23 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
                 if_kw,
                 comp(
                     open_paren,
-                    comp(condition_layout, close_paren, false, false),
-                    false,
-                    false,
+                    comp(
+                        condition_layout,
+                        close_paren,
+                        Pad::Unpadded,
+                        Break::Breakable,
+                    ),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 ),
-                false,
-                false,
+                Pad::Unpadded,
+                Break::Breakable,
             );
 
             let then_part = format_block(then_block);
 
             match else_block {
-                None => comp(condition_part, then_part, false, false),
+                None => comp(condition_part, then_part, Pad::Unpadded, Break::Breakable),
                 Some(else_stmts) => {
                     let else_kw = text(" else ".to_string());
                     let else_part = format_block(else_stmts);
@@ -201,12 +221,12 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
                         condition_part,
                         comp(
                             then_part,
-                            comp(else_kw, else_part, false, false),
-                            false,
-                            false,
+                            comp(else_kw, else_part, Pad::Unpadded, Break::Breakable),
+                            Pad::Unpadded,
+                            Break::Breakable,
                         ),
-                        false,
-                        false,
+                        Pad::Unpadded,
+                        Break::Breakable,
                     )
                 }
             }
@@ -222,16 +242,21 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
                 while_kw,
                 comp(
                     open_paren,
-                    comp(condition_layout, close_paren, false, false),
-                    false,
-                    false,
+                    comp(
+                        condition_layout,
+                        close_paren,
+                        Pad::Unpadded,
+                        Break::Breakable,
+                    ),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 ),
-                false,
-                false,
+                Pad::Unpadded,
+                Break::Breakable,
             );
 
             let body_part = format_block(body);
-            comp(condition_part, body_part, false, false)
+            comp(condition_part, body_part, Pad::Unpadded, Break::Breakable)
         }
     }
 }
@@ -242,7 +267,7 @@ fn format_block(statements: &[Statement]) -> Box<Layout> {
     let close_brace = text("}".to_string());
 
     if statements.is_empty() {
-        comp(open_brace, close_brace, false, false)
+        comp(open_brace, close_brace, Pad::Unpadded, Break::Breakable)
     } else {
         let mut formatted_stmts = null();
         for stmt in statements {
@@ -260,11 +285,11 @@ fn format_block(statements: &[Statement]) -> Box<Layout> {
             comp(
                 line(null(), indented_stmts),
                 line(null(), close_brace),
-                false,
-                false,
+                Pad::Unpadded,
+                Break::Breakable,
             ),
-            false,
-            false,
+            Pad::Unpadded,
+            Break::Breakable,
         )
     }
 }

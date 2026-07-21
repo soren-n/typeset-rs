@@ -37,9 +37,14 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
                     } else {
                         comp(
                             acc,
-                            comp(text(",".to_string()), formatted_item, true, false),
-                            false,
-                            false,
+                            comp(
+                                text(",".to_string()),
+                                formatted_item,
+                                Pad::Padded,
+                                Break::Breakable,
+                            ),
+                            Pad::Unpadded,
+                            Break::Breakable,
                         )
                     }
                 });
@@ -50,9 +55,9 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
 
                 comp(
                     opening,
-                    comp(indented_content, closing, false, false),
-                    false,
-                    false,
+                    comp(indented_content, closing, Pad::Unpadded, Break::Breakable),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 )
             }
         }
@@ -76,9 +81,9 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
 
                         let pair = comp(
                             key_layout,
-                            comp(colon, value_layout, false, false),
-                            false,
-                            false,
+                            comp(colon, value_layout, Pad::Unpadded, Break::Breakable),
+                            Pad::Unpadded,
+                            Break::Breakable,
                         );
 
                         if i == 0 {
@@ -86,9 +91,9 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
                         } else {
                             comp(
                                 acc,
-                                comp(text(",".to_string()), pair, true, false),
-                                false,
-                                false,
+                                comp(text(",".to_string()), pair, Pad::Padded, Break::Breakable),
+                                Pad::Unpadded,
+                                Break::Breakable,
                             )
                         }
                     });
@@ -99,9 +104,9 @@ fn format_json(value: &JsonValue) -> Box<Layout> {
 
                 comp(
                     opening,
-                    comp(indented_content, closing, false, false),
-                    false,
-                    false,
+                    comp(indented_content, closing, Pad::Unpadded, Break::Breakable),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 )
             }
         }

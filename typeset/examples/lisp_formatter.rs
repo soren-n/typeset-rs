@@ -28,9 +28,9 @@ fn format_sexpr(expr: &SExpr) -> Box<Layout> {
                     // Single item: (item)
                     comp(
                         open_paren,
-                        comp(first, close_paren, false, false),
-                        false,
-                        false,
+                        comp(first, close_paren, Pad::Unpadded, Break::Breakable),
+                        Pad::Unpadded,
+                        Break::Breakable,
                     )
                 } else {
                     // Multiple items: use pack for alignment
@@ -39,18 +39,18 @@ fn format_sexpr(expr: &SExpr) -> Box<Layout> {
                         let formatted = format_sexpr(expr);
                         rest = match rest.as_ref() {
                             Layout::Null => formatted,
-                            _ => comp(rest, formatted, true, false),
+                            _ => comp(rest, formatted, Pad::Padded, Break::Breakable),
                         };
                     }
 
                     // Pack aligns subsequent lines to the first argument
-                    let args = pack(comp(first, rest, true, false));
+                    let args = pack(comp(first, rest, Pad::Padded, Break::Breakable));
 
                     comp(
                         open_paren,
-                        comp(args, close_paren, false, false),
-                        false,
-                        false,
+                        comp(args, close_paren, Pad::Unpadded, Break::Breakable),
+                        Pad::Unpadded,
+                        Break::Breakable,
                     )
                 }
             }
@@ -76,7 +76,7 @@ fn format_sexpr_sequence(expr: &SExpr) -> Box<Layout> {
                     items = if i == 0 {
                         formatted
                     } else {
-                        comp(items, formatted, true, false)
+                        comp(items, formatted, Pad::Padded, Break::Breakable)
                     };
                 }
 
@@ -86,9 +86,9 @@ fn format_sexpr_sequence(expr: &SExpr) -> Box<Layout> {
 
                 comp(
                     open_paren,
-                    comp(indented, close_paren, false, false),
-                    false,
-                    false,
+                    comp(indented, close_paren, Pad::Unpadded, Break::Breakable),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 )
             }
         }

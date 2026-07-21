@@ -7,7 +7,7 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use typeset::{compile, render, text, comp, nest, grp};
+//! use typeset::{compile, render, text, comp, nest, grp, Pad, Break};
 //!
 //! // Create a simple layout
 //! let layout = comp(
@@ -15,9 +15,9 @@
 //!     nest(comp(
 //!         text("name()"),
 //!         text("{ body }"),
-//!         true, false
+//!         Pad::Padded, Break::Breakable
 //!     )),
-//!     true, false
+//!     Pad::Padded, Break::Breakable
 //! );
 //!
 //! // Compile and render
@@ -108,8 +108,8 @@
 //!
 //! let json_object = braces(
 //!     join_with_commas(vec![
-//!         comp(text("\"name\""), text("\"John\""), true, false),
-//!         comp(text("\"age\""), text("30"), true, false),
+//!         comp(text("\"name\""), text("\"John\""), Pad::Padded, Break::Breakable),
+//!         comp(text("\"age\""), text("30"), Pad::Padded, Break::Breakable),
 //!     ])
 //! );
 //!
@@ -141,11 +141,14 @@
 mod compiler;
 
 pub use self::compiler::{
+    // Composition axes for `comp`
+    Break,
     // Error handling
     DepthLimitExceeded,
     // Core types
     Doc,
     Layout,
+    Pad,
     // Core compilation functions
     compile,
     compile_within_depth,

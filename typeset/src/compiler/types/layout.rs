@@ -9,6 +9,43 @@ pub struct Attr {
     pub fix: bool,
 }
 
+/// Whether a composition puts a space between its two operands when they share
+/// a line — the padding axis of [`comp`](crate::comp).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Pad {
+    /// No space between the operands (`foo` then `(` renders as `foo(`).
+    Unpadded,
+    /// A single space between the operands (`foo` then `bar` renders as
+    /// `foo bar`).
+    Padded,
+}
+
+/// Whether a composition may break across lines — the break axis of
+/// [`comp`](crate::comp). `Fixed` is the composition-level analogue of wrapping
+/// in [`fix`](crate::fix).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Break {
+    /// The composition may move its right operand to the next line when it does
+    /// not fit within the target width.
+    Breakable,
+    /// The composition never breaks; both operands always stay on one line.
+    Fixed,
+}
+
+impl Pad {
+    /// The internal boolean encoding (`Padded` is `true`).
+    pub(crate) fn is_padded(self) -> bool {
+        matches!(self, Pad::Padded)
+    }
+}
+
+impl Break {
+    /// The internal boolean encoding (`Fixed` is `true`, matching `Attr::fix`).
+    pub(crate) fn is_fixed(self) -> bool {
+        matches!(self, Break::Fixed)
+    }
+}
+
 /// Layout AST - the input language for the compiler
 ///
 /// `Clone`, `Drop`, `Debug`, and `Display` are implemented iteratively below

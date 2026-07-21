@@ -24,9 +24,9 @@ let layout = comp(
     nest(comp(
         text("name()"),
         text("{ body }"),
-        true, false
+        Pad::Padded, Break::Breakable
     )),
-    true, false
+    Pad::Padded, Break::Breakable
 );
 
 // Compile and render with indent width 2, buffer width 40

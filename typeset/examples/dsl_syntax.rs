@@ -17,14 +17,24 @@ fn main() {
         comp(
             name.clone(),
             line(
-                comp(text("Age:".to_string()), age.clone(), true, false),
-                comp(text("City:".to_string()), city.clone(), true, false),
+                comp(
+                    text("Age:".to_string()),
+                    age.clone(),
+                    Pad::Padded,
+                    Break::Breakable,
+                ),
+                comp(
+                    text("City:".to_string()),
+                    city.clone(),
+                    Pad::Padded,
+                    Break::Breakable,
+                ),
             ),
-            true,
-            false,
+            Pad::Padded,
+            Break::Breakable,
         ),
-        true,
-        false,
+        Pad::Padded,
+        Break::Breakable,
     );
 
     // DSL approach - much more concise!
@@ -86,9 +96,14 @@ fn main() {
             } else {
                 comp(
                     acc,
-                    comp(text(",".to_string()), param.clone(), true, false),
-                    false,
-                    false,
+                    comp(
+                        text(",".to_string()),
+                        param.clone(),
+                        Pad::Padded,
+                        Break::Breakable,
+                    ),
+                    Pad::Unpadded,
+                    Break::Breakable,
                 )
             }
         });
@@ -100,14 +115,14 @@ fn main() {
             comp(
                 pack(seq(manual_params)),
                 text(")".to_string()),
-                false,
-                false,
+                Pad::Unpadded,
+                Break::Breakable,
             ),
-            false,
-            false,
+            Pad::Unpadded,
+            Break::Breakable,
         ),
-        false,
-        false,
+        Pad::Unpadded,
+        Break::Breakable,
     );
 
     // Same thing with DSL

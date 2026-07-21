@@ -24,14 +24,14 @@ Versus, e.g with an accumulator:
 fn layout_option(maybe_string: Option<String>, result: Layout) -> Layout {
   match maybe_string {
     None => result,
-    Some(data) => comp(result, text(data), true, false)
+    Some(data) => comp(result, text(data), Pad::Padded, Break::Breakable)
   }
 }
 ```
 
 The `null` will be eliminated from the layout by the compiler, and will not be rendered, e.g:
 ```Rust
-let foobar = comp(text("foo"), comp(null(), text("bar"), false, false), false, false);
+let foobar = comp(text("foo"), comp(null(), text("bar"), Pad::Unpadded, Break::Breakable), Pad::Unpadded, Break::Breakable);
 ```
 
 When rendering `foobar`, when the layout fits in the layout buffer, the result will be:
@@ -66,7 +66,7 @@ fo|o
 Sometimes you need to render a part of some layout as inline, i.e. that its compositions should not be broken; this is what the `fix` constructor is for. In other words a fixed layout is treated as a literal.
 
 ```Rust
-let foobar = fix(comp(text("foo"), text("bar"), false, false));
+let foobar = fix(comp(text("foo"), text("bar"), Pad::Unpadded, Break::Breakable));
 ```
 
 When rendering the fixed layout `foobar`, when the layout fits in the layout buffer, the result will be:
@@ -88,7 +88,7 @@ fo|obar
 The `grp` constructor prevents the solver from breaking its compositions, as long as there are compositions to the left of the group which could still be broken. This is useful when you need part of the layout to be treated as an item.
 
 ```Rust
-let foobarbaz = comp(text("foo"), grp(comp(text("bar"), text("baz"), false, false)), false, false);
+let foobarbaz = comp(text("foo"), grp(comp(text("bar"), text("baz"), Pad::Unpadded, Break::Breakable)), Pad::Unpadded, Break::Breakable);
 ```
 
 When rendering `foobarbaz`, when the layout fits in the layout buffer, the result will be:
@@ -128,7 +128,7 @@ baz |
 The `seq` constructor forces the solver to break all of its compositions as soon as one of them is broken. This is useful when you have data that is a sequence or is list-like in nature; when one item in the sequence is put on a new line, then so should the rest of the items in the sequence.
 
 ```Rust
-let foobarbaz = seq(comp(text("foo"), comp(text("bar"), text("baz"), false, false), false, false));
+let foobarbaz = seq(comp(text("foo"), comp(text("bar"), text("baz"), Pad::Unpadded, Break::Breakable), Pad::Unpadded, Break::Breakable));
 ```
 
 When rendering `foobarbaz`, when the layout fits in the layout buffer, the result will be:
@@ -153,7 +153,7 @@ Since the compositions were part of a sequence; i.e when one of them broke, they
 The `nest` constructor is simply there to provide an extra level of indentation for all literals that it ranges over. The width of each level of indentation is given as a parameter to the `render` function.
 
 ```Rust
-let foobarbaz = comp(text("foo"), nest(comp(text("bar"), text("baz"), false, false)), false, false);
+let foobarbaz = comp(text("foo"), nest(comp(text("bar"), text("baz"), Pad::Unpadded, Break::Breakable)), Pad::Unpadded, Break::Breakable);
 ```
 
 When rendering `foobarbaz` with a indentation width of 2, when the layout fits in the layout buffer, the result will be:
@@ -186,7 +186,7 @@ In this case _bar_ and _baz_ will overflow the layout buffer because of the give
 The `pack` constructor defines an indentation level, but implicitly sets the indentation width to the index of the first literal in the layout it annotates. This is e.g. useful if you are pretty printing terms in a lisp-like language, where all other arguments to an application is often "indented" to the same buffer index as the first argument.
 
 ```Rust
-let foobarbaz = comp(text("foo"), pack(comp(text("bar"), text("baz"), false, false)), false, false);
+let foobarbaz = comp(text("foo"), pack(comp(text("bar"), text("baz"), Pad::Unpadded, Break::Breakable)), Pad::Unpadded, Break::Breakable);
 ```
 
 When rendering `foobarbaz`, when the layout fits in the layout buffer, the result will be:
@@ -239,7 +239,7 @@ bar     |
 The unpadded composition will compose two layouts without any whitespace.
 
 ```Rust
-let foobar = comp(text("foo"), text("bar"), false, false);
+let foobar = comp(text("foo"), text("bar"), Pad::Unpadded, Break::Breakable);
 ```
 
 When rendering `foobar`, when the layout fits in the layout buffer, the result will be:
@@ -254,7 +254,7 @@ foobar  |
 The padded composition will compose two layouts with whitespace.
 
 ```Rust
-let foobar = comp(text("foo"), text("bar"), true, false);
+let foobar = comp(text("foo"), text("bar"), Pad::Padded, Break::Breakable);
 ```
 
 When rendering `foobar`, when the layout fits in the layout buffer, the result will be:
@@ -269,8 +269,8 @@ foo bar |
 The infix fixed compositions are syntactic sugar for compositions where the leftmost literal of the left operand, and the rightmost literal of the right operand are fixed together. I.e. the two following layouts are equivalent:
 
 ```Rust
-let foobarbaz1 = comp(text("foo"), comp(text("bar"), text("baz"), false, true), false, false);
-let foobarbaz2 = comp(text("foo"), fix(comp(text("bar"), text("baz"), false, false)), false, false);
+let foobarbaz1 = comp(text("foo"), comp(text("bar"), text("baz"), Pad::Unpadded, Break::Fixed), Pad::Unpadded, Break::Breakable);
+let foobarbaz2 = comp(text("foo"), fix(comp(text("bar"), text("baz"), Pad::Unpadded, Break::Breakable)), Pad::Unpadded, Break::Breakable);
 ```
 
 The example above might make it seem trivial, and that infix fixed compositions do not give you much value; but remember that you are composing layouts, not just literals. As such normalising the infix fixed composition is actually quite challenging since there are many different cases to consider when the fix is "sunk in place" in the layout tree; this is part of what the compiler is responsible for.

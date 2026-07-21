@@ -163,12 +163,12 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
 /// # Examples
 ///
 /// ```rust
-/// use typeset::{compile, render, text, comp};
+/// use typeset::{compile, render, text, comp, Pad, Break};
 ///
 /// let doc = compile(comp(
 ///     text("hello".to_string()),
 ///     text("world".to_string()),
-///     true, false,
+///     Pad::Padded, Break::Breakable,
 /// ));
 /// assert_eq!(render(doc, 2, 80), "hello world");
 /// ```
@@ -186,12 +186,12 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
 /// # Examples
 ///
 /// ```rust
-/// use typeset::{compile, render_ref, text, comp};
+/// use typeset::{compile, render_ref, text, comp, Pad, Break};
 ///
 /// let doc = compile(comp(
 ///     text("hello".to_string()),
 ///     text("world".to_string()),
-///     true, false,
+///     Pad::Padded, Break::Breakable,
 /// ));
 /// // Render at several widths without moving the document.
 /// assert!(render_ref(&doc, 2, 5).contains('\n'));
@@ -205,6 +205,7 @@ pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::compiler::constructors::*;
+    use crate::compiler::types::{Break, Pad};
 
     #[test]
     fn test_compile_simple_text() {
@@ -231,7 +232,7 @@ mod tests {
     fn test_compile_complex_layout() {
         let left = text("hello");
         let right = text("world");
-        let layout = comp(left, right, true, false);
+        let layout = comp(left, right, Pad::Padded, Break::Breakable);
         let result = compile_within_depth(layout, 10000);
         assert!(result.is_ok());
     }
@@ -282,7 +283,7 @@ mod tests {
         // exercising the renderer's deep break path and the deep `Doc` spine.
         let mut layout = text("a");
         for _ in 0..DEEP {
-            layout = comp(layout, text("b"), true, false);
+            layout = comp(layout, text("b"), Pad::Padded, Break::Breakable);
         }
         let doc = compile_within_depth(layout, DEEP * 2).expect("deep comp should compile");
         let output = render(doc, 2, 1);
@@ -292,7 +293,7 @@ mod tests {
 
     #[test]
     fn render_ref_matches_render_and_is_reusable() {
-        let layout = comp(text("hello"), text("world"), true, false);
+        let layout = comp(text("hello"), text("world"), Pad::Padded, Break::Breakable);
         let doc = compile(layout);
         // Borrowing renders the same document repeatedly without moving it.
         let a = render_ref(&doc, 2, 5);

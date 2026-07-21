@@ -14,7 +14,12 @@ fn create_simple_layout() -> Box<Layout> {
 fn create_nested_layout(depth: usize) -> Box<Layout> {
     let mut layout = text("base");
     for i in 0..depth {
-        layout = nest(comp(text(format!("level_{}", i)), layout, true, false));
+        layout = nest(comp(
+            text(format!("level_{}", i)),
+            layout,
+            Pad::Padded,
+            Break::Breakable,
+        ));
     }
     layout
 }
@@ -198,11 +203,11 @@ fn bench_combinators(c: &mut Criterion) {
     group.bench_function("text", |b| b.iter(|| text("benchmark text")));
 
     group.bench_function("comp_padded", |b| {
-        b.iter(|| comp(base.clone(), base.clone(), true, false))
+        b.iter(|| comp(base.clone(), base.clone(), Pad::Padded, Break::Breakable))
     });
 
     group.bench_function("comp_unpadded", |b| {
-        b.iter(|| comp(base.clone(), base.clone(), false, false))
+        b.iter(|| comp(base.clone(), base.clone(), Pad::Unpadded, Break::Breakable))
     });
 
     group.bench_function("line", |b| b.iter(|| line(base.clone(), base.clone())));

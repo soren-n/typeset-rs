@@ -4,8 +4,8 @@
 //! and that the overall pipeline produces correct results.
 
 use typeset::{
-    braces, comp, compile, compile_within_depth, fix, grp, join_with_commas, join_with_spaces,
-    nest, pack, parens, render, seq, text,
+    Break, Pad, braces, comp, compile, compile_within_depth, fix, grp, join_with_commas,
+    join_with_spaces, nest, pack, parens, render, seq, text,
 };
 
 /// Test the complete compiler pipeline with various layout constructs
@@ -21,16 +21,21 @@ fn test_all_layout_constructs() {
                 braces(grp(join_with_commas(vec![
                     text("stmt1"),
                     text("stmt2"),
-                    seq(comp(text("if"), parens(text("condition")), true, false)),
+                    seq(comp(
+                        text("if"),
+                        parens(text("condition")),
+                        Pad::Padded,
+                        Break::Breakable,
+                    )),
                 ]))),
-                true,
-                false,
+                Pad::Padded,
+                Break::Breakable,
             ),
-            true,
-            false,
+            Pad::Padded,
+            Break::Breakable,
         )),
-        false,
-        false,
+        Pad::Unpadded,
+        Break::Breakable,
     );
 
     let doc = compile(layout);
@@ -52,7 +57,12 @@ fn test_deep_nesting() {
 
     // Create moderately nested structure (reduced to avoid stack overflow)
     for i in 0..20 {
-        layout = nest(comp(text(format!("level_{}", i)), layout, true, false));
+        layout = nest(comp(
+            text(format!("level_{}", i)),
+            layout,
+            Pad::Padded,
+            Break::Breakable,
+        ));
     }
 
     let result = compile_within_depth(layout, 10000);
@@ -73,7 +83,12 @@ fn test_wide_layouts() {
 
     // Create wide structure with many compositions (reduced to prevent stack overflow)
     for i in 1..20 {
-        layout = comp(layout, text(format!("item_{}", i)), true, false);
+        layout = comp(
+            layout,
+            text(format!("item_{}", i)),
+            Pad::Padded,
+            Break::Breakable,
+        );
     }
 
     let result = compile_within_depth(layout, 200);
@@ -90,11 +105,21 @@ fn test_wide_layouts() {
 /// Test that fix construct prevents breaking
 #[test]
 fn test_fix_prevents_breaking() {
-    let breakable = comp(text("breakable"), text("content"), true, false);
+    let breakable = comp(
+        text("breakable"),
+        text("content"),
+        Pad::Padded,
+        Break::Breakable,
+    );
 
-    let fixed = fix(comp(text("fixed"), text("content"), true, false));
+    let fixed = fix(comp(
+        text("fixed"),
+        text("content"),
+        Pad::Padded,
+        Break::Breakable,
+    ));
 
-    let layout = comp(breakable, fixed, false, false);
+    let layout = comp(breakable, fixed, Pad::Unpadded, Break::Breakable);
 
     let doc = compile(layout);
     let output = render(doc, 2, 10); // Very narrow to force breaking
@@ -115,7 +140,12 @@ fn test_group_breaking() {
         text("together"),
     ]));
 
-    let layout = comp(text("Before"), grouped_content, true, false);
+    let layout = comp(
+        text("Before"),
+        grouped_content,
+        Pad::Padded,
+        Break::Breakable,
+    );
 
     // Test with wide width (should fit on one line)
     let doc = compile(layout.clone());
@@ -146,7 +176,7 @@ fn test_sequence_breaking() {
         text("seq4"),
     ]));
 
-    let layout = comp(text("Before"), seq_content, true, false);
+    let layout = comp(text("Before"), seq_content, Pad::Padded, Break::Breakable);
 
     let doc = compile(layout);
     let output = render(doc, 2, 15); // Narrow enough to trigger breaking
@@ -168,12 +198,17 @@ fn test_sequence_breaking() {
 #[test]
 fn test_pack_alignment_complex() {
     let pack_content = pack(join_with_commas(vec![
-        comp(text("key1"), text("value1"), true, false),
-        comp(text("key2"), text("value2"), true, false),
-        comp(text("longer_key"), text("value3"), true, false),
+        comp(text("key1"), text("value1"), Pad::Padded, Break::Breakable),
+        comp(text("key2"), text("value2"), Pad::Padded, Break::Breakable),
+        comp(
+            text("longer_key"),
+            text("value3"),
+            Pad::Padded,
+            Break::Breakable,
+        ),
     ]));
 
-    let layout = comp(text("Config:"), pack_content, true, false);
+    let layout = comp(text("Config:"), pack_content, Pad::Padded, Break::Breakable);
 
     let doc = compile(layout);
     let output = render(doc, 2, 25); // Force some breaking
@@ -195,8 +230,8 @@ fn test_mixed_constructs() {
             text("item_b"),
             text("item_c"),
         ]))),
-        true,
-        false,
+        Pad::Padded,
+        Break::Breakable,
     )));
 
     let result = compile_within_depth(layout, 10000);
@@ -221,7 +256,12 @@ fn test_edge_cases() {
     assert_eq!(output, "");
 
     // Test composition with null
-    let with_null = comp(text("Before"), typeset::null(), true, false);
+    let with_null = comp(
+        text("Before"),
+        typeset::null(),
+        Pad::Padded,
+        Break::Breakable,
+    );
     let doc = compile(with_null);
     let output = render(doc, 2, 80);
     assert_eq!(output, "Before");
@@ -245,10 +285,10 @@ fn test_edge_cases() {
 #[test]
 fn test_seq_inside_grp_breaks_all_or_nothing() {
     let layout = grp(seq(comp(
-        comp(text("a"), text("b"), true, false),
+        comp(text("a"), text("b"), Pad::Padded, Break::Breakable),
         text("c"),
-        true,
-        false,
+        Pad::Padded,
+        Break::Breakable,
     )));
     let output = render(compile(layout), 2, 3);
     assert_eq!(output, "a\nb\nc", "seq inside grp broke only partially");
@@ -259,10 +299,10 @@ fn test_seq_inside_grp_breaks_all_or_nothing() {
 #[test]
 fn test_grp_inside_seq_keeps_its_own_fit_scope() {
     let layout = seq(grp(comp(
-        comp(text("a"), text("b"), true, false),
+        comp(text("a"), text("b"), Pad::Padded, Break::Breakable),
         text("c"),
-        true,
-        false,
+        Pad::Padded,
+        Break::Breakable,
     )));
     let output = render(compile(layout), 2, 3);
     assert_eq!(output, "a b\nc", "grp inside seq lost its fit scope");

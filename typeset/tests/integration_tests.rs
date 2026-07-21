@@ -4,14 +4,19 @@
 //! and produces the same results as the original monolithic implementation.
 
 use typeset::{
-    DepthLimitExceeded, comp, compile, compile_within_depth, grp, line, nest, pack, render, seq,
-    text,
+    Break, DepthLimitExceeded, Pad, comp, compile, compile_within_depth, grp, line, nest, pack,
+    render, seq, text,
 };
 
 /// Test basic compilation functionality
 #[test]
 fn test_basic_compilation() {
-    let layout = comp(text("Hello"), text("World"), false, false);
+    let layout = comp(
+        text("Hello"),
+        text("World"),
+        Pad::Unpadded,
+        Break::Breakable,
+    );
 
     // A bounded compile of a shallow layout succeeds...
     let bounded_result = compile_within_depth(layout.clone(), 10000);
@@ -31,7 +36,7 @@ fn test_basic_compilation() {
 /// Test padded composition
 #[test]
 fn test_padded_composition() {
-    let layout = comp(text("Hello"), text("World"), true, false);
+    let layout = comp(text("Hello"), text("World"), Pad::Padded, Break::Breakable);
 
     let doc = compile(layout);
     let output = render(doc, 2, 80);
@@ -55,20 +60,25 @@ fn test_depth_bound_rejection() {
 #[test]
 fn test_complex_layout() {
     let complex_layout = comp(
-        comp(text("fn"), text("main"), true, false),
+        comp(text("fn"), text("main"), Pad::Padded, Break::Breakable),
         comp(
             text("()"),
             comp(
                 text("{"),
-                comp(text("println!"), text("(\"Hello, World!\");"), false, false),
-                false,
-                false,
+                comp(
+                    text("println!"),
+                    text("(\"Hello, World!\");"),
+                    Pad::Unpadded,
+                    Break::Breakable,
+                ),
+                Pad::Unpadded,
+                Break::Breakable,
             ),
-            false,
-            false,
+            Pad::Unpadded,
+            Break::Breakable,
         ),
-        true,
-        false,
+        Pad::Padded,
+        Break::Breakable,
     );
 
     let result = compile_within_depth(complex_layout, 10000);
@@ -99,8 +109,8 @@ fn test_nesting() {
     let layout = comp(
         text("Prefix:"),
         nest(line(text("Indented"), text("text"))),
-        false,
-        false,
+        Pad::Unpadded,
+        Break::Breakable,
     );
 
     let doc = compile(layout);
@@ -118,9 +128,14 @@ fn test_grouping() {
     // Test that fits on one line
     let layout = comp(
         text("Before"),
-        grp(comp(text("grouped"), text("content"), true, false)),
-        true,
-        false,
+        grp(comp(
+            text("grouped"),
+            text("content"),
+            Pad::Padded,
+            Break::Breakable,
+        )),
+        Pad::Padded,
+        Break::Breakable,
     );
 
     let doc = compile(layout);
@@ -132,10 +147,15 @@ fn test_grouping() {
 #[test]
 fn test_sequence_breaking() {
     let layout = seq(comp(
-        comp(text("item1"), text("item2"), false, false),
+        comp(
+            text("item1"),
+            text("item2"),
+            Pad::Unpadded,
+            Break::Breakable,
+        ),
         text("item3"),
-        false,
-        false,
+        Pad::Unpadded,
+        Break::Breakable,
     ));
 
     let doc = compile(layout);
@@ -155,13 +175,18 @@ fn test_pack_alignment() {
     let layout = comp(
         text("Start"),
         pack(comp(
-            comp(text("first"), text("second"), false, false),
+            comp(
+                text("first"),
+                text("second"),
+                Pad::Unpadded,
+                Break::Breakable,
+            ),
             text("third"),
-            false,
-            false,
+            Pad::Unpadded,
+            Break::Breakable,
         )),
-        true,
-        false,
+        Pad::Padded,
+        Break::Breakable,
     );
 
     let doc = compile(layout);
@@ -190,12 +215,12 @@ fn test_different_widths() {
         text("This"),
         comp(
             text("is"),
-            comp(text("a"), text("test"), true, false),
-            true,
-            false,
+            comp(text("a"), text("test"), Pad::Padded, Break::Breakable),
+            Pad::Padded,
+            Break::Breakable,
         ),
-        true,
-        false,
+        Pad::Padded,
+        Break::Breakable,
     );
 
     // Test wide rendering

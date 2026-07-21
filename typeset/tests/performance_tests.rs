@@ -4,14 +4,19 @@
 //! characteristics and doesn't introduce regressions.
 
 use std::time::{Duration, Instant};
-use typeset::{comp, compile, compile_within_depth, grp, nest, render, seq, text};
+use typeset::{Break, Pad, comp, compile, compile_within_depth, grp, nest, render, seq, text};
 
 /// Helper function to create a layout with specified depth
 fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
     let mut layout = text("base");
 
     for i in 0..depth {
-        layout = nest(grp(comp(text(format!("level_{}", i)), layout, true, false)));
+        layout = nest(grp(comp(
+            text(format!("level_{}", i)),
+            layout,
+            Pad::Padded,
+            Break::Breakable,
+        )));
     }
 
     layout
@@ -22,7 +27,12 @@ fn create_wide_layout(width: usize) -> Box<typeset::Layout> {
     let mut layout = text("first");
 
     for i in 1..width {
-        layout = comp(layout, text(format!("item_{}", i)), true, false);
+        layout = comp(
+            layout,
+            text(format!("item_{}", i)),
+            Pad::Padded,
+            Break::Breakable,
+        );
     }
 
     layout
@@ -133,8 +143,8 @@ fn test_memory_efficiency() {
         let layout = comp(
             text(format!("iteration_{}", i)),
             create_deep_layout(8),
-            true,
-            false,
+            Pad::Padded,
+            Break::Breakable,
         );
 
         let result = compile_within_depth(layout, 50);
@@ -162,7 +172,7 @@ fn test_nested_scope_compilation_is_linear() {
     fn nested_seq(n: usize) -> Box<typeset::Layout> {
         let mut layout = text("a");
         for _ in 0..n {
-            layout = seq(comp(text("a"), layout, true, false));
+            layout = seq(comp(text("a"), layout, Pad::Padded, Break::Breakable));
         }
         layout
     }

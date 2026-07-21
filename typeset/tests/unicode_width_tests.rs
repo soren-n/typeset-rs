@@ -7,7 +7,12 @@ use typeset::*;
 
 /// Build `a + b` (padded composition) inside a group and render at `width`.
 fn render_pair(a: &str, b: &str, width: usize) -> String {
-    let layout = grp(comp(text(a.to_string()), text(b.to_string()), true, false));
+    let layout = grp(comp(
+        text(a.to_string()),
+        text(b.to_string()),
+        Pad::Padded,
+        Break::Breakable,
+    ));
     render(compile(layout), 2, width)
 }
 

@@ -26,15 +26,15 @@
 //!     nest(comp(
 //!         text("name()".to_string()),
 //!         braces(text("body".to_string())),
-//!         true, false
+//!         Pad::Padded, Break::Breakable
 //!     )),
-//!     true, false
+//!     Pad::Padded, Break::Breakable
 //! );
 //!
 //! let output = format_layout(layout, 2, 40);
 //! ```
 
-use crate::compiler::types::{Attr, Layout};
+use crate::compiler::types::{Attr, Break, Layout, Pad};
 
 // --- Basic constructors: the primitives ------------------------------------
 
@@ -43,7 +43,7 @@ use crate::compiler::types::{Attr, Layout};
 ///
 /// ```rust
 /// use typeset::*;
-/// let result = comp(null(), text("content".to_string()), true, false);
+/// let result = comp(null(), text("content".to_string()), Pad::Padded, Break::Breakable);
 /// assert_eq!(format_layout(result, 2, 80), "content");
 /// ```
 pub fn null() -> Box<Layout> {
@@ -70,7 +70,7 @@ pub fn text(data: impl Into<String>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let expr = fix(comp(text("a"), comp(text(" + "), text("b"), false, false), false, false));
+/// let expr = fix(comp(text("a"), comp(text(" + "), text("b"), Pad::Unpadded, Break::Breakable), Pad::Unpadded, Break::Breakable));
 /// // Fixed content stays on one line even when narrower than its width.
 /// assert_eq!(format_layout(expr, 2, 10), "a + b");
 /// ```
@@ -108,7 +108,7 @@ pub fn seq(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let call = comp(text("f("), comp(nest(text("x")), text(")"), false, false), false, false);
+/// let call = comp(text("f("), comp(nest(text("x")), text(")"), Pad::Unpadded, Break::Breakable), Pad::Unpadded, Break::Breakable);
 /// assert_eq!(format_layout(call, 2, 80), "f(x)");
 /// ```
 pub fn nest(layout: Box<Layout>) -> Box<Layout> {
@@ -140,42 +140,53 @@ pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Line(left, right))
 }
 
-/// The general composition of two layouts. `pad` inserts a space between them
-/// when they share a line; `fix` forbids breaking (like wrapping in
+/// The general composition of two layouts. [`Pad`] chooses whether a space
+/// separates them when they share a line; [`Break`] chooses whether the
+/// composition may break (`Break::Fixed` forbids it, like wrapping in
 /// [`fix`](crate::fix)). When a breakable composition doesn't fit, the right
 /// operand moves to the next line. The [`pad`]/[`unpad`]/[`fix_pad`]/[`fix_unpad`]
-/// shortcuts cover the four boolean combinations.
+/// shortcuts name the four combinations.
 ///
 /// ```rust
 /// use typeset::*;
-/// let padded = comp(text("function"), text("name()"), true, false);
+/// let padded = comp(text("function"), text("name()"), Pad::Padded, Break::Breakable);
 /// assert_eq!(format_layout(padded, 2, 80), "function name()");
 /// ```
-pub fn comp(left: Box<Layout>, right: Box<Layout>, pad: bool, fix: bool) -> Box<Layout> {
-    Box::new(Layout::Comp(left, right, Attr { pad, fix }))
+pub fn comp(left: Box<Layout>, right: Box<Layout>, pad: Pad, brk: Break) -> Box<Layout> {
+    Box::new(Layout::Comp(
+        left,
+        right,
+        Attr {
+            pad: pad.is_padded(),
+            fix: brk.is_fixed(),
+        },
+    ))
 }
 
-/// Padded, breakable composition — `comp(left, right, true, false)`.
+/// Padded, breakable composition — `comp(left, right, Pad::Padded,
+/// Break::Breakable)`.
 ///
 /// ```rust
 /// use typeset::*;
 /// assert_eq!(format_layout(pad(text("Hello"), text("world")), 2, 80), "Hello world");
 /// ```
 pub fn pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
-    comp(left, right, true, false)
+    comp(left, right, Pad::Padded, Break::Breakable)
 }
 
-/// Unpadded, breakable composition — `comp(left, right, false, false)`.
+/// Unpadded, breakable composition — `comp(left, right, Pad::Unpadded,
+/// Break::Breakable)`.
 ///
 /// ```rust
 /// use typeset::*;
 /// assert_eq!(format_layout(unpad(text("prefix"), text("suffix")), 2, 80), "prefixsuffix");
 /// ```
 pub fn unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
-    comp(left, right, false, false)
+    comp(left, right, Pad::Unpadded, Break::Breakable)
 }
 
-/// Padded composition that never breaks — `comp(left, right, true, true)`.
+/// Padded composition that never breaks — `comp(left, right, Pad::Padded,
+/// Break::Fixed)`.
 ///
 /// ```rust
 /// use typeset::*;
@@ -183,18 +194,18 @@ pub fn unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// assert_eq!(format_layout(fix_pad(text("!"), text("condition")), 2, 5), "! condition");
 /// ```
 pub fn fix_pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
-    comp(left, right, true, true)
+    comp(left, right, Pad::Padded, Break::Fixed)
 }
 
-/// Unpadded composition that never breaks — `comp(left, right, false, true)`.
-/// Useful for compound tokens like `->` or `==`.
+/// Unpadded composition that never breaks — `comp(left, right, Pad::Unpadded,
+/// Break::Fixed)`. Useful for compound tokens like `->` or `==`.
 ///
 /// ```rust
 /// use typeset::*;
 /// assert_eq!(format_layout(fix_unpad(text("-"), text(">")), 2, 80), "->");
 /// ```
 pub fn fix_unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
-    comp(left, right, false, true)
+    comp(left, right, Pad::Unpadded, Break::Fixed)
 }
 
 // --- Convenience constructors: spaces, punctuation, line breaks ------------
@@ -203,7 +214,7 @@ pub fn fix_unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let spaced = comp(text("Hello"), comp(space(), text("world"), false, false), false, false);
+/// let spaced = comp(text("Hello"), comp(space(), text("world"), Pad::Unpadded, Break::Breakable), Pad::Unpadded, Break::Breakable);
 /// assert_eq!(format_layout(spaced, 2, 80), "Hello world");
 /// ```
 pub fn space() -> Box<Layout> {
@@ -225,7 +236,7 @@ pub fn comma() -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let statement = comp(text("let x = 5"), semicolon(), false, false);
+/// let statement = comp(text("let x = 5"), semicolon(), Pad::Unpadded, Break::Breakable);
 /// assert_eq!(format_layout(statement, 2, 80), "let x = 5;");
 /// ```
 pub fn semicolon() -> Box<Layout> {
@@ -236,7 +247,7 @@ pub fn semicolon() -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let separated = comp(text("First line"), comp(newline(), text("Second line"), false, false), false, false);
+/// let separated = comp(text("First line"), comp(newline(), text("Second line"), Pad::Unpadded, Break::Breakable), Pad::Unpadded, Break::Breakable);
 /// assert_eq!(format_layout(separated, 2, 80), "First line\nSecond line");
 /// ```
 pub fn newline() -> Box<Layout> {
@@ -247,7 +258,7 @@ pub fn newline() -> Box<Layout> {
 ///
 /// ```rust
 /// use typeset::*;
-/// let document = comp(text("Section 1"), comp(blank_line(), text("Section 2"), false, false), false, false);
+/// let document = comp(text("Section 1"), comp(blank_line(), text("Section 2"), Pad::Unpadded, Break::Breakable), Pad::Unpadded, Break::Breakable);
 /// assert_eq!(format_layout(document, 2, 80), "Section 1\n\nSection 2");
 /// ```
 pub fn blank_line() -> Box<Layout> {
@@ -272,17 +283,12 @@ fn join_reduce(
 ///
 /// ```rust
 /// use typeset::*;
-/// let joined = join_with(vec![text("a"), text("b")], comp(comma(), space(), false, false));
+/// let joined = join_with(vec![text("a"), text("b")], comp(comma(), space(), Pad::Unpadded, Break::Breakable));
 /// assert_eq!(format_layout(joined, 2, 80), "a, b");
 /// ```
 pub fn join_with(layouts: Vec<Box<Layout>>, separator: Box<Layout>) -> Box<Layout> {
     join_reduce(layouts, move |acc, layout| {
-        comp(
-            acc,
-            comp(separator.clone(), layout, false, false),
-            false,
-            false,
-        )
+        unpad(acc, unpad(separator.clone(), layout))
     })
 }
 
@@ -305,7 +311,7 @@ pub fn join_with_spaces(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 /// assert_eq!(format_layout(params, 2, 80), "x, y, z");
 /// ```
 pub fn join_with_commas(layouts: Vec<Box<Layout>>) -> Box<Layout> {
-    join_with(layouts, comp(comma(), space(), false, false))
+    join_with(layouts, unpad(comma(), space()))
 }
 
 /// Joins `layouts` with forced [`line()`] breaks — one element per line.
@@ -325,19 +331,14 @@ pub fn join_with_lines(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 /// compositions, so no spaces are introduced and the delimiters never break
 /// apart from the content (the content may still break internally).
 fn wrap(open: &str, close: &str, layout: Box<Layout>) -> Box<Layout> {
-    comp(
-        text(open),
-        comp(layout, text(close), false, false),
-        false,
-        false,
-    )
+    unpad(text(open), unpad(layout, text(close)))
 }
 
 /// Wraps a layout in parentheses: `(content)`.
 ///
 /// ```rust
 /// use typeset::*;
-/// let call = comp(text("f"), parens(join_with_commas(vec![text("a"), text("b")])), false, false);
+/// let call = comp(text("f"), parens(join_with_commas(vec![text("a"), text("b")])), Pad::Unpadded, Break::Breakable);
 /// assert_eq!(format_layout(call, 2, 80), "f(a, b)");
 /// ```
 pub fn parens(layout: Box<Layout>) -> Box<Layout> {
