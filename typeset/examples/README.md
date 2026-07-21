@@ -48,7 +48,7 @@ This directory contains comprehensive examples demonstrating how to use the type
 
 ### Layout Combinators
 - **`text()`** - Basic text literals
-- **`comp()`** - Composition with padding and fix options
+- **`comp()`** - Composition with `Pad` (spacing) and `Break` (breakable/fixed) options
 - **`line()`** - Forced line breaks
 - **`null()`** - Empty layout (identity element)
 
