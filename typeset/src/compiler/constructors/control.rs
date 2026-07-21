@@ -48,9 +48,9 @@ use crate::compiler::types::Layout;
 ///
 /// # See Also
 ///
-/// - [`grp`] - For layouts that break together as a group
-/// - [`comp`] - The `fix` parameter controls breaking behavior
-/// - [`fix_pad`], [`fix_unpad`] - Composition shortcuts with fixing
+/// - [`grp`](crate::grp) - For layouts that break together as a group
+/// - [`comp`](crate::comp) - The `fix` parameter controls breaking behavior
+/// - [`fix_pad`](crate::fix_pad), [`fix_unpad`](crate::fix_unpad) - Composition shortcuts with fixing
 pub fn fix(layout: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Fix(layout))
 }
@@ -105,9 +105,9 @@ pub fn fix(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// # See Also
 ///
-/// - [`seq`] - For sequential breaking where one break forces all breaks
-/// - [`fix`] - For preventing any breaking
-/// - [`nest`] - For adding indentation to broken groups
+/// - [`seq`](crate::seq) - For sequential breaking where one break forces all breaks
+/// - [`fix`](crate::fix) - For preventing any breaking
+/// - [`nest`](crate::nest) - For adding indentation to broken groups
 pub fn grp(layout: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Grp(layout))
 }
@@ -154,13 +154,13 @@ pub fn grp(layout: Box<Layout>) -> Box<Layout> {
 /// - Breaking propagates forward through the sequence
 /// - Earlier elements can stay unbroken even if later ones break
 /// - Useful for maintaining consistent indentation in code blocks
-/// - Different from [`grp`] which breaks all-or-nothing
+/// - Different from [`grp`](crate::grp) which breaks all-or-nothing
 ///
 /// # See Also
 ///
-/// - [`grp`] - For all-or-nothing group breaking
-/// - [`line()`] - For explicit line breaks
-/// - [`join_with_lines`] - Often used with seq for statement sequences
+/// - [`grp`](crate::grp) - For all-or-nothing group breaking
+/// - [`line()`](crate::line) - For explicit line breaks
+/// - [`join_with_lines`](crate::join_with_lines) - Often used with seq for statement sequences
 pub fn seq(layout: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Seq(layout))
 }
@@ -231,8 +231,8 @@ pub fn seq(layout: Box<Layout>) -> Box<Layout> {
 /// # See Also
 ///
 /// - [`pack`] - For alignment-based indentation instead of fixed-width
-/// - [`format_layout`] - The `tab` parameter controls indentation width
-/// - [`braces`], [`parens`] - Often combined with nest for block structures
+/// - [`format_layout`](crate::format_layout) - The `tab` parameter controls indentation width
+/// - [`braces`](crate::braces), [`parens`](crate::parens) - Often combined with nest for block structures
 pub fn nest(layout: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Nest(layout))
 }
@@ -241,7 +241,7 @@ pub fn nest(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// The `pack` constructor aligns its content to the column position where the
 /// first text element appears, rather than using fixed-width indentation like
-/// [`nest`]. This creates "hanging" indentation that aligns with the start
+/// [`nest`](crate::nest). This creates "hanging" indentation that aligns with the start
 /// of the content, commonly used for parameter lists and similar structures.
 ///
 /// # Parameters
@@ -297,15 +297,15 @@ pub fn nest(layout: Box<Layout>) -> Box<Layout> {
 /// # Behavior
 ///
 /// - Indentation aligns to the column where content starts
-/// - More flexible than fixed-width [`nest`] for varying prefixes
+/// - More flexible than fixed-width [`nest`](crate::nest) for varying prefixes
 /// - Particularly useful for function calls, method chaining, and similar patterns
 /// - Alignment is based on the first text element encountered
 ///
 /// # See Also
 ///
-/// - [`nest`] - For fixed-width indentation
-/// - [`join_with_commas`] - Often used within pack for parameter lists
-/// - [`comp`] - Used to combine prefixes with packed content
+/// - [`nest`](crate::nest) - For fixed-width indentation
+/// - [`join_with_commas`](crate::join_with_commas) - Often used within pack for parameter lists
+/// - [`comp`](crate::comp) - Used to combine prefixes with packed content
 pub fn pack(layout: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Pack(layout))
 }

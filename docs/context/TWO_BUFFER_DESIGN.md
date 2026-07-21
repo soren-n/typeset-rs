@@ -93,10 +93,12 @@ consume — not a stack-safety guard. The 10,000 default used by `compile_safe()
 is a reasonable ceiling for typical use; raise or lower it to suit your memory
 budget. `AllocationFailed` is never constructed.
 
-Making the whole path deep-safe additionally requires converting
-`move_to_heap` and the renderer to iterate and giving `Doc`/`DocObj`/`DocObjFix`
-an iterative `Drop` (which entails reworking the renderer from consuming `Doc`
-by value to borrowing it).
+This whole-path deep-safety is done: `move_to_heap` and the renderer iterate,
+and `Doc`/`DocObj`/`DocObjFix` (and the input `Layout`) carry iterative `Drop`,
+`Clone`, and `Display`. Because a `Drop` type cannot be moved out of, the
+renderer borrows `&Doc` rather than consuming it — exposed publicly as
+[`render_ref`], with `render(Box<Doc>)` delegating to it — and `broken::_mark`
+extracts `Layout` children with `mem::take` instead of a by-value `match`.
 
 ## Implementation Challenges & Solutions
 

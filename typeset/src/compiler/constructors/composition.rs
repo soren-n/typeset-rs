@@ -63,10 +63,10 @@ use crate::compiler::types::{Attr, Layout};
 ///
 /// # See Also
 ///
-/// - [`newline`] - Convenience function for line breaks with empty content
-/// - [`blank_line`] - Creates double line breaks
-/// - [`join_with_lines`] - Joins multiple layouts with line breaks
-/// - [`comp`] - For conditional breaking based on width
+/// - [`newline`](crate::newline) - Convenience function for line breaks with empty content
+/// - [`blank_line`](crate::blank_line) - Creates double line breaks
+/// - [`join_with_lines`](crate::join_with_lines) - Joins multiple layouts with line breaks
+/// - [`comp`](crate::comp) - For conditional breaking based on width
 pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     Box::new(Layout::Line(left, right))
 }
@@ -145,7 +145,7 @@ pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// - `false`: No space added - layouts are directly adjacent
 ///
 /// ## `fix` Parameter  
-/// - `true`: This composition never breaks, similar to wrapping in [`fix`]
+/// - `true`: This composition never breaks, similar to wrapping in [`fix`](crate::fix)
 /// - `false`: This composition can break based on width constraints
 ///
 /// # Behavior
@@ -158,9 +158,9 @@ pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// # See Also
 ///
 /// - [`pad`], [`unpad`] - Convenience functions for common padding patterns
-/// - [`fix_pad`], [`fix_unpad`] - Convenience functions with fixing
+/// - [`fix_pad`](crate::fix_pad), [`fix_unpad`](crate::fix_unpad) - Convenience functions with fixing
 /// - [`line()`] - For unconditional line breaks
-/// - [`fix`] - Alternative way to prevent breaking
+/// - [`fix`](crate::fix) - Alternative way to prevent breaking
 pub fn comp(left: Box<Layout>, right: Box<Layout>, pad: bool, fix: bool) -> Box<Layout> {
     Box::new(Layout::Comp(left, right, Attr { pad, fix }))
 }
@@ -233,9 +233,9 @@ pub fn comp(left: Box<Layout>, right: Box<Layout>, pad: bool, fix: bool) -> Box<
 /// # See Also
 ///
 /// - [`unpad`] - Composition without spaces
-/// - [`fix_pad`] - Padded composition that never breaks
-/// - [`comp`] - The underlying composition function
-/// - [`join_with_spaces`] - For joining multiple layouts with padding
+/// - [`fix_pad`](crate::fix_pad) - Padded composition that never breaks
+/// - [`comp`](crate::comp) - The underlying composition function
+/// - [`join_with_spaces`](crate::join_with_spaces) - For joining multiple layouts with padding
 pub fn pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, true, false)
 }
@@ -310,9 +310,9 @@ pub fn pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// # See Also
 ///
 /// - [`pad`] - Composition with spaces
-/// - [`fix_unpad`] - Unpadded composition that never breaks
-/// - [`comp`] - The underlying composition function
-/// - Wrapper functions like [`parens`], [`brackets`], [`braces`] use unpadded compositions
+/// - [`fix_unpad`](crate::fix_unpad) - Unpadded composition that never breaks
+/// - [`comp`](crate::comp) - The underlying composition function
+/// - Wrapper functions like [`parens`](crate::parens), [`brackets`](crate::brackets), [`braces`](crate::braces) use unpadded compositions
 pub fn unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, false, false)
 }
@@ -393,9 +393,9 @@ pub fn unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// # See Also
 ///
 /// - [`pad`] - Padded composition that can break
-/// - [`fix_unpad`] - Fixed composition without spaces
-/// - [`fix`] - Alternative way to prevent breaking
-/// - [`comp`] - The underlying composition function
+/// - [`fix_unpad`](crate::fix_unpad) - Fixed composition without spaces
+/// - [`fix`](crate::fix) - Alternative way to prevent breaking
+/// - [`comp`](crate::comp) - The underlying composition function
 pub fn fix_pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, true, true)
 }
@@ -479,9 +479,9 @@ pub fn fix_pad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// # See Also
 ///
 /// - [`unpad`] - Unpadded composition that can break
-/// - [`fix_pad`] - Fixed composition with spaces
-/// - [`fix`] - Alternative way to prevent breaking
-/// - [`comp`] - The underlying composition function
+/// - [`fix_pad`](crate::fix_pad) - Fixed composition with spaces
+/// - [`fix`](crate::fix) - Alternative way to prevent breaking
+/// - [`comp`](crate::comp) - The underlying composition function
 pub fn fix_unpad(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
     comp(left, right, false, true)
 }

@@ -36,7 +36,7 @@ use crate::compiler::types::Layout;
 /// # See Also
 ///
 /// - [`text`] - For creating text content
-/// - [`comp`] - For composing layouts together
+/// - [`comp`](crate::comp) - For composing layouts together
 pub fn null() -> Box<Layout> {
     Box::new(Layout::Null)
 }
@@ -71,8 +71,8 @@ pub fn null() -> Box<Layout> {
 /// # See Also
 ///
 /// - [`text_str`] - Convenience function that takes `&str`
-/// - [`comp`] - For combining text with other layouts
-/// - [`fix`] - For ensuring text never breaks
+/// - [`comp`](crate::comp) - For combining text with other layouts
+/// - [`fix`](crate::fix) - For ensuring text never breaks
 pub fn text(data: String) -> Box<Layout> {
     Box::new(Layout::Text(data))
 }
@@ -111,7 +111,7 @@ pub fn text(data: String) -> Box<Layout> {
 /// # See Also
 ///
 /// - [`text`] - The underlying function that takes `String`
-/// - Common text constructors: [`space`], [`comma`], [`semicolon`]
+/// - Common text constructors: [`space`](crate::space), [`comma`](crate::comma), [`semicolon`](crate::semicolon)
 pub fn text_str(s: &str) -> Box<Layout> {
     text(s.to_string())
 }

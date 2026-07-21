@@ -91,10 +91,10 @@ use crate::compiler::types::Layout;
 ///
 /// # See Also
 ///
-/// - [`join_with_spaces`] - Joins with space separators
-/// - [`join_with_commas`] - Joins with comma separators
-/// - [`join_with_lines`] - Joins with line breaks
-/// - [`comp`] - The underlying composition function used
+/// - [`join_with_spaces`](crate::join_with_spaces) - Joins with space separators
+/// - [`join_with_commas`](crate::join_with_commas) - Joins with comma separators
+/// - [`join_with_lines`](crate::join_with_lines) - Joins with line breaks
+/// - [`comp`](crate::comp) - The underlying composition function used
 pub fn join_with(mut layouts: Vec<Box<Layout>>, separator: Box<Layout>) -> Box<Layout> {
     match layouts.len() {
         0 => null(),
@@ -172,9 +172,9 @@ pub fn join_with(mut layouts: Vec<Box<Layout>>, separator: Box<Layout>) -> Box<L
 ///
 /// # See Also
 ///
-/// - [`join_with_commas`] - For comma-separated lists
+/// - [`join_with_commas`](crate::join_with_commas) - For comma-separated lists
 /// - [`join_with`] - Generic joining with any separator
-/// - [`space`] - The separator used by this function
+/// - [`space`](crate::space) - The separator used by this function
 pub fn join_with_spaces(layouts: Vec<Box<Layout>>) -> Box<Layout> {
     join_with(layouts, space())
 }
@@ -248,10 +248,10 @@ pub fn join_with_spaces(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 ///
 /// # See Also
 ///
-/// - [`join_with_spaces`] - For space-separated elements
+/// - [`join_with_spaces`](crate::join_with_spaces) - For space-separated elements
 /// - [`join_with`] - Generic joining with any separator  
-/// - [`comma`] - The separator character used
-/// - [`grp`] - Often used to control breaking behavior of comma-separated lists
+/// - [`comma`](crate::comma) - The separator character used
+/// - [`grp`](crate::grp) - Often used to control breaking behavior of comma-separated lists
 pub fn join_with_commas(layouts: Vec<Box<Layout>>) -> Box<Layout> {
     join_with(layouts, comp(comma(), space(), false, false))
 }
@@ -353,8 +353,8 @@ pub fn join_with_commas(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 ///
 /// - [`join_with`] - Generic joining that may break based on width
 /// - [`line()`] - The underlying line break constructor
-/// - [`newline`], [`blank_line`] - For manual line break insertion
-/// - [`seq`] - Often used with line-based layouts for breaking control
+/// - [`newline`](crate::newline), [`blank_line`](crate::blank_line) - For manual line break insertion
+/// - [`seq`](crate::seq) - Often used with line-based layouts for breaking control
 pub fn join_with_lines(mut layouts: Vec<Box<Layout>>) -> Box<Layout> {
     match layouts.len() {
         0 => null(),

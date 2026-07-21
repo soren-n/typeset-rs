@@ -60,7 +60,9 @@
 //! - **Constructors** - Functions for building layout trees ([`text()`], [`comp()`], [`nest()`], etc.)
 //! - **Compiler** - Multi-pass compilation pipeline that optimizes layouts
 //! - **Types** - Core data structures for layouts and intermediate representations  
-//! - **Render** - Final rendering engine that produces formatted strings
+//! - **Render** - Final rendering engine that produces formatted strings. Use
+//!   [`render()`] to render a document once, or [`render_ref()`] to render the
+//!   same [`Doc`] repeatedly (e.g. at several widths) without cloning it
 //! - **Memory** - Efficient bump allocation for zero-copy transformations
 //!
 //! ## Error Handling

@@ -14,7 +14,7 @@ use super::composition::line;
 ///
 /// # Returns
 ///
-/// A boxed [`Layout::Text`] containing a single space.
+/// A boxed [`Layout::Text`](crate::Layout::Text) containing a single space.
 ///
 /// # Examples
 ///
@@ -46,8 +46,8 @@ use super::composition::line;
 ///
 /// # See Also
 ///
-/// - [`join_with_spaces`] - Joins layouts with spaces
-/// - [`comp`] - The `pad=true` parameter provides automatic spacing
+/// - [`join_with_spaces`](crate::join_with_spaces) - Joins layouts with spaces
+/// - [`comp`](crate::comp) - The `pad=true` parameter provides automatic spacing
 pub fn space() -> Box<crate::compiler::types::Layout> {
     text_str(" ")
 }
@@ -59,7 +59,7 @@ pub fn space() -> Box<crate::compiler::types::Layout> {
 ///
 /// # Returns
 ///
-/// A boxed [`Layout::Text`] containing a comma.
+/// A boxed [`Layout::Text`](crate::Layout::Text) containing a comma.
 ///
 /// # Examples
 ///
@@ -95,9 +95,9 @@ pub fn space() -> Box<crate::compiler::types::Layout> {
 ///
 /// # See Also
 ///
-/// - [`join_with_commas`] - Joins layouts with comma separators
-/// - [`semicolon`] - For semicolon separators
-/// - [`space`] - Often used after commas
+/// - [`join_with_commas`](crate::join_with_commas) - Joins layouts with comma separators
+/// - [`semicolon`](crate::semicolon) - For semicolon separators
+/// - [`space`](crate::space) - Often used after commas
 pub fn comma() -> Box<crate::compiler::types::Layout> {
     text_str(",")
 }
@@ -109,7 +109,7 @@ pub fn comma() -> Box<crate::compiler::types::Layout> {
 ///
 /// # Returns
 ///
-/// A boxed [`Layout::Text`] containing a semicolon.
+/// A boxed [`Layout::Text`](crate::Layout::Text) containing a semicolon.
 ///
 /// # Examples
 ///
@@ -142,8 +142,8 @@ pub fn comma() -> Box<crate::compiler::types::Layout> {
 ///
 /// # See Also
 ///
-/// - [`comma`] - For comma separators
-/// - [`join_with_lines`] - Often used for statement sequences
+/// - [`comma`](crate::comma) - For comma separators
+/// - [`join_with_lines`](crate::join_with_lines) - Often used for statement sequences
 pub fn semicolon() -> Box<crate::compiler::types::Layout> {
     text_str(";")
 }
@@ -156,7 +156,7 @@ pub fn semicolon() -> Box<crate::compiler::types::Layout> {
 ///
 /// # Returns
 ///
-/// A boxed [`Layout::Line`] with empty content on both sides.
+/// A boxed [`Layout::Line`](crate::Layout::Line) with empty content on both sides.
 ///
 /// # Examples
 ///
@@ -192,9 +192,9 @@ pub fn semicolon() -> Box<crate::compiler::types::Layout> {
 ///
 /// # See Also
 ///
-/// - [`blank_line`] - For double line breaks
+/// - [`blank_line`](crate::blank_line) - For double line breaks
 /// - [`line()`] - For line breaks with content on both sides
-/// - [`join_with_lines`] - For joining multiple layouts with line breaks
+/// - [`join_with_lines`](crate::join_with_lines) - For joining multiple layouts with line breaks
 pub fn newline() -> Box<crate::compiler::types::Layout> {
     line(null(), null())
 }
@@ -208,7 +208,7 @@ pub fn newline() -> Box<crate::compiler::types::Layout> {
 ///
 /// # Returns
 ///
-/// A boxed [`Layout::Line`] that produces a blank line.
+/// A boxed [`Layout::Line`](crate::Layout::Line) that produces a blank line.
 ///
 /// # Examples
 ///
@@ -248,9 +248,9 @@ pub fn newline() -> Box<crate::compiler::types::Layout> {
 ///
 /// # See Also
 ///
-/// - [`newline`] - For single line breaks
+/// - [`newline`](crate::newline) - For single line breaks
 /// - [`line()`] - The underlying line break constructor
-/// - [`join_with_lines`] - For single-line separation
+/// - [`join_with_lines`](crate::join_with_lines) - For single-line separation
 pub fn blank_line() -> Box<crate::compiler::types::Layout> {
     line(line(null(), null()), null())
 }

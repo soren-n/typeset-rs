@@ -78,9 +78,9 @@ use crate::compiler::types::Layout;
 ///
 /// # See Also
 ///
-/// - [`brackets`] - For wrapping in square brackets `[]`
-/// - [`braces`] - For wrapping in curly braces `{}`
-/// - [`comp`] - The underlying composition constructor used
+/// - [`brackets`](crate::brackets) - For wrapping in square brackets `[]`
+/// - [`braces`](crate::braces) - For wrapping in curly braces `{}`
+/// - [`comp`](crate::comp) - The underlying composition constructor used
 pub fn parens(layout: Box<Layout>) -> Box<Layout> {
     comp(
         text_str("("),
@@ -165,9 +165,9 @@ pub fn parens(layout: Box<Layout>) -> Box<Layout> {
 ///
 /// # See Also
 ///
-/// - [`parens`] - For wrapping in parentheses `()`
-/// - [`braces`] - For wrapping in curly braces `{}`
-/// - [`comp`] - The underlying composition constructor used
+/// - [`parens`](crate::parens) - For wrapping in parentheses `()`
+/// - [`braces`](crate::braces) - For wrapping in curly braces `{}`
+/// - [`comp`](crate::comp) - The underlying composition constructor used
 pub fn brackets(layout: Box<Layout>) -> Box<Layout> {
     comp(
         text_str("["),
@@ -255,15 +255,15 @@ pub fn brackets(layout: Box<Layout>) -> Box<Layout> {
 /// - Uses unpadded compositions (`pad=false`) to avoid spaces around braces
 /// - The wrapped content can break internally based on its own structure
 /// - Braces themselves never break apart from their content
-/// - Commonly combined with [`nest`] for proper indentation of block content
+/// - Commonly combined with [`nest`](crate::nest) for proper indentation of block content
 /// - No additional spacing is introduced
 ///
 /// # See Also
 ///
-/// - [`parens`] - For wrapping in parentheses `()`
-/// - [`brackets`] - For wrapping in square brackets `[]`
-/// - [`nest`] - Often used inside braces for proper indentation
-/// - [`join_with_lines`] - Common for multi-statement blocks
+/// - [`parens`](crate::parens) - For wrapping in parentheses `()`
+/// - [`brackets`](crate::brackets) - For wrapping in square brackets `[]`
+/// - [`nest`](crate::nest) - Often used inside braces for proper indentation
+/// - [`join_with_lines`](crate::join_with_lines) - Common for multi-statement blocks
 pub fn braces(layout: Box<Layout>) -> Box<Layout> {
     comp(
         text_str("{"),

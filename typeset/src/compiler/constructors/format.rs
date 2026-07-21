@@ -89,7 +89,7 @@ use crate::compiler::types::Layout;
 /// # Parameters
 ///
 /// ## `tab` Parameter
-/// - Controls indentation width for [`nest`] constructors
+/// - Controls indentation width for [`nest`](crate::nest) constructors
 /// - Common values: 2 (compact), 4 (standard), 8 (traditional)
 /// - Affects readability vs. horizontal space trade-off
 ///
