@@ -71,9 +71,10 @@ use crate::compiler::types::Layout;
 ///
 /// - Empty vector returns [`null`]
 /// - Single element vector returns that element unchanged
-/// - Multiple elements are joined with padded compositions
+/// - Multiple elements are joined with unpadded compositions (the separator
+///   supplies its own spacing)
 /// - The separator is placed between consecutive elements (N-1 separators for N elements)
-/// - Both the main composition and separator composition use `pad=true, fix=false`
+/// - Both the main composition and separator composition use `pad=false, fix=false`
 ///
 /// # Edge Cases
 ///
@@ -182,10 +183,10 @@ pub fn join_with_spaces(layouts: Vec<Box<Layout>>) -> Box<Layout> {
 /// Joins a collection of layouts with comma separators.
 ///
 /// This convenience function takes a vector of layouts and combines them with
-/// comma-space separators (", ") between each element. It's equivalent to
-/// `join_with(layouts, comma())` but note that the underlying implementation
-/// adds both comma and space. This is the standard way to create comma-separated
-/// lists like function parameters, array elements, or object properties.
+/// comma-space separators (", ") between each element — equivalent to
+/// `join_with(layouts, comp(comma(), space(), false, false))`. This is the
+/// standard way to create comma-separated lists like function parameters, array
+/// elements, or object properties.
 ///
 /// # Parameters
 ///
