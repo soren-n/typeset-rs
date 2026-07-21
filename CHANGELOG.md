@@ -1,3 +1,23 @@
+## [3.1.7](https://github.com/soren-n/typeset-rs/compare/v3.1.6...v3.1.7) (2026-07-21)
+
+
+### Bug Fixes
+
+* make List::get and get_unsafe iterative ([afae985](https://github.com/soren-n/typeset-rs/commit/afae98588dc68506f42f5f59ebb917e309fe75e7))
+
+
+### Performance Improvements
+
+* defunctionalize the broken pass to remove native-stack recursion ([4d76641](https://github.com/soren-n/typeset-rs/commit/4d766416a21699fa30e989ff1dfa8d94f0f98245))
+* defunctionalize the denull pass to remove native-stack recursion ([3ddda36](https://github.com/soren-n/typeset-rs/commit/3ddda3685ab255d7199836b42fb55a93f848037f))
+* defunctionalize the fixed pass to remove native-stack recursion ([db9704c](https://github.com/soren-n/typeset-rs/commit/db9704cf5510b466513de0ef5904e15d298bdabf))
+* defunctionalize the identities pass to remove native-stack recursion ([0235d46](https://github.com/soren-n/typeset-rs/commit/0235d46ffc83cb94dab60a1c818a3fa4018f0f4b))
+* defunctionalize the linearize pass to remove native-stack recursion ([b5c1cc5](https://github.com/soren-n/typeset-rs/commit/b5c1cc51d6d05b390e3f1bcc371535a862346674))
+* defunctionalize the reassociate pass to remove native-stack recursion ([b2cd7ea](https://github.com/soren-n/typeset-rs/commit/b2cd7ea84c9f8631092720f1976b7c45dba5c1dc))
+* defunctionalize the rescope pass to remove native-stack recursion ([178200a](https://github.com/soren-n/typeset-rs/commit/178200a7f00ba8ca7cd1946bfefc020e5694723c))
+* defunctionalize the serialize pass to remove native-stack recursion ([70b81ed](https://github.com/soren-n/typeset-rs/commit/70b81ed3ed0ea831fa8df4cc99cf3e261660e350))
+* defunctionalize the structurize pass to remove native-stack recursion ([3f2ac45](https://github.com/soren-n/typeset-rs/commit/3f2ac45b130c92d973a95c8a8c862eb51747e600))
+
 ## [3.1.6](https://github.com/soren-n/typeset-rs/compare/v3.1.5...v3.1.6) (2026-07-20)
 
 
