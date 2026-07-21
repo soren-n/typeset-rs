@@ -11,20 +11,17 @@ The project uses a comprehensive dual-language testing approach combining Rust u
 
 **Coverage**:
 - Individual function behavior
-- Data structure operations (the persistent `List`)
 - Layout constructor behavior
-- Compiler pass validation
+- Compiler pass validation (including per-pass depth-50k deep-safety tests)
 
-`list.rs` carries `proptest` property tests (in `#[cfg(test)] mod proptests`)
-that model the structure against a std reference — `List` against `Vec` — and
-check every public operation. Integer-keyed maps now use standard-library
-collections (`HashMap` for the renderer's marks, `BTreeMap` for `structurize`'s
-property map), so they need no bespoke tests; the compiler's use of them is
+The compiler uses only standard-library collections (`Vec`/slices, `HashMap`,
+`BTreeMap`), so there is no bespoke data-structure test suite; their use is
 covered end-to-end by the differential fuzzer and the OCaml oracle.
 
-**Note**: "property-based testing" in this project refers to two independent
-mechanisms — these Rust `proptest` tests over the data structures, and the
-OCaml QCheck suite (below) that validates rendering against the reference.
+**Note**: "property-based testing" in this project now refers to the OCaml
+QCheck suite (below) that validates rendering against the reference, together
+with the Python differential fuzzer. (Earlier bespoke `proptest` tests over the
+custom data structures were removed along with those structures.)
 
 ### 2. Rust Integration Tests  
 **Location**: `typeset/tests/` and `tests/unit/`

@@ -151,7 +151,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod compiler;
-mod list;
 
 pub use self::compiler::{
     // Error handling

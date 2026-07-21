@@ -17,15 +17,15 @@ This is a Rust workspace containing two main crates:
   - `passes/`: Compilation passes (denull, reassociate, linearize, serialize, etc.)
   - `render/`: Text rendering engine
   - `types/`: Core data structures (Layout, Doc, intermediate representations)
-- `list.rs`: Persistent (bump-allocated, structurally-shared) singly-linked list
-  used by the compiler passes (`structurize`, `rescope`)
-
-Integer-keyed maps use standard-library collections: the renderer's pack marks
-are a `HashMap` (point lookup/insert only, no ordering needed), and
-`structurize`'s open-scope property map is a `BTreeMap` (see below). The former
-custom `avl.rs`/`map.rs`/`order.rs` layer (a faithful port of the OCaml
-`cps_toolbox` AVL/Map), and the `util.rs` closure-composition helper that only
-its list folds used, have been removed.
+The compiler passes use standard-library collections throughout — no custom
+data-structure layer remains. Sequences and LIFO working stacks are `Vec<T>`
+(or, when they must outlive a pass in the bump arena, arena slices `&'a [T]`
+built with `alloc_slice_copy`); integer-keyed maps are `HashMap` (the renderer's
+pack marks — point lookup/insert only, no ordering needed) or `BTreeMap`
+(`structurize`'s open-scope property map — see below). The former custom
+`avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
+`cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
+used, have been removed.
 
 ### Upstream references
 
@@ -34,8 +34,6 @@ behaviour diverges. If the OCaml packages are installed (see TESTING.md) the
 source sits at:
 
 - `~/.opam/default/lib/typeset/Typeset.ml` — the compiler passes and renderer
-- `~/.opam/default/.opam-switch/sources/cps_toolbox.0.3/lib/List.ml` — the
-  original for `list.rs`
 
 Ordering matters in `structurize`: it feeds the property map's values straight
 into its graph construction, so the values must come out in key order. This is
