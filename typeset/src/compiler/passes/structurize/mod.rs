@@ -50,7 +50,11 @@ mod tests {
         for _ in 0..depth {
             obj = mem.alloc(FixedObj::Next(
                 mem.alloc(FixedItem::Term(mem.alloc(Term::Text("y")))),
-                mem.alloc(FixedComp::Comp(false, &[], &[])),
+                mem.alloc(FixedComp {
+                    pad: false,
+                    opens: &[],
+                    closes: &[],
+                }),
                 obj,
             ));
         }
@@ -100,7 +104,11 @@ mod tests {
         for _ in 0..DEEP {
             fix = mem.alloc(FixedFix::Next(
                 mem.alloc(Term::Text("y")),
-                mem.alloc(FixedComp::Comp(false, &[], &[])),
+                mem.alloc(FixedComp {
+                    pad: false,
+                    opens: &[],
+                    closes: &[],
+                }),
                 fix,
             ));
         }

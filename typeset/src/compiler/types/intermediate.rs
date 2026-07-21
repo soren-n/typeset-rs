@@ -75,11 +75,13 @@ pub enum LinearObj<'a> {
     Last(&'a Term<'a>),
 }
 
+/// A composition: its attributes, the scopes opening here, and the scopes
+/// closing here.
 #[derive(Debug)]
-pub enum LinearComp<'a> {
-    /// A composition: its attributes, the scopes opening here, and the scopes
-    /// closing here.
-    Comp(Attr, &'a [Scope], &'a [Scope]),
+pub struct LinearComp<'a> {
+    pub attr: Attr,
+    pub opens: &'a [Scope],
+    pub closes: &'a [Scope],
 }
 
 // Fifth intermediate representation: FixedDoc
@@ -101,11 +103,13 @@ pub enum FixedItem<'a> {
     Term(&'a Term<'a>),
 }
 
+/// A composition: its pad flag, the scopes opening here, and the scopes
+/// closing here.
 #[derive(Debug)]
-pub enum FixedComp<'a> {
-    /// A composition: its pad flag, the scopes opening here, and the scopes
-    /// closing here.
-    Comp(bool, &'a [Scope], &'a [Scope]),
+pub struct FixedComp<'a> {
+    pub pad: bool,
+    pub opens: &'a [Scope],
+    pub closes: &'a [Scope],
 }
 
 #[derive(Debug)]

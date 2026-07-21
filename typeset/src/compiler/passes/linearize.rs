@@ -73,7 +73,11 @@ fn build_line<'b>(
 fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a SerialComp<'a>) -> &'b LinearComp<'b> {
     match comp {
         SerialComp::Line => unreachable!("Invariant"),
-        SerialComp::Comp(attr, opens, closes) => mem.alloc(LinearComp::Comp(*attr, opens, closes)),
+        SerialComp::Comp(attr, opens, closes) => mem.alloc(LinearComp {
+            attr: *attr,
+            opens,
+            closes,
+        }),
     }
 }
 

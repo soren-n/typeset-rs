@@ -70,7 +70,7 @@ type Edge = (u64, Property, u64, u64);
 // here (pairing it with its recorded open into an edge), then open each scope
 // that begins here. Returns the composition's pad flag.
 fn apply_comp(node: u64, comp: &FixedComp, open: &mut OpenScopes, edges: &mut Vec<Edge>) -> bool {
-    let FixedComp::Comp(pad, opens, closes) = comp;
+    let FixedComp { pad, opens, closes } = comp;
     for scope in closes.iter() {
         let index = scope_index(scope);
         let (prop, from) = open

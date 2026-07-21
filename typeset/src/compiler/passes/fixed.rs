@@ -110,12 +110,19 @@ fn build_fix<'b>(
 /// Maps a comp to its `FixedComp`, reporting whether its composition is fixed.
 /// The scope delta slices pass through by borrow (`Copy`, outlive this arena).
 fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a LinearComp<'a>) -> (bool, &'b FixedComp<'b>) {
-    match comp {
-        LinearComp::Comp(attr, opens, closes) => (
-            attr.fix,
-            mem.alloc(FixedComp::Comp(attr.pad, opens, closes)),
-        ),
-    }
+    let LinearComp {
+        attr,
+        opens,
+        closes,
+    } = comp;
+    (
+        attr.fix,
+        mem.alloc(FixedComp {
+            pad: attr.pad,
+            opens,
+            closes,
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -133,7 +140,11 @@ mod tests {
         for _ in 0..len {
             obj = mem.alloc(LinearObj::Next(
                 mem.alloc(Term::Text("y")),
-                mem.alloc(LinearComp::Comp(attr, &[], &[])),
+                mem.alloc(LinearComp {
+                    attr,
+                    opens: &[],
+                    closes: &[],
+                }),
                 obj,
             ));
         }
