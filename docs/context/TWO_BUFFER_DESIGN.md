@@ -95,7 +95,8 @@ budget. `AllocationFailed` is never constructed.
 
 This whole-path deep-safety is done: `move_to_heap` and the renderer iterate,
 and `Doc`/`DocObj`/`DocObjFix` (and the input `Layout`) carry iterative `Drop`,
-`Clone`, and `Display`. Because a `Drop` type cannot be moved out of, the
+`Clone`, `Display`, and `Debug` — every trait that walks the tree, so no depth
+overflows on any of them. Because a `Drop` type cannot be moved out of, the
 renderer borrows `&Doc` rather than consuming it — exposed publicly as
 [`render_ref`], with `render(Box<Doc>)` delegating to it — and `broken::_mark`
 extracts `Layout` children with `mem::take` instead of a by-value `match`.
