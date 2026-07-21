@@ -13,7 +13,6 @@
 use crate::compiler::types::{
     DenullDoc, DenullFix, DenullObj, DenullTerm, FinalDoc, FinalDocObj, FinalDocObjFix,
 };
-use crate::list::{self as _list, List};
 use bumpalo::Bump;
 
 #[derive(Debug, Copy, Clone)]
@@ -37,7 +36,7 @@ enum ObjFrame<'b, 'a> {
         pad: bool,
     },
     CompRight {
-        l_props: &'b List<'b, Prop>,
+        l_props: Vec<Prop>,
         left1: &'b FinalDocObj<'b>,
         pad: bool,
     },
@@ -50,7 +49,7 @@ enum FixFrame<'b, 'a> {
         pad: bool,
     },
     CompRight {
-        l_props: &'b List<'b, Prop>,
+        l_props: Vec<Prop>,
         left1: &'b FinalDocObjFix<'b>,
         pad: bool,
     },
@@ -66,7 +65,7 @@ pub fn rescope<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b FinalDo
             DenullDoc::Eod => break mem.alloc(FinalDoc::Eod),
             DenullDoc::Line(obj) => {
                 let (props, obj1) = _visit_obj(mem, obj);
-                break mem.alloc(FinalDoc::Line(_wrap_props(mem, props, obj1)));
+                break mem.alloc(FinalDoc::Line(_wrap_props(mem, &props, obj1)));
             }
             DenullDoc::Empty(doc1) => {
                 items.push(DocItem::Empty);
@@ -74,7 +73,7 @@ pub fn rescope<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b FinalDo
             }
             DenullDoc::Break(obj, doc1) => {
                 let (props, obj1) = _visit_obj(mem, obj);
-                items.push(DocItem::Break(_wrap_props(mem, props, obj1)));
+                items.push(DocItem::Break(_wrap_props(mem, &props, obj1)));
                 cur = doc1;
             }
         }
@@ -94,11 +93,11 @@ pub fn rescope<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b FinalDo
 fn _visit_obj<'b, 'a: 'b>(
     mem: &'b Bump,
     obj: &'a DenullObj<'a>,
-) -> (&'b List<'b, Prop>, &'b FinalDocObj<'b>) {
+) -> (Vec<Prop>, &'b FinalDocObj<'b>) {
     let mut stack: Vec<ObjFrame<'b, 'a>> = Vec::new();
     let mut cur = obj;
     'machine: loop {
-        let mut val: (&'b List<'b, Prop>, &'b FinalDocObj<'b>) = loop {
+        let mut val: (Vec<Prop>, &'b FinalDocObj<'b>) = loop {
             match cur {
                 DenullObj::Term(term) => break _visit_term(mem, term),
                 DenullObj::Fix(fix) => {
@@ -134,17 +133,20 @@ fn _visit_obj<'b, 'a: 'b>(
                     continue 'machine;
                 }
                 Some(ObjFrame::CompRight {
-                    l_props,
+                    mut l_props,
                     left1,
                     pad,
                 }) => {
                     let (r_props, right1) = val;
                     // Factor the common prop prefix out around the composition;
-                    // apply the leftovers to each operand individually.
-                    let (l_props1, r_props1, c_props) = _join_props(mem, l_props, r_props);
-                    let left2 = _wrap_props(mem, l_props1, left1);
-                    let right2 = _wrap_props(mem, r_props1, right1);
-                    val = (c_props, mem.alloc(FinalDocObj::Comp(left2, right2, pad)));
+                    // apply the leftovers to each operand individually. `l_props`
+                    // is reused as the common prefix (truncated in place).
+                    let k = _common_prefix_len(&l_props, &r_props);
+                    let left2 = _wrap_props(mem, &l_props[k..], left1);
+                    let right2 = _wrap_props(mem, &r_props[k..], right1);
+                    let comp = mem.alloc(FinalDocObj::Comp(left2, right2, pad));
+                    l_props.truncate(k);
+                    val = (l_props, comp);
                 }
             }
         }
@@ -156,11 +158,11 @@ fn _visit_obj<'b, 'a: 'b>(
 fn _visit_fix<'b, 'a: 'b>(
     mem: &'b Bump,
     fix: &'a DenullFix<'a>,
-) -> (&'b List<'b, Prop>, &'b FinalDocObjFix<'b>) {
+) -> (Vec<Prop>, &'b FinalDocObjFix<'b>) {
     let mut stack: Vec<FixFrame<'b, 'a>> = Vec::new();
     let mut cur = fix;
     'machine: loop {
-        let mut val: (&'b List<'b, Prop>, &'b FinalDocObjFix<'b>) = loop {
+        let mut val: (Vec<Prop>, &'b FinalDocObjFix<'b>) = loop {
             match cur {
                 DenullFix::Term(term) => break _visit_fix_term(mem, term),
                 DenullFix::Comp(left, right, pad) => {
@@ -194,12 +196,12 @@ fn _visit_fix<'b, 'a: 'b>(
     }
 }
 
-/// Strips a term chain into its prop prefix (head = outermost) and a text obj.
+/// Strips a term chain into its prop prefix (index 0 = outermost) and a text obj.
 fn _visit_term<'b, 'a: 'b>(
     mem: &'b Bump,
     term: &'a DenullTerm<'a>,
-) -> (&'b List<'b, Prop>, &'b FinalDocObj<'b>) {
-    let (props, data) = _strip_term(mem, term);
+) -> (Vec<Prop>, &'b FinalDocObj<'b>) {
+    let (props, data) = _strip_term(term);
     (props, mem.alloc(FinalDocObj::Text(data)))
 }
 
@@ -207,90 +209,58 @@ fn _visit_term<'b, 'a: 'b>(
 fn _visit_fix_term<'b, 'a: 'b>(
     mem: &'b Bump,
     term: &'a DenullTerm<'a>,
-) -> (&'b List<'b, Prop>, &'b FinalDocObjFix<'b>) {
-    let (props, data) = _strip_term(mem, term);
+) -> (Vec<Prop>, &'b FinalDocObjFix<'b>) {
+    let (props, data) = _strip_term(term);
     (props, mem.alloc(FinalDocObjFix::Text(data)))
 }
 
 /// Collects a term's nest/pack wrappers (outermost first) and its text data.
-fn _strip_term<'b, 'a: 'b>(
-    mem: &'b Bump,
-    term: &'a DenullTerm<'a>,
-) -> (&'b List<'b, Prop>, &'b str) {
-    let mut props_vec: Vec<Prop> = Vec::new();
+fn _strip_term<'a>(term: &'a DenullTerm<'a>) -> (Vec<Prop>, &'a str) {
+    let mut props: Vec<Prop> = Vec::new();
     let mut cur = term;
-    let data: &'b str = loop {
+    let data: &'a str = loop {
         match cur {
             DenullTerm::Text(data) => break data,
             DenullTerm::Nest(term1) => {
-                props_vec.push(Prop::Nest);
+                props.push(Prop::Nest);
                 cur = term1;
             }
             DenullTerm::Pack(index, term1) => {
-                props_vec.push(Prop::Pack(*index));
+                props.push(Prop::Pack(*index));
                 cur = term1;
             }
         }
     };
-    (_list_from(mem, &props_vec), data)
+    (props, data)
 }
 
-/// Builds a prop list from a slice with `v[0]` at the head.
-fn _list_from<'b>(mem: &'b Bump, v: &[Prop]) -> &'b List<'b, Prop> {
-    let mut list = _list::nil(mem);
-    for prop in v.iter().rev() {
-        list = _list::cons(mem, *prop, list);
-    }
-    list
-}
-
-/// Splits off the common prefix of two prop lists (matching Nest/Nest or
-/// Pack/Pack with the same index), returning the two remainders and the common
-/// prefix.
-fn _join_props<'b>(
-    mem: &'b Bump,
-    l: &'b List<'b, Prop>,
-    r: &'b List<'b, Prop>,
-) -> (&'b List<'b, Prop>, &'b List<'b, Prop>, &'b List<'b, Prop>) {
-    let mut common: Vec<Prop> = Vec::new();
-    let mut ll = l;
-    let mut rr = r;
-    loop {
-        match (ll, rr) {
-            (List::Cons(_, Prop::Nest, l1), List::Cons(_, Prop::Nest, r1)) => {
-                common.push(Prop::Nest);
-                ll = l1;
-                rr = r1;
-            }
-            (List::Cons(_, Prop::Pack(l_index), l1), List::Cons(_, Prop::Pack(r_index), r1))
-                if l_index == r_index =>
-            {
-                common.push(Prop::Pack(*l_index));
-                ll = l1;
-                rr = r1;
-            }
-            _ => break,
+/// Length of the common prop prefix of `l` and `r` (matching Nest/Nest or
+/// Pack/Pack with the same index).
+fn _common_prefix_len(l: &[Prop], r: &[Prop]) -> usize {
+    let mut k = 0;
+    while k < l.len() && k < r.len() {
+        let same = match (l[k], r[k]) {
+            (Prop::Nest, Prop::Nest) => true,
+            (Prop::Pack(li), Prop::Pack(ri)) => li == ri,
+            _ => false,
+        };
+        if !same {
+            break;
         }
+        k += 1;
     }
-    (ll, rr, _list_from(mem, &common))
+    k
 }
 
-/// Wraps a term with its props, head outermost.
+/// Wraps a term with its props, index 0 outermost.
 fn _wrap_props<'b>(
     mem: &'b Bump,
-    props: &'b List<'b, Prop>,
+    props: &[Prop],
     term: &'b FinalDocObj<'b>,
 ) -> &'b FinalDocObj<'b> {
-    // Collect props (head first), then apply from the tail so the head ends up
-    // outermost.
-    let mut v: Vec<Prop> = Vec::new();
-    let mut cur = props;
-    while let List::Cons(_, prop, rest) = cur {
-        v.push(*prop);
-        cur = rest;
-    }
+    // Apply from the tail so the first prop ends up outermost.
     let mut obj = term;
-    for prop in v.iter().rev() {
+    for prop in props.iter().rev() {
         obj = match prop {
             Prop::Nest => mem.alloc(FinalDocObj::Nest(obj)),
             Prop::Pack(index) => mem.alloc(FinalDocObj::Pack(*index, obj)),
