@@ -1,8 +1,13 @@
 use std::fmt;
 use std::mem;
 
+// `Clone` is implemented iteratively below rather than derived: a derived
+// (recursive) clone would overflow the native stack on deep documents, the same
+// hazard the iterative `Drop` and renderer avoid. `Debug` stays derived — it is
+// a debug-only path and not part of any deep public workflow.
+
 /// Final document representation - output of the compiler
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Doc {
     Eod,
     Empty(Box<Doc>),
@@ -10,7 +15,7 @@ pub enum Doc {
     Line(Box<DocObj>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum DocObj {
     Text(String),
     Fix(Box<DocObjFix>),
@@ -21,7 +26,7 @@ pub enum DocObj {
     Comp(Box<DocObj>, Box<DocObj>, bool),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum DocObjFix {
     Text(String),
     Comp(Box<DocObjFix>, Box<DocObjFix>, bool),
@@ -112,6 +117,148 @@ impl Drop for DocObjFix {
         while let Some(mut node) = stack.pop() {
             _dismantle_fix(&mut node, &mut stack);
         }
+    }
+}
+
+// Iterative Clone
+// ---------------
+// Deep-copy each tree bottom-up with task/result stacks (the same shape as the
+// `move_to_heap` pass), so cloning a deep document — e.g. the documented
+// `render(doc.clone(), ...)` pattern for re-rendering at multiple widths — runs
+// in constant native stack instead of overflowing.
+
+fn _clone_fix(fix: &DocObjFix) -> Box<DocObjFix> {
+    enum Task<'a> {
+        Visit(&'a DocObjFix),
+        Comp(bool),
+    }
+    let mut tasks: Vec<Task> = vec![Task::Visit(fix)];
+    let mut out: Vec<Box<DocObjFix>> = Vec::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Visit(f) => match f {
+                DocObjFix::Text(data) => out.push(Box::new(DocObjFix::Text(data.clone()))),
+                DocObjFix::Comp(left, right, pad) => {
+                    tasks.push(Task::Comp(*pad));
+                    tasks.push(Task::Visit(right));
+                    tasks.push(Task::Visit(left));
+                }
+            },
+            Task::Comp(pad) => {
+                let right = out.pop().expect("fix comp: right operand");
+                let left = out.pop().expect("fix comp: left operand");
+                out.push(Box::new(DocObjFix::Comp(left, right, pad)));
+            }
+        }
+    }
+    out.pop().expect("fix clone produced no result")
+}
+
+fn _clone_obj(obj: &DocObj) -> Box<DocObj> {
+    enum Task<'a> {
+        Visit(&'a DocObj),
+        Grp,
+        Seq,
+        Nest,
+        Pack(u64),
+        Comp(bool),
+    }
+    let mut tasks: Vec<Task> = vec![Task::Visit(obj)];
+    let mut out: Vec<Box<DocObj>> = Vec::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Visit(o) => match o {
+                DocObj::Text(data) => out.push(Box::new(DocObj::Text(data.clone()))),
+                DocObj::Fix(fix) => out.push(Box::new(DocObj::Fix(_clone_fix(fix)))),
+                DocObj::Grp(obj1) => {
+                    tasks.push(Task::Grp);
+                    tasks.push(Task::Visit(obj1));
+                }
+                DocObj::Seq(obj1) => {
+                    tasks.push(Task::Seq);
+                    tasks.push(Task::Visit(obj1));
+                }
+                DocObj::Nest(obj1) => {
+                    tasks.push(Task::Nest);
+                    tasks.push(Task::Visit(obj1));
+                }
+                DocObj::Pack(index, obj1) => {
+                    tasks.push(Task::Pack(*index));
+                    tasks.push(Task::Visit(obj1));
+                }
+                DocObj::Comp(left, right, pad) => {
+                    tasks.push(Task::Comp(*pad));
+                    tasks.push(Task::Visit(right));
+                    tasks.push(Task::Visit(left));
+                }
+            },
+            Task::Grp => {
+                let inner = out.pop().expect("grp operand");
+                out.push(Box::new(DocObj::Grp(inner)));
+            }
+            Task::Seq => {
+                let inner = out.pop().expect("seq operand");
+                out.push(Box::new(DocObj::Seq(inner)));
+            }
+            Task::Nest => {
+                let inner = out.pop().expect("nest operand");
+                out.push(Box::new(DocObj::Nest(inner)));
+            }
+            Task::Pack(index) => {
+                let inner = out.pop().expect("pack operand");
+                out.push(Box::new(DocObj::Pack(index, inner)));
+            }
+            Task::Comp(pad) => {
+                let right = out.pop().expect("comp: right operand");
+                let left = out.pop().expect("comp: left operand");
+                out.push(Box::new(DocObj::Comp(left, right, pad)));
+            }
+        }
+    }
+    out.pop().expect("obj clone produced no result")
+}
+
+fn _clone_doc(doc: &Doc) -> Box<Doc> {
+    let mut spine: Vec<&Doc> = Vec::new();
+    let mut node = doc;
+    loop {
+        spine.push(node);
+        match node {
+            Doc::Eod | Doc::Line(_) => break,
+            Doc::Empty(doc1) | Doc::Break(_, doc1) => node = doc1,
+        }
+    }
+    let mut acc: Option<Box<Doc>> = None;
+    for node in spine.into_iter().rev() {
+        let built = match node {
+            Doc::Eod => Box::new(Doc::Eod),
+            Doc::Line(obj) => Box::new(Doc::Line(_clone_obj(obj))),
+            Doc::Empty(_) => Box::new(Doc::Empty(acc.take().expect("empty: tail"))),
+            Doc::Break(obj, _) => Box::new(Doc::Break(
+                _clone_obj(obj),
+                acc.take().expect("break: tail"),
+            )),
+        };
+        acc = Some(built);
+    }
+    acc.expect("empty spine")
+}
+
+impl Clone for Doc {
+    fn clone(&self) -> Self {
+        *_clone_doc(self)
+    }
+}
+
+impl Clone for DocObj {
+    fn clone(&self) -> Self {
+        *_clone_obj(self)
+    }
+}
+
+impl Clone for DocObjFix {
+    fn clone(&self) -> Self {
+        *_clone_fix(self)
     }
 }
 
@@ -266,6 +413,55 @@ mod tests {
             ));
         }
         drop(fix);
+    }
+
+    #[test]
+    fn deep_clone_is_iterative() {
+        // A Break spine of Nest objects exercises both spine and object cloning.
+        let mut doc = Box::new(Doc::Eod);
+        for _ in 0..DEEP {
+            let mut obj = Box::new(DocObj::Text("x".to_string()));
+            for _ in 0..2 {
+                obj = Box::new(DocObj::Nest(obj));
+            }
+            doc = Box::new(Doc::Break(obj, doc));
+        }
+        let cloned = doc.clone();
+        // Clone is structurally identical to the original.
+        assert_eq!(format!("{}", *cloned), format!("{}", *doc));
+    }
+
+    #[test]
+    fn deep_object_clone_is_iterative() {
+        let mut obj = Box::new(DocObj::Text("x".to_string()));
+        for _ in 0..DEEP {
+            obj = Box::new(DocObj::Nest(obj));
+        }
+        let cloned = obj.clone();
+        assert_eq!(
+            format!("{}", Doc::Line(cloned)),
+            format!("{}", Doc::Line(obj))
+        );
+    }
+
+    #[test]
+    fn clone_matches_original_shape() {
+        let doc = Doc::Break(
+            Box::new(DocObj::Comp(
+                Box::new(DocObj::Text("a".to_string())),
+                Box::new(DocObj::Fix(Box::new(DocObjFix::Comp(
+                    Box::new(DocObjFix::Text("c".to_string())),
+                    Box::new(DocObjFix::Text("d".to_string())),
+                    true,
+                )))),
+                false,
+            )),
+            Box::new(Doc::Line(Box::new(DocObj::Pack(
+                7,
+                Box::new(DocObj::Text("z".to_string())),
+            )))),
+        );
+        assert_eq!(format!("{}", doc.clone()), format!("{}", doc));
     }
 
     #[test]
