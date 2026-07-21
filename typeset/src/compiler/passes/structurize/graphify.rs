@@ -2,10 +2,16 @@
 //!
 //! Walks the fixed spine, assigns a node index per item, and materializes the
 //! grp/seq scopes as graph edges (the scope graph that `solve` then resolves).
+//!
+//! Each composition carries the scopes that *open* and *close* at it (computed
+//! back in `serialize`). Replaying those deltas per line — open records a
+//! scope's `from` node, close pairs it with a `to` node and emits an edge — is
+//! linear in the number of scopes, so deeply nested grp/seq no longer cost
+//! O(n^2) (the old full-stack diff did). `solve` and `rebuild` are unchanged.
 
 use super::graph::{GraphDoc, GraphEdge, GraphFix, GraphNode, GraphTerm, Property};
 use crate::compiler::passes::term_chain::map_term_chain;
-use crate::compiler::types::{FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj};
+use crate::compiler::types::{FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, Scope};
 use bumpalo::Bump;
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -40,180 +46,73 @@ fn make_edge<'a>(
     })
 }
 
+fn scope_index(scope: &Scope) -> u64 {
+    match scope {
+        Scope::Grp(index) | Scope::Seq(index) => *index,
+    }
+}
+
+fn scope_prop(scope: &Scope) -> Property<()> {
+    match scope {
+        Scope::Grp(_) => Property::Grp(()),
+        Scope::Seq(_) => Property::Seq(()),
+    }
+}
+
+// The scopes open across the current point of a line, keyed by scope index:
+// each records the scope's kind and the node it opened at.
+type OpenScopes = BTreeMap<u64, (Property<()>, u64)>;
+// A resolved scope edge: (scope index, kind, from node, to node). Collected per
+// line, then materialized in scope-index order.
+type Edge = (u64, Property<()>, u64, u64);
+
+// Applies one composition's scope deltas at `node`: close each scope that ends
+// here (pairing it with its recorded open into an edge), then open each scope
+// that begins here. Returns the composition's pad flag.
+fn apply_comp(node: u64, comp: &FixedComp, open: &mut OpenScopes, edges: &mut Vec<Edge>) -> bool {
+    let FixedComp::Comp(pad, opens, closes) = comp;
+    for scope in closes.iter() {
+        let index = scope_index(scope);
+        let (prop, from) = open
+            .remove(&index)
+            .expect("Invariant: scope closed without a matching open");
+        edges.push((index, prop, from, node));
+    }
+    for scope in opens.iter() {
+        open.insert(scope_index(scope), (scope_prop(scope), node));
+    }
+    *pad
+}
+
+fn push_ins<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
+    match node.ins_tail.get() {
+        None => {
+            node.ins_head.set(Some(edge));
+            node.ins_tail.set(Some(edge))
+        }
+        Some(tail) => {
+            edge.ins_prev.set(Some(tail));
+            tail.ins_next.set(Some(edge));
+            node.ins_tail.set(Some(edge))
+        }
+    }
+}
+
+fn push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
+    match node.outs_tail.get() {
+        None => {
+            node.outs_head.set(Some(edge));
+            node.outs_tail.set(Some(edge))
+        }
+        Some(tail) => {
+            edge.outs_prev.set(Some(tail));
+            tail.outs_next.set(Some(edge));
+            node.outs_tail.set(Some(edge))
+        }
+    }
+}
+
 pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
-    fn lift_stack(comp: &FixedComp) -> (Vec<Property<u64>>, bool) {
-        // Linear chain of grp/seq wrappers around a leaf Comp(pad). Index 0
-        // is the outermost wrapper (what used to be the list head).
-        let mut props: Vec<Property<u64>> = Vec::new();
-        let mut cur = comp;
-        let pad = loop {
-            match cur {
-                FixedComp::Comp(pad) => break *pad,
-                FixedComp::Grp(index, comp1) => {
-                    props.push(Property::Grp(*index));
-                    cur = comp1;
-                }
-                FixedComp::Seq(index, comp1) => {
-                    props.push(Property::Seq(*index));
-                    cur = comp1;
-                }
-            }
-        };
-        (props, pad)
-    }
-    // The open-scope property map is keyed by scope index. It is threaded
-    // linearly (each update replaces the binding; no earlier version is ever
-    // retained), so a plain owned `BTreeMap` mutated in place is a faithful
-    // replacement for the former persistent map. `BTreeMap` also gives the
-    // key-ordered `values()` iteration `transpose` depends on.
-    type Graph = BTreeMap<u64, Property<(u64, Option<u64>)>>;
-    fn close(to_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
-        // Close each open grp/seq scope on the stack by recording to_node.
-        for prop in stack {
-            match prop {
-                Property::Grp(index) => match props[index] {
-                    Property::Seq(_) => unreachable!("Invariant"),
-                    Property::Grp((from_node, _to_node)) => {
-                        props.insert(*index, Property::Grp((from_node, Some(to_node))));
-                    }
-                },
-                Property::Seq(index) => match props[index] {
-                    Property::Grp(_) => unreachable!("Invariant"),
-                    Property::Seq((from_node, _to_node)) => {
-                        props.insert(*index, Property::Seq((from_node, Some(to_node))));
-                    }
-                },
-            }
-        }
-        props
-    }
-    fn open(from_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
-        // Open a fresh grp/seq scope on the stack, anchored at from_node.
-        for prop in stack {
-            match prop {
-                Property::Grp(index) => {
-                    props.insert(*index, Property::Grp((from_node, None)));
-                }
-                Property::Seq(index) => {
-                    props.insert(*index, Property::Seq((from_node, None)));
-                }
-            }
-        }
-        props
-    }
-    fn update(
-        node: u64,
-        mut props: Graph,
-        scope: &mut Vec<Property<u64>>,
-        stack: &[Property<u64>],
-    ) -> Graph {
-        // Walk scope and stack in lockstep: matching grp/seq scopes are kept
-        // (the common prefix `scope[..k]`); the first divergence closes the
-        // remaining scope and opens the remaining stack.
-        let mut k = 0;
-        loop {
-            match (scope.get(k), stack.get(k)) {
-                (_, None) => {
-                    props = close(node, props, &scope[k..]);
-                    break;
-                }
-                (None, _) => {
-                    props = open(node, props, &stack[k..]);
-                    break;
-                }
-                (Some(sp), Some(stp)) => {
-                    let matched = match (sp, stp) {
-                        (Property::Grp(left), Property::Grp(right)) => {
-                            if left > right {
-                                unreachable!("Invariant")
-                            }
-                            left == right
-                        }
-                        (Property::Seq(left), Property::Seq(right)) => {
-                            if left > right {
-                                unreachable!("Invariant")
-                            }
-                            left == right
-                        }
-                        _ => false,
-                    };
-                    if matched {
-                        k += 1;
-                    } else {
-                        props = close(node, props, &scope[k..]);
-                        props = open(node, props, &stack[k..]);
-                        break;
-                    }
-                }
-            }
-        }
-        // Rebuild the scope stack in place: keep the matched common prefix
-        // `scope[..k]` and append the diverging `stack[k..]`. `truncate` drops
-        // no elements (Property is Copy), so this costs O(|stack[k..]|) and
-        // allocates nothing, where a fresh `scope[..k].to_vec()` was O(|scope|)
-        // plus a per-node allocation. This trims the constant factor only; the
-        // lockstep comparison above is still O(|scope|) per node, so deeply
-        // nested scopes remain O(n^2) overall (see the module docs).
-        scope.truncate(k);
-        scope.extend_from_slice(&stack[k..]);
-        props
-    }
-    fn transpose<'a>(
-        mem: &'a Bump,
-        nodes: &'a [&'a GraphNode<'a>],
-        props: &[Property<(u64, Option<u64>)>],
-    ) {
-        fn push_ins<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
-            match node.ins_tail.get() {
-                None => {
-                    node.ins_head.set(Some(edge));
-                    node.ins_tail.set(Some(edge))
-                }
-                Some(tail) => {
-                    edge.ins_prev.set(Some(tail));
-                    tail.ins_next.set(Some(edge));
-                    node.ins_tail.set(Some(edge))
-                }
-            }
-        }
-        fn push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
-            match node.outs_tail.get() {
-                None => {
-                    node.outs_head.set(Some(edge));
-                    node.outs_tail.set(Some(edge))
-                }
-                Some(tail) => {
-                    edge.outs_prev.set(Some(tail));
-                    tail.outs_next.set(Some(edge));
-                    node.outs_tail.set(Some(edge))
-                }
-            }
-        }
-        // Materialize each closed grp/seq property as a graph edge.
-        for prop in props {
-            match prop {
-                Property::Grp((from_index, Some(to_index))) => {
-                    if from_index != to_index {
-                        let from_node = nodes[*from_index as usize];
-                        let to_node = nodes[*to_index as usize];
-                        let curr = make_edge(mem, Property::Grp(()), from_node, to_node);
-                        push_ins(curr, to_node);
-                        push_outs(curr, from_node);
-                    }
-                }
-                Property::Seq((from_index, Some(to_index))) => {
-                    if from_index != to_index {
-                        let from_node = nodes[*from_index as usize];
-                        let to_node = nodes[*to_index as usize];
-                        let curr = make_edge(mem, Property::Seq(()), from_node, to_node);
-                        push_ins(curr, to_node);
-                        push_outs(curr, from_node);
-                    }
-                }
-                _ => unreachable!("Invariant"),
-            }
-        }
-    }
     fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
         // Walk the linear FixedDoc spine, graphifying each line's object.
         type Line<'b> = (&'b [&'b GraphNode<'b>], &'b [bool]);
@@ -223,13 +122,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
             match cur {
                 FixedDoc::Eod => break,
                 FixedDoc::Break(obj, doc1) => {
-                    let (nodes2, pads1, props1) = visit_obj(mem, obj);
-                    // BTreeMap::values yields the properties in key order,
-                    // which is the order transpose consumes them in.
-                    let props2: Vec<Property<(u64, Option<u64>)>> =
-                        props1.values().copied().collect();
-                    transpose(mem, nodes2, &props2);
-                    breaks.push((nodes2, pads1));
+                    breaks.push(visit_obj(mem, obj));
                     cur = doc1;
                 }
             }
@@ -240,34 +133,32 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         }
         gdoc
     }
-    #[allow(clippy::type_complexity)]
     fn visit_obj<'b, 'a: 'b>(
         mem: &'b Bump,
         obj: &'a FixedObj<'a>,
-    ) -> (&'b [&'b GraphNode<'b>], &'b [bool], Graph) {
-        // Walk the object's item chain, assigning indices and threading the
-        // scope stack and the open-scope property map.
+    ) -> (&'b [&'b GraphNode<'b>], &'b [bool]) {
+        // Walk the object's item chain, assigning a node index per item and
+        // replaying each composition's scope deltas at that index. A fix item's
+        // internal comps and its trailing separator all share the item's index,
+        // exactly as document order threads them.
         let mut nodes_vec: Vec<&'b GraphNode<'b>> = Vec::new();
         let mut pads_vec: Vec<bool> = Vec::new();
+        let mut open: OpenScopes = BTreeMap::new();
+        let mut edges: Vec<Edge> = Vec::new();
         let mut index: u64 = 0;
-        let mut scope: Vec<Property<u64>> = Vec::new();
-        let mut props: Graph = BTreeMap::new();
         let mut cur = obj;
-        let final_props: Graph = loop {
+        let last_index: u64 = loop {
             match cur {
                 FixedObj::Next(item, comp, obj1) => {
                     let term1 = match item {
                         FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
-                            let (fix1, props1) = visit_fix(mem, fix, index, &mut scope, props);
-                            props = props1;
+                            let fix1 = visit_fix(mem, fix, index, &mut open, &mut edges);
                             mem.alloc(GraphTerm::Fix(fix1))
                         }
                     };
                     nodes_vec.push(make_node(mem, index, term1));
-                    let (stack, pad) = lift_stack(comp);
-                    pads_vec.push(pad);
-                    props = update(index, props, &mut scope, &stack);
+                    pads_vec.push(apply_comp(index, comp, &mut open, &mut edges));
                     index += 1;
                     cur = obj1;
                 }
@@ -275,39 +166,51 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     let term1 = match item {
                         FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
-                            let (fix1, props1) = visit_fix(mem, fix, index, &mut scope, props);
-                            props = props1;
+                            let fix1 = visit_fix(mem, fix, index, &mut open, &mut edges);
                             mem.alloc(GraphTerm::Fix(fix1))
                         }
                     };
                     nodes_vec.push(make_node(mem, index, term1));
-                    break close(index, props, &scope);
+                    break index;
                 }
             }
         };
-        (
-            mem.alloc_slice_copy(&nodes_vec),
-            mem.alloc_slice_copy(&pads_vec),
-            final_props,
-        )
+        // Close every scope still open at the line's last node.
+        for (index, (prop, from)) in &open {
+            edges.push((*index, *prop, *from, last_index));
+        }
+        // Materialize edges in scope-index order, so each node's ins/outs lists
+        // are ordered exactly as the old index-keyed map produced them (solve
+        // and rebuild depend on that order).
+        edges.sort_by_key(|(index, ..)| *index);
+        let nodes = mem.alloc_slice_copy(&nodes_vec);
+        for (_index, prop, from, to) in edges {
+            if from != to {
+                let from_node = nodes[from as usize];
+                let to_node = nodes[to as usize];
+                let edge = make_edge(mem, prop, from_node, to_node);
+                push_ins(edge, to_node);
+                push_outs(edge, from_node);
+            }
+        }
+        (nodes, mem.alloc_slice_copy(&pads_vec))
     }
     fn visit_fix<'b, 'a: 'b>(
         mem: &'b Bump,
         fix: &'a FixedFix<'a>,
         index: u64,
-        scope: &mut Vec<Property<u64>>,
-        mut props: Graph,
-    ) -> (&'b GraphFix<'b>, Graph) {
-        // Walk the fix chain forward, threading scope/props; rebuild the
-        // GraphFix bottom-up from the recorded (term, pad) pairs.
+        open: &mut OpenScopes,
+        edges: &mut Vec<Edge>,
+    ) -> &'b GraphFix<'b> {
+        // Walk the fix chain forward, replaying each internal comp's deltas at
+        // the fix item's node index; rebuild the GraphFix bottom-up.
         let mut recorded: Vec<(&'b GraphTerm<'b>, bool)> = Vec::new();
         let mut cur = fix;
         let last_term: &'b GraphTerm<'b> = loop {
             match cur {
                 FixedFix::Next(term, comp, fix1) => {
                     let term1 = map_term_chain(mem, *term);
-                    let (stack, pad) = lift_stack(comp);
-                    props = update(index, props, scope, &stack);
+                    let pad = apply_comp(index, comp, open, edges);
                     recorded.push((term1, pad));
                     cur = fix1;
                 }
@@ -318,7 +221,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         for &(term1, pad) in recorded.iter().rev() {
             gfix = mem.alloc(GraphFix::Next(term1, gfix, pad));
         }
-        (gfix, props)
+        gfix
     }
     visit_doc(mem, doc)
 }

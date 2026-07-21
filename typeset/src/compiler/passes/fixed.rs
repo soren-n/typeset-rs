@@ -13,12 +13,6 @@ use crate::compiler::types::{
 };
 use bumpalo::Bump;
 
-/// A `LinearComp` wrapper, recorded outermost-first while descending.
-enum CompWrap {
-    Grp(u64),
-    Seq(u64),
-}
-
 pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: &'a LinearDoc<'a>) -> &'b FixedDoc<'b> {
     // Walk the linear spine, coalescing each object, then fold onto Eod.
     let mut objs: Vec<&'b FixedObj<'b>> = Vec::new();
@@ -113,30 +107,15 @@ fn build_fix<'b>(
     fix
 }
 
-/// Rebuilds a comp chain, reporting whether its innermost composition is fixed.
+/// Maps a comp to its `FixedComp`, reporting whether its composition is fixed.
+/// The scope delta slices pass through by borrow (`Copy`, outlive this arena).
 fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a LinearComp<'a>) -> (bool, &'b FixedComp<'b>) {
-    let mut wraps: Vec<CompWrap> = Vec::new();
-    let mut cur = comp;
-    let (is_fixed, mut val): (bool, &'b FixedComp<'b>) = loop {
-        match cur {
-            LinearComp::Comp(attr) => break (attr.fix, mem.alloc(FixedComp::Comp(attr.pad))),
-            LinearComp::Grp(index, comp1) => {
-                wraps.push(CompWrap::Grp(*index));
-                cur = comp1;
-            }
-            LinearComp::Seq(index, comp1) => {
-                wraps.push(CompWrap::Seq(*index));
-                cur = comp1;
-            }
-        }
-    };
-    while let Some(wrap) = wraps.pop() {
-        val = match wrap {
-            CompWrap::Grp(index) => mem.alloc(FixedComp::Grp(index, val)),
-            CompWrap::Seq(index) => mem.alloc(FixedComp::Seq(index, val)),
-        };
+    match comp {
+        LinearComp::Comp(attr, opens, closes) => (
+            attr.fix,
+            mem.alloc(FixedComp::Comp(attr.pad, opens, closes)),
+        ),
     }
-    (is_fixed, val)
 }
 
 #[cfg(test)]
@@ -154,7 +133,7 @@ mod tests {
         for _ in 0..len {
             obj = mem.alloc(LinearObj::Next(
                 mem.alloc(Term::Text("y")),
-                mem.alloc(LinearComp::Comp(attr)),
+                mem.alloc(LinearComp::Comp(attr, &[], &[])),
                 obj,
             ));
         }

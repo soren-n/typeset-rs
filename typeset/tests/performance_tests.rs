@@ -4,7 +4,7 @@
 //! characteristics and doesn't introduce regressions.
 
 use std::time::{Duration, Instant};
-use typeset::{comp, compile_safe_with_depth, grp, nest, render, text};
+use typeset::{comp, compile, compile_safe_with_depth, grp, nest, render, seq, text};
 
 /// Helper function to create a layout with specified depth
 fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
@@ -149,6 +149,34 @@ fn test_memory_efficiency() {
         assert!(output.contains(&format!("iteration_{}", i)));
         assert!(output.contains("base"));
     }
+}
+
+/// Deeply *nested* grp/seq scopes (`seq(a + seq(b + ...))`) were once O(n^2)
+/// in `structurize`: every composition carried its full enclosing scope stack,
+/// so a chain n deep did O(n^2) work. The scope-delta representation makes it
+/// linear. Pin that here — a regression to the quadratic would take tens of
+/// seconds at this size, so the time bound catches it loudly without being
+/// flaky (linear compiles this in a few milliseconds).
+#[test]
+fn test_nested_scope_compilation_is_linear() {
+    fn nested_seq(n: usize) -> Box<typeset::Layout> {
+        let mut layout = text("a".to_string());
+        for _ in 0..n {
+            layout = seq(comp(text("a".to_string()), layout, true, false));
+        }
+        layout
+    }
+
+    let start = Instant::now();
+    let doc = compile(nested_seq(50_000));
+    let output = render(doc, 2, 10);
+    let elapsed = start.elapsed();
+
+    assert!(output.contains('a'));
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "nested-scope compilation too slow ({elapsed:?}); O(n^2) regression?"
+    );
 }
 
 /// Benchmark comparison between compile and compile_safe

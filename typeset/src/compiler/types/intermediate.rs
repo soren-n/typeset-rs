@@ -39,12 +39,27 @@ pub enum Term<'a> {
     Pack(u64, &'a Term<'a>),
 }
 
+/// A grp or seq scope, identified by the index `serialize` assigns it in
+/// document pre-order. Each composition point records which scopes *open* and
+/// which *close* at it, relative to the previous composition on the same line;
+/// `structurize` replays those deltas to rebuild the scope graph.
+///
+/// Carrying open/close deltas (total size O(number of scopes)) rather than each
+/// composition's full enclosing scope stack (O(depth) per composition) is what
+/// keeps the grp/seq passes — serialize, linearize, fixed, structurize — linear
+/// on deeply nested scopes instead of O(n^2).
+#[derive(Debug, Copy, Clone)]
+pub enum Scope {
+    Grp(u64),
+    Seq(u64),
+}
+
 #[derive(Debug)]
 pub enum SerialComp<'a> {
     Line,
-    Comp(Attr),
-    Grp(u64, &'a SerialComp<'a>),
-    Seq(u64, &'a SerialComp<'a>),
+    /// A composition: its attributes, the scopes opening here, and the scopes
+    /// closing here.
+    Comp(Attr, &'a [Scope], &'a [Scope]),
 }
 
 // Fourth intermediate representation: LinearDoc
@@ -62,9 +77,9 @@ pub enum LinearObj<'a> {
 
 #[derive(Debug)]
 pub enum LinearComp<'a> {
-    Comp(Attr),
-    Grp(u64, &'a LinearComp<'a>),
-    Seq(u64, &'a LinearComp<'a>),
+    /// A composition: its attributes, the scopes opening here, and the scopes
+    /// closing here.
+    Comp(Attr, &'a [Scope], &'a [Scope]),
 }
 
 // Fifth intermediate representation: FixedDoc
@@ -88,9 +103,9 @@ pub enum FixedItem<'a> {
 
 #[derive(Debug)]
 pub enum FixedComp<'a> {
-    Comp(bool),
-    Grp(u64, &'a FixedComp<'a>),
-    Seq(u64, &'a FixedComp<'a>),
+    /// A composition: its pad flag, the scopes opening here, and the scopes
+    /// closing here.
+    Comp(bool, &'a [Scope], &'a [Scope]),
 }
 
 #[derive(Debug)]

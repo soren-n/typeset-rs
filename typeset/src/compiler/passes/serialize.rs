@@ -18,7 +18,7 @@
 //! folded from the right onto `Past` to build the Serial — byte-identical to
 //! the recursive version.
 
-use crate::compiler::types::{Attr, Edsl, Serial, SerialComp, Term};
+use crate::compiler::types::{Attr, Edsl, Scope, Serial, SerialComp, Term};
 use bumpalo::Bump;
 
 /// A nest/pack wrapper accumulated on the path to a term.
@@ -42,10 +42,15 @@ struct TermList<'b> {
     next: Option<&'b TermList<'b>>,
 }
 
-/// Persistent list of comp wrappers; head is the innermost wrapper.
+/// Persistent list of comp wrappers; head is the innermost wrapper. `depth` is
+/// the list length (root = 0), so two comps' enclosing lists — which share
+/// their outer tail by pointer — can be diffed by an O(delta) longest-common-
+/// suffix walk (advance the deeper to equal depth, then step in lockstep to the
+/// shared node).
 struct CompList<'b> {
     wrap: CompWrap,
     next: Option<&'b CompList<'b>>,
+    depth: usize,
 }
 
 /// How a leaf's term attaches to the rest of the serial.
@@ -131,6 +136,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
                     comps: Some(mem.alloc(CompList {
                         wrap: CompWrap::Grp(index),
                         next: comps,
+                        depth: comps.map_or(0, |c| c.depth) + 1,
                     })),
                     glue,
                     fixed,
@@ -145,6 +151,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
                     comps: Some(mem.alloc(CompList {
                         wrap: CompWrap::Seq(index),
                         next: comps,
+                        depth: comps.map_or(0, |c| c.depth) + 1,
                     })),
                     glue,
                     fixed,
@@ -216,9 +223,31 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
         }
     }
 
+    // Compute each composition's scope open/close deltas in document order.
+    // `prev` is the previous composition's enclosing scope list *on the same
+    // line*; it resets at every line break (Line/Last), because grp/seq scopes
+    // never cross a hard line — structurize resolves each line independently.
+    // Diffing the shared-tail `CompList`s is O(delta), so this whole pass stays
+    // linear even when scopes nest n deep.
+    let mut deltas: Vec<(&'b [Scope], &'b [Scope])> = Vec::with_capacity(entries.len());
+    let mut prev: Option<&'b CompList<'b>> = None;
+    for entry in entries.iter() {
+        match entry.glue {
+            Glue::Comp { comps, .. } => {
+                let (opens, closes) = diff_comps(prev, comps);
+                deltas.push((mem.alloc_slice_copy(&opens), mem.alloc_slice_copy(&closes)));
+                prev = comps;
+            }
+            Glue::Line | Glue::Last => {
+                deltas.push((&[], &[]));
+                prev = None;
+            }
+        }
+    }
+
     // Fold the leaf entries (document order) from the right onto Past.
     let mut serial: &'b Serial<'b> = mem.alloc(Serial::Past);
-    for entry in entries.iter().rev() {
+    for (idx, entry) in entries.iter().enumerate().rev() {
         serial = match entry.glue {
             Glue::Last => mem.alloc(Serial::Last(entry.term, serial)),
             Glue::Line => mem.alloc(Serial::Next(
@@ -226,13 +255,67 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
                 mem.alloc(SerialComp::Line),
                 serial,
             )),
-            Glue::Comp { comps, attr } => {
-                let comp = apply_comps(mem, comps, mem.alloc(SerialComp::Comp(attr)));
+            Glue::Comp { attr, .. } => {
+                let (opens, closes) = deltas[idx];
+                let comp = mem.alloc(SerialComp::Comp(attr, opens, closes));
                 mem.alloc(Serial::Next(entry.term, comp, serial))
             }
         };
     }
     serial
+}
+
+/// Diffs two enclosing-scope lists (innermost-first, sharing an outer tail by
+/// pointer) into the scopes that *open* (in `cur`, not `prev`) and *close* (in
+/// `prev`, not `cur`) at this composition. Order within each list is irrelevant:
+/// structurize keys scopes by index. O(number of scopes that differ).
+fn diff_comps<'b>(
+    prev: Option<&'b CompList<'b>>,
+    cur: Option<&'b CompList<'b>>,
+) -> (Vec<Scope>, Vec<Scope>) {
+    fn scope_of(wrap: CompWrap) -> Scope {
+        match wrap {
+            CompWrap::Grp(index) => Scope::Grp(index),
+            CompWrap::Seq(index) => Scope::Seq(index),
+        }
+    }
+    fn depth(list: Option<&CompList>) -> usize {
+        list.map_or(0, |node| node.depth)
+    }
+    let mut closes: Vec<Scope> = Vec::new();
+    let mut opens: Vec<Scope> = Vec::new();
+    let mut a = prev; // contributes closes
+    let mut b = cur; // contributes opens
+    let (mut da, mut db) = (depth(a), depth(b));
+    // Drop the deeper list's excess head down to the shallower list's depth.
+    while da > db {
+        let node = a.expect("depth > 0");
+        closes.push(scope_of(node.wrap));
+        a = node.next;
+        da -= 1;
+    }
+    while db > da {
+        let node = b.expect("depth > 0");
+        opens.push(scope_of(node.wrap));
+        b = node.next;
+        db -= 1;
+    }
+    // Equal depth: step in lockstep until the shared tail (same node pointer,
+    // or both empty) — everything above it differs.
+    loop {
+        match (a, b) {
+            (None, None) => break,
+            (Some(x), Some(y)) if std::ptr::eq(x, y) => break,
+            (Some(x), Some(y)) => {
+                closes.push(scope_of(x.wrap));
+                opens.push(scope_of(y.wrap));
+                a = x.next;
+                b = y.next;
+            }
+            _ => unreachable!("equal-depth lists reach the shared tail together"),
+        }
+    }
+    (opens, closes)
 }
 
 /// Applies the accumulated term wrappers to a base term. The list head is the
@@ -252,24 +335,6 @@ fn apply_terms<'b>(
         cur = node.next;
     }
     term
-}
-
-/// Applies the accumulated comp wrappers to a base comp (innermost first).
-fn apply_comps<'b>(
-    mem: &'b Bump,
-    list: Option<&'b CompList<'b>>,
-    base: &'b SerialComp<'b>,
-) -> &'b SerialComp<'b> {
-    let mut comp = base;
-    let mut cur = list;
-    while let Some(node) = cur {
-        comp = match node.wrap {
-            CompWrap::Grp(index) => mem.alloc(SerialComp::Grp(index, comp)),
-            CompWrap::Seq(index) => mem.alloc(SerialComp::Seq(index, comp)),
-        };
-        cur = node.next;
-    }
-    comp
 }
 
 #[cfg(test)]

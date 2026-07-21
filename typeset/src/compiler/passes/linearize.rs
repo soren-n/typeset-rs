@@ -9,12 +9,6 @@ use super::term_chain::map_term_chain;
 use crate::compiler::types::{LinearComp, LinearDoc, LinearObj, Serial, SerialComp, Term};
 use bumpalo::Bump;
 
-/// A `SerialComp` wrapper, recorded outermost-first while descending.
-enum CompWrap {
-    Grp(u64),
-    Seq(u64),
-}
-
 pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b LinearDoc<'b> {
     // Completed line objects, in document order.
     let mut lines: Vec<&'b LinearObj<'b>> = Vec::new();
@@ -73,31 +67,14 @@ fn build_line<'b>(
     obj
 }
 
-/// Linearizes a non-`Line` `SerialComp` chain into a `LinearComp`.
+/// Carries a non-`Line` `SerialComp` through to a `LinearComp`. The scope
+/// delta slices are `Copy` and outlive this pass's arena, so they pass through
+/// by borrow — no per-comp rebuild.
 fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a SerialComp<'a>) -> &'b LinearComp<'b> {
-    let mut wraps: Vec<CompWrap> = Vec::new();
-    let mut cur = comp;
-    let mut val: &'b LinearComp<'b> = loop {
-        match cur {
-            SerialComp::Line => unreachable!("Invariant"),
-            SerialComp::Comp(attr) => break mem.alloc(LinearComp::Comp(*attr)),
-            SerialComp::Grp(index, comp1) => {
-                wraps.push(CompWrap::Grp(*index));
-                cur = comp1;
-            }
-            SerialComp::Seq(index, comp1) => {
-                wraps.push(CompWrap::Seq(*index));
-                cur = comp1;
-            }
-        }
-    };
-    while let Some(wrap) = wraps.pop() {
-        val = match wrap {
-            CompWrap::Grp(index) => mem.alloc(LinearComp::Grp(index, val)),
-            CompWrap::Seq(index) => mem.alloc(LinearComp::Seq(index, val)),
-        };
+    match comp {
+        SerialComp::Line => unreachable!("Invariant"),
+        SerialComp::Comp(attr, opens, closes) => mem.alloc(LinearComp::Comp(*attr, opens, closes)),
     }
-    val
 }
 
 #[cfg(test)]
@@ -124,7 +101,7 @@ mod tests {
         for _ in 0..DEEP {
             serial = mem.alloc(Serial::Next(
                 mem.alloc(Term::Text("x")),
-                mem.alloc(SerialComp::Comp(attr)),
+                mem.alloc(SerialComp::Comp(attr, &[], &[])),
                 serial,
             ));
         }
@@ -150,18 +127,20 @@ mod tests {
     #[test]
     fn linearize_handles_deep_term_and_comp() {
         let mem = Bump::new();
-        // Deep Nest term and deep Grp comp on a single element.
+        // Deep Nest term on a single element; the comp carries its scope
+        // deltas by borrow (no per-comp recursion to overflow anymore).
         let mut term: &Term = mem.alloc(Term::Text("x"));
         for _ in 0..DEEP {
             term = mem.alloc(Term::Nest(term));
         }
-        let mut comp: &SerialComp = mem.alloc(SerialComp::Comp(Attr {
-            pad: false,
-            fix: false,
-        }));
-        for _ in 0..DEEP {
-            comp = mem.alloc(SerialComp::Grp(0, comp));
-        }
+        let comp: &SerialComp = mem.alloc(SerialComp::Comp(
+            Attr {
+                pad: false,
+                fix: false,
+            },
+            &[],
+            &[],
+        ));
         let serial: &Serial = mem.alloc(Serial::Next(
             term,
             comp,

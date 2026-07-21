@@ -5,16 +5,10 @@
 //! 2. [`solve`]    — GraphDoc → GraphDoc: resolve the scope graph in place.
 //! 3. [`rebuild`]  — GraphDoc → RebuildDoc: rebuild the composition spine.
 //!
-//! Known O(n^2): deeply *nested* grp/seq scopes (e.g. `seq(a + seq(b + …))`)
-//! are quadratic — but the cost is in `graphify`, not `solve`. Each
-//! composition point carries its entire enclosing scope stack (materialized
-//! per-comp, without sharing, back in `serialize`'s `apply_comps`), so
-//! `graphify`'s `lift_stack` + `update` do O(depth) work at every node,
-//! summing to O(n^2). `solve`'s edge splices stay O(1) and rebuild is linear.
-//! A flat comp line or independent sibling scopes are already linear. A real
-//! fix is representational: carry scope open/close *deltas* through
-//! serialize → linearize → fixed → graphify instead of the full stack per
-//! comp — a cross-pass change, not a local one.
+//! Each composition arrives carrying the scopes that open and close at it (the
+//! deltas `serialize` computed). `graphify` replays those to build the scope
+//! graph in time linear in the number of scopes, so deeply nested grp/seq is
+//! linear rather than the O(n^2) a per-composition full-stack diff would cost.
 
 mod graph;
 mod graphify;
@@ -56,7 +50,7 @@ mod tests {
         for _ in 0..depth {
             obj = mem.alloc(FixedObj::Next(
                 mem.alloc(FixedItem::Term(mem.alloc(Term::Text("y")))),
-                mem.alloc(FixedComp::Comp(false)),
+                mem.alloc(FixedComp::Comp(false, &[], &[])),
                 obj,
             ));
         }
@@ -106,7 +100,7 @@ mod tests {
         for _ in 0..DEEP {
             fix = mem.alloc(FixedFix::Next(
                 mem.alloc(Term::Text("y")),
-                mem.alloc(FixedComp::Comp(false)),
+                mem.alloc(FixedComp::Comp(false, &[], &[])),
                 fix,
             ));
         }
