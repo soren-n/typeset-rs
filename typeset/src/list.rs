@@ -90,26 +90,36 @@ impl<'b, 'a: 'b, T: Copy + Clone + Debug> List<'a, T> {
     }
 
     pub fn get(&'a self, index: u64) -> Option<T> {
-        match self {
-            List::Nil => None,
-            List::Cons(_, item, items1) => {
-                if index == 0 {
-                    Some(*item)
-                } else {
-                    items1.get(index - 1)
+        // Iterative walk: a recursive version overflows the native stack on
+        // long lists (element counts run into the tens of thousands).
+        let mut cur = self;
+        let mut index = index;
+        loop {
+            match cur {
+                List::Nil => return None,
+                List::Cons(_, item, items1) => {
+                    if index == 0 {
+                        return Some(*item);
+                    }
+                    cur = items1;
+                    index -= 1;
                 }
             }
         }
     }
 
     pub fn get_unsafe(&'a self, index: u64) -> T {
-        match self {
-            List::Nil => unreachable!("Invariant"),
-            List::Cons(_, item, items1) => {
-                if index == 0 {
-                    *item
-                } else {
-                    items1.get_unsafe(index - 1)
+        let mut cur = self;
+        let mut index = index;
+        loop {
+            match cur {
+                List::Nil => unreachable!("Invariant"),
+                List::Cons(_, item, items1) => {
+                    if index == 0 {
+                        return *item;
+                    }
+                    cur = items1;
+                    index -= 1;
                 }
             }
         }
