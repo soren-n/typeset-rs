@@ -1,13 +1,14 @@
-//! Shared spine walking for the `DenullDoc`-consuming passes.
+//! Shared spine walking for the identity-simplifying passes.
 //!
-//! `identities`, `reassociate`, and `rescope` all walk the same linear
-//! `DenullDoc` spine (`Eod`/`Empty`/`Break`/`Line`), transform each line's
-//! object, and fold the results back onto the terminal. They differ only in the
-//! per-object transform and the output spine type (`DenullDoc` for the first
-//! two, `FinalDoc` for `rescope`). [`map_denull_spine`] captures that one shape;
-//! [`SpineSink`] abstracts the output constructors.
+//! `identities` and `reassociate` both walk the same linear `DenullDoc` spine
+//! (`Eod`/`Empty`/`Break`/`Line`), transform each line's object, and fold the
+//! results back onto the terminal as a fresh `DenullDoc`. They differ only in
+//! the per-object transform. [`map_denull_spine`] captures that one shape;
+//! [`SpineSink`] abstracts the output constructors. (The final `rescope` pass
+//! walks the same spine but folds directly into the heap [`Doc`], so it does its
+//! own spine walk rather than going through this arena-allocating sink.)
 
-use crate::compiler::types::{DenullDoc, DenullObj, FinalDoc, FinalDocObj};
+use crate::compiler::types::{DenullDoc, DenullObj};
 use bumpalo::Bump;
 
 /// An output spine a `DenullDoc` walk can fold into. Implemented for the pass
@@ -34,22 +35,6 @@ impl<'b> SpineSink<'b> for DenullDoc<'b> {
     }
     fn line(mem: &'b Bump, obj: Self::Obj) -> &'b Self {
         mem.alloc(DenullDoc::Line(obj))
-    }
-}
-
-impl<'b> SpineSink<'b> for FinalDoc<'b> {
-    type Obj = &'b FinalDocObj<'b>;
-    fn eod(mem: &'b Bump) -> &'b Self {
-        mem.alloc(FinalDoc::Eod)
-    }
-    fn empty(mem: &'b Bump, tail: &'b Self) -> &'b Self {
-        mem.alloc(FinalDoc::Empty(tail))
-    }
-    fn brk(mem: &'b Bump, obj: Self::Obj, tail: &'b Self) -> &'b Self {
-        mem.alloc(FinalDoc::Break(obj, tail))
-    }
-    fn line(mem: &'b Bump, obj: Self::Obj) -> &'b Self {
-        mem.alloc(FinalDoc::Line(obj))
     }
 }
 

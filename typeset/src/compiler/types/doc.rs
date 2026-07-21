@@ -114,9 +114,9 @@ impl Drop for DocObjFix {
 // Iterative Clone
 // ---------------
 // Deep-copy each tree bottom-up with task/result stacks (the same shape as the
-// `move_to_heap` pass), so cloning a deep document — e.g. the documented
-// `render(doc.clone(), ...)` pattern for re-rendering at multiple widths — runs
-// in constant native stack instead of overflowing.
+// `rescope` pass that builds these trees), so cloning a deep document — e.g. the
+// documented `render(doc.clone(), ...)` pattern for re-rendering at multiple
+// widths — runs in constant native stack instead of overflowing.
 
 fn clone_fix(fix: &DocObjFix) -> Box<DocObjFix> {
     enum Task<'a> {

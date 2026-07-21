@@ -167,28 +167,5 @@ pub enum DenullTerm<'a> {
     Pack(u64, &'a DenullTerm<'a>),
 }
 
-// Eighth intermediate representation: FinalDoc
-#[derive(Debug)]
-pub enum FinalDoc<'a> {
-    Eod,
-    Empty(&'a FinalDoc<'a>),
-    Break(&'a FinalDocObj<'a>, &'a FinalDoc<'a>),
-    Line(&'a FinalDocObj<'a>),
-}
-
-#[derive(Debug)]
-pub enum FinalDocObj<'a> {
-    Text(&'a str),
-    Fix(&'a FinalDocObjFix<'a>),
-    Grp(&'a FinalDocObj<'a>),
-    Seq(&'a FinalDocObj<'a>),
-    Nest(&'a FinalDocObj<'a>),
-    Pack(u64, &'a FinalDocObj<'a>),
-    Comp(&'a FinalDocObj<'a>, &'a FinalDocObj<'a>, bool),
-}
-
-#[derive(Debug)]
-pub enum FinalDocObjFix<'a> {
-    Text(&'a str),
-    Comp(&'a FinalDocObjFix<'a>, &'a FinalDocObjFix<'a>, bool),
-}
+// The final pass, `rescope`, lowers `DenullDoc` straight into the owned heap
+// `Doc` (see `types::doc`), so there is no arena IR between the two.

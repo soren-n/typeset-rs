@@ -1,18 +1,18 @@
 //! Compilation pipeline: [`Layout`] → [`Doc`].
 //!
-//! The pipeline runs ten sequential passes, each lowering the tree through one
+//! The pipeline runs nine sequential passes, each lowering the tree through one
 //! intermediate representation:
 //!
 //! ```text
 //! Layout → Edsl → Serial → LinearDoc → FixedDoc → RebuildDoc →
-//! DenullDoc → IdentitiesDoc → ReassociateDoc → FinalDoc → Doc
+//! DenullDoc → IdentitiesDoc → ReassociateDoc → Doc
 //! ```
 //!
-//! Each pass allocates its output in a fresh bump arena; the final pass moves
-//! the result to the heap [`Doc`]. The whole pipeline — passes, heap conversion,
-//! renderer, and dropping the [`Doc`] — is iterative, so it runs in constant
-//! native stack and deep layouts never overflow it. Depth shows up as O(depth)
-//! heap instead.
+//! Each intermediate pass allocates its output in a fresh bump arena; the final
+//! pass ([`rescope`](crate::compiler::passes::rescope)) builds the owned heap
+//! [`Doc`] directly. The whole pipeline — passes, renderer, and dropping the
+//! [`Doc`] — is iterative, so it runs in constant native stack and deep layouts
+//! never overflow it. Depth shows up as O(depth) heap instead.
 //!
 //! Two entry points: [`compile`] is infallible (the fast path — the pipeline is
 //! iterative, so no layout is too deep and there is no depth cap);
@@ -23,8 +23,7 @@
 use crate::compiler::{
     error::DepthLimitExceeded,
     passes::{
-        broken, denull, fixed, identities, linearize, move_to_heap, reassociate, rescope,
-        serialize, structurize,
+        broken, denull, fixed, identities, linearize, reassociate, rescope, serialize, structurize,
     },
     render::render_ref as render_ref_impl,
     types::{Doc, Layout},
@@ -112,12 +111,13 @@ pub fn compile_within_depth(
     Ok(run_passes(layout))
 }
 
-/// Runs the ten-pass pipeline, lowering [`Layout`] to a heap [`Doc`].
+/// Runs the nine-pass pipeline, lowering [`Layout`] to a heap [`Doc`].
 ///
 /// Infallible and iterative: shared by [`compile`] (no depth bound) and
 /// [`compile_within_depth`] (which measures and rejects over-deep layouts
-/// before calling here). Each pass allocates its output in a fresh bump arena,
-/// so every intermediate representation is freed once this returns.
+/// before calling here). Each intermediate pass allocates its output in a fresh
+/// bump arena, so every intermediate representation is freed once this returns;
+/// the final pass builds the heap [`Doc`] directly.
 fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     use bumpalo::Bump;
 
@@ -145,11 +145,9 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     let mem8 = Bump::new();
     let reassociate_doc = reassociate(&mem8, identities_doc);
 
-    let mem9 = Bump::new();
-    let final_doc = rescope(&mem9, reassociate_doc);
-
-    // Pass 10: FinalDoc → Doc (move to heap; does not use an arena).
-    move_to_heap(final_doc)
+    // Final pass: DenullDoc → Doc. `rescope` builds the owned heap Doc directly,
+    // so there is no arena here and no separate heap-conversion pass.
+    rescope(reassociate_doc)
 }
 
 /// Renders a compiled document to a formatted string, consuming it.

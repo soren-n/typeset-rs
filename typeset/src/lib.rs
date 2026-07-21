@@ -45,11 +45,11 @@
 //!
 //! The library uses a sophisticated multi-pass compiler that transforms layouts
 //! through several intermediate representations, each lowered in a fresh bump
-//! arena:
+//! arena (the final pass builds the owned heap `Doc` directly):
 //!
 //! ```text
 //! Layout → Edsl → Serial → LinearDoc → FixedDoc → RebuildDoc →
-//! DenullDoc → FinalDoc → Doc → String
+//! DenullDoc → Doc → String
 //! ```
 //!
 //! The `DenullDoc → DenullDoc` identity-removal and reassociation passes are

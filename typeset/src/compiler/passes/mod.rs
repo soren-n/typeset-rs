@@ -13,13 +13,11 @@
 //! 6. denull - RebuildDoc → DenullDoc (remove null identities)
 //! 7. identities - DenullDoc → DenullDoc (remove grp/seq identities)
 //! 8. reassociate - DenullDoc → DenullDoc (reassociate compositions)
-//! 9. rescope - DenullDoc → FinalDoc (rescope nest and pack)
-//! 10. heap - FinalDoc → Doc (move to heap)
+//! 9. rescope - DenullDoc → Doc (rescope nest and pack, into the heap)
 
 pub mod broken;
 pub mod denull;
 pub mod fixed;
-pub mod heap;
 pub mod identities;
 pub mod linearize;
 pub mod reassociate;
@@ -33,7 +31,6 @@ mod walk;
 pub use broken::broken;
 pub use denull::denull;
 pub use fixed::fixed;
-pub use heap::move_to_heap;
 pub use identities::identities;
 pub use linearize::linearize;
 pub use reassociate::reassociate;
