@@ -1,13 +1,11 @@
 use std::fmt;
 use std::mem;
 
-// `Clone` is implemented iteratively below rather than derived: a derived
-// (recursive) clone would overflow the native stack on deep documents, the same
-// hazard the iterative `Drop` and renderer avoid. `Debug` stays derived — it is
-// a debug-only path and not part of any deep public workflow.
+// `Clone`, `Debug`, and `Display` are implemented iteratively below rather than
+// derived: a derived (recursive) impl would overflow the native stack on deep
+// documents, the same hazard the iterative `Drop` and renderer avoid.
 
 /// Final document representation - output of the compiler
-#[derive(Debug)]
 pub enum Doc {
     Eod,
     Empty(Box<Doc>),
@@ -15,7 +13,6 @@ pub enum Doc {
     Line(Box<DocObj>),
 }
 
-#[derive(Debug)]
 pub enum DocObj {
     Text(String),
     Fix(Box<DocObjFix>),
@@ -26,7 +23,6 @@ pub enum DocObj {
     Comp(Box<DocObj>, Box<DocObj>, bool),
 }
 
-#[derive(Debug)]
 pub enum DocObjFix {
     Text(String),
     Comp(Box<DocObjFix>, Box<DocObjFix>, bool),
@@ -363,6 +359,117 @@ impl fmt::Display for Doc {
     }
 }
 
+// Iterative Debug
+// ---------------
+// A derived `Debug` recurses down the `Box` chain and overflows the native stack
+// on deep documents — the same hazard every other trait here avoids. These impls
+// reproduce the derived (non-alternate) output byte-for-byte, driven by an
+// explicit task stack shared across the `Doc`/`DocObj`/`DocObjFix` family. The
+// alternate (`{:#?}`) indented form is not reproduced; it falls back to the same
+// compact form.
+
+enum DebugTask<'a> {
+    Doc(&'a Doc),
+    Obj(&'a DocObj),
+    Fix(&'a DocObjFix),
+    Lit(&'static str),
+    Owned(String),
+}
+
+fn _debug_doc_family(f: &mut fmt::Formatter, start: DebugTask) -> fmt::Result {
+    let mut stack: Vec<DebugTask> = vec![start];
+    while let Some(task) = stack.pop() {
+        match task {
+            DebugTask::Lit(s) => f.write_str(s)?,
+            DebugTask::Owned(s) => f.write_str(&s)?,
+            DebugTask::Doc(d) => match d {
+                Doc::Eod => f.write_str("Eod")?,
+                Doc::Empty(doc1) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Doc(doc1));
+                    stack.push(DebugTask::Lit("Empty("));
+                }
+                Doc::Break(obj, doc1) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Doc(doc1));
+                    stack.push(DebugTask::Lit(", "));
+                    stack.push(DebugTask::Obj(obj));
+                    stack.push(DebugTask::Lit("Break("));
+                }
+                Doc::Line(obj) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Obj(obj));
+                    stack.push(DebugTask::Lit("Line("));
+                }
+            },
+            DebugTask::Obj(o) => match o {
+                DocObj::Text(data) => f.write_str(&format!("Text({:?})", data))?,
+                DocObj::Fix(obj1) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Fix(obj1));
+                    stack.push(DebugTask::Lit("Fix("));
+                }
+                DocObj::Grp(obj1) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Obj(obj1));
+                    stack.push(DebugTask::Lit("Grp("));
+                }
+                DocObj::Seq(obj1) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Obj(obj1));
+                    stack.push(DebugTask::Lit("Seq("));
+                }
+                DocObj::Nest(obj1) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Obj(obj1));
+                    stack.push(DebugTask::Lit("Nest("));
+                }
+                DocObj::Pack(index, obj1) => {
+                    stack.push(DebugTask::Lit(")"));
+                    stack.push(DebugTask::Obj(obj1));
+                    stack.push(DebugTask::Owned(format!("Pack({}, ", index)));
+                }
+                DocObj::Comp(left, right, pad) => {
+                    stack.push(DebugTask::Owned(format!(", {})", pad)));
+                    stack.push(DebugTask::Obj(right));
+                    stack.push(DebugTask::Lit(", "));
+                    stack.push(DebugTask::Obj(left));
+                    stack.push(DebugTask::Lit("Comp("));
+                }
+            },
+            DebugTask::Fix(x) => match x {
+                DocObjFix::Text(data) => f.write_str(&format!("Text({:?})", data))?,
+                DocObjFix::Comp(left, right, pad) => {
+                    stack.push(DebugTask::Owned(format!(", {})", pad)));
+                    stack.push(DebugTask::Fix(right));
+                    stack.push(DebugTask::Lit(", "));
+                    stack.push(DebugTask::Fix(left));
+                    stack.push(DebugTask::Lit("Comp("));
+                }
+            },
+        }
+    }
+    Ok(())
+}
+
+impl fmt::Debug for Doc {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        _debug_doc_family(f, DebugTask::Doc(self))
+    }
+}
+
+impl fmt::Debug for DocObj {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        _debug_doc_family(f, DebugTask::Obj(self))
+    }
+}
+
+impl fmt::Debug for DocObjFix {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        _debug_doc_family(f, DebugTask::Fix(self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,5 +603,44 @@ mod tests {
         let expected = "Break (Comp (Text \"a\") (Grp (Text \"b\")) true)\n\
                         Line (Fix (Comp (Text \"c\") (Text \"d\") false))";
         assert_eq!(format!("{}", doc), expected);
+    }
+
+    #[test]
+    fn debug_format_matches_derived() {
+        // Byte-for-byte the output the old `#[derive(Debug)]` produced.
+        let doc = Doc::Break(
+            Box::new(DocObj::Comp(
+                Box::new(DocObj::Text("a".to_string())),
+                Box::new(DocObj::Pack(
+                    7,
+                    Box::new(DocObj::Fix(Box::new(DocObjFix::Comp(
+                        Box::new(DocObjFix::Text("c".to_string())),
+                        Box::new(DocObjFix::Text("d".to_string())),
+                        true,
+                    )))),
+                )),
+                false,
+            )),
+            Box::new(Doc::Line(Box::new(DocObj::Grp(Box::new(DocObj::Text(
+                "b".to_string(),
+            )))))),
+        );
+        let expected = "Break(Comp(Text(\"a\"), \
+                        Pack(7, Fix(Comp(Text(\"c\"), Text(\"d\"), true))), false), \
+                        Line(Grp(Text(\"b\"))))";
+        assert_eq!(format!("{:?}", doc), expected);
+    }
+
+    #[test]
+    fn deep_debug_is_iterative() {
+        let mut obj = Box::new(DocObj::Text("x".to_string()));
+        for _ in 0..DEEP {
+            obj = Box::new(DocObj::Nest(obj));
+        }
+        let doc = Doc::Line(obj);
+        let s = format!("{:?}", doc);
+        assert!(s.starts_with("Line(Nest("));
+        assert_eq!(s.matches("Nest(").count(), DEEP);
+        assert!(s.contains("Text(\"x\")"));
     }
 }

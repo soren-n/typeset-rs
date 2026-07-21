@@ -10,11 +10,11 @@ pub struct Attr {
 
 /// Layout AST - the input language for the compiler
 ///
-/// `Clone` and `Drop` are implemented iteratively below rather than derived: a
-/// derived (recursive) clone or drop would overflow the native stack on a deeply
-/// nested layout, the same hazard the compiler passes and renderer avoid.
-/// `Debug` stays derived (a debug-only path).
-#[derive(Debug, Default)]
+/// `Clone`, `Drop`, `Debug`, and `Display` are implemented iteratively below
+/// rather than derived: a derived (recursive) impl would overflow the native
+/// stack on a deeply nested layout, the same hazard the compiler passes and
+/// renderer avoid.
+#[derive(Default)]
 pub enum Layout {
     #[default]
     Null,
@@ -210,6 +210,71 @@ impl fmt::Display for Layout {
     }
 }
 
+impl fmt::Debug for Layout {
+    // Iterative to match every other trait here: a derived (recursive) `Debug`
+    // would overflow the native stack on a deep layout. Reproduces the derived
+    // (non-alternate) output byte-for-byte; the alternate (`{:#?}`) indented form
+    // is not reproduced and falls back to this compact form.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        enum Task<'a> {
+            Visit(&'a Layout),
+            Lit(&'static str),
+            Owned(String),
+        }
+        let mut stack: Vec<Task> = vec![Task::Visit(self)];
+        while let Some(task) = stack.pop() {
+            match task {
+                Task::Lit(s) => f.write_str(s)?,
+                Task::Owned(s) => f.write_str(&s)?,
+                Task::Visit(l) => match l {
+                    Layout::Null => f.write_str("Null")?,
+                    Layout::Text(data) => f.write_str(&format!("Text({:?})", data))?,
+                    Layout::Fix(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("Fix("));
+                    }
+                    Layout::Grp(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("Grp("));
+                    }
+                    Layout::Seq(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("Seq("));
+                    }
+                    Layout::Nest(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("Nest("));
+                    }
+                    Layout::Pack(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("Pack("));
+                    }
+                    Layout::Line(left, right) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(right));
+                        stack.push(Task::Lit(", "));
+                        stack.push(Task::Visit(left));
+                        stack.push(Task::Lit("Line("));
+                    }
+                    Layout::Comp(left, right, attr) => {
+                        stack.push(Task::Owned(format!(", {:?})", attr)));
+                        stack.push(Task::Visit(right));
+                        stack.push(Task::Lit(", "));
+                        stack.push(Task::Visit(left));
+                        stack.push(Task::Lit("Comp("));
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,5 +359,33 @@ mod tests {
         let expected = "(Comp (Text \"a\") (Grp (Line (Text \"b\") Null)) true false)";
         assert_eq!(format!("{}", layout), expected);
         assert_eq!(format!("{}", layout.clone()), expected);
+    }
+
+    #[test]
+    fn debug_format_matches_derived() {
+        // Byte-for-byte the output the old `#[derive(Debug)]` produced.
+        let layout = Layout::Comp(
+            Box::new(Layout::Text("a".to_string())),
+            Box::new(Layout::Grp(Box::new(Layout::Line(
+                Box::new(Layout::Text("b".to_string())),
+                Box::new(Layout::Null),
+            )))),
+            Attr {
+                pad: true,
+                fix: false,
+            },
+        );
+        let expected =
+            "Comp(Text(\"a\"), Grp(Line(Text(\"b\"), Null)), Attr { pad: true, fix: false })";
+        assert_eq!(format!("{:?}", layout), expected);
+    }
+
+    #[test]
+    fn deep_debug_is_iterative() {
+        let layout = deep_nest(DEEP);
+        let s = format!("{:?}", *layout);
+        assert!(s.starts_with("Nest("));
+        assert_eq!(s.matches("Nest(").count(), DEEP);
+        assert!(s.contains("Text(\"x\")"));
     }
 }
