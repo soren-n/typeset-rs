@@ -217,50 +217,22 @@ fn _reify_layout(ast: Ast) -> Quoted {
         Ast::Binary(BinaryOp::Unpadded, left, right) => {
             let left_layout = _reify_layout(*left);
             let right_layout = _reify_layout(*right);
-            quote! {
-              typeset::comp(
-                #left_layout,
-                #right_layout,
-                false,
-                false
-              )
-            }
+            quote! { typeset::unpad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::Padded, left, right) => {
             let left_layout = _reify_layout(*left);
             let right_layout = _reify_layout(*right);
-            quote! {
-              typeset::comp(
-                #left_layout,
-                #right_layout,
-                true,
-                false
-              )
-            }
+            quote! { typeset::pad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::FixedUnpadded, left, right) => {
             let left_layout = _reify_layout(*left);
             let right_layout = _reify_layout(*right);
-            quote! {
-              typeset::comp(
-                #left_layout,
-                #right_layout,
-                false,
-                true
-              )
-            }
+            quote! { typeset::fix_unpad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::FixedPadded, left, right) => {
             let left_layout = _reify_layout(*left);
             let right_layout = _reify_layout(*right);
-            quote! {
-              typeset::comp(
-                #left_layout,
-                #right_layout,
-                true,
-                true
-              )
-            }
+            quote! { typeset::fix_pad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::Newline, left, right) => {
             let left_layout = _reify_layout(*left);
