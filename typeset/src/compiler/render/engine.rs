@@ -2,6 +2,13 @@
 //!
 //! This module contains the rendering logic that transforms compiled Doc
 //! structures into final string output with proper formatting and line breaking.
+//!
+//! Every traversal here is iterative. The document is walked by borrowing
+//! (`&Doc`), never by consuming it, so arbitrarily deep layouts render with a
+//! constant native stack — the descent state lives in heap-allocated frame
+//! stacks (`Vec<...Frame>`) instead of stack frames. Borrowing rather than
+//! moving is also what lets [`Doc`](crate::compiler::types::Doc) carry an
+//! iterative `Drop`.
 
 use crate::compiler::types::{Doc, DocObj, DocObjFix};
 use crate::{map::Map, order::total};
@@ -83,6 +90,323 @@ fn _get_offset<'a>(state: State<'a>) -> usize {
     }
 }
 
+/// Append `n` spaces to `result` (iterative `_pad`).
+fn _pad(result: &mut String, n: usize) {
+    result.extend(std::iter::repeat_n(' ', n));
+}
+
+/// Frame for the state-only measuring traversals (`_measure`, `_next_comp`).
+///
+/// These fold a document object into a single position without producing any
+/// output, so a frame only needs to describe the remaining work and any state
+/// field to restore once a child subtree has been folded.
+enum MFrame<'t> {
+    Obj(&'t DocObj),
+    Fix(&'t DocObjFix),
+    RestoreLvl(usize),
+    RestoreHead(bool),
+    /// After visiting the left of a `Comp`: pad, drop `head`, visit the right,
+    /// then restore `head`.
+    CompMid(&'t DocObj, bool),
+    /// After visiting the left of a fixed `Comp`: pad, then visit the right.
+    FixCompMid(&'t DocObjFix, bool),
+}
+
+/// Position at which `obj` finishes if laid out from `state` (iterative fold).
+fn _measure<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize {
+    let mut st: State<'b> = state;
+    let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            MFrame::Obj(o) => match o {
+                DocObj::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObj::Fix(fix) => stack.push(MFrame::Fix(fix)),
+                DocObj::Grp(obj1) => stack.push(MFrame::Obj(obj1)),
+                DocObj::Seq(obj1) => stack.push(MFrame::Obj(obj1)),
+                DocObj::Nest(obj1) => {
+                    let lvl = st.lvl;
+                    let state1 = _indent(st.tab, st);
+                    let offset = _get_offset(state1);
+                    st = _inc_pos(offset, state1);
+                    stack.push(MFrame::RestoreLvl(lvl));
+                    stack.push(MFrame::Obj(obj1));
+                }
+                DocObj::Pack(index, obj1) => {
+                    let index = *index as usize;
+                    let lvl = st.lvl;
+                    let marks = st.marks;
+                    match marks.lookup(&total, index) {
+                        None => {
+                            let pos = st.pos;
+                            let marks1 = marks.insert(mem, &total, index, pos);
+                            st = State {
+                                marks: marks1,
+                                lvl: max(lvl, pos),
+                                ..st
+                            };
+                        }
+                        Some(lvl1) => {
+                            let state1 = State {
+                                lvl: max(lvl, lvl1),
+                                ..st
+                            };
+                            let offset = _get_offset(state1);
+                            st = _inc_pos(offset, state1);
+                        }
+                    }
+                    stack.push(MFrame::RestoreLvl(lvl));
+                    stack.push(MFrame::Obj(obj1));
+                }
+                DocObj::Comp(left, right, pad) => {
+                    stack.push(MFrame::CompMid(right, *pad));
+                    stack.push(MFrame::Obj(left));
+                }
+            },
+            MFrame::Fix(f) => match f {
+                DocObjFix::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObjFix::Comp(left, right, pad) => {
+                    stack.push(MFrame::FixCompMid(right, *pad));
+                    stack.push(MFrame::Fix(left));
+                }
+            },
+            MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
+            MFrame::RestoreHead(head) => st = State { head, ..st },
+            MFrame::CompMid(right, pad) => {
+                st = _inc_pos(if pad { 1 } else { 0 }, st);
+                let head = st.head;
+                st = State { head: false, ..st };
+                stack.push(MFrame::RestoreHead(head));
+                stack.push(MFrame::Obj(right));
+            }
+            MFrame::FixCompMid(right, pad) => {
+                st = _inc_pos(if pad { 1 } else { 0 }, st);
+                stack.push(MFrame::Fix(right));
+            }
+        }
+    }
+    st.pos
+}
+
+/// Position of the next composition boundary reachable from `obj` (iterative).
+fn _next_comp<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize {
+    let mut st: State<'b> = state;
+    let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            MFrame::Obj(o) => match o {
+                DocObj::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObj::Fix(fix) => stack.push(MFrame::Fix(fix)),
+                DocObj::Grp(obj1) => {
+                    if st.head {
+                        stack.push(MFrame::Obj(obj1));
+                    } else {
+                        let end = _measure(mem, obj1, st);
+                        st = State { pos: end, ..st };
+                    }
+                }
+                DocObj::Seq(obj1) => stack.push(MFrame::Obj(obj1)),
+                DocObj::Nest(obj1) => {
+                    let lvl = st.lvl;
+                    let state1 = _indent(st.tab, st);
+                    let offset = _get_offset(state1);
+                    st = _inc_pos(offset, state1);
+                    stack.push(MFrame::RestoreLvl(lvl));
+                    stack.push(MFrame::Obj(obj1));
+                }
+                DocObj::Pack(index, obj1) => {
+                    let index = *index as usize;
+                    let lvl = st.lvl;
+                    let marks = st.marks;
+                    match marks.lookup(&total, index) {
+                        None => {
+                            let pos = st.pos;
+                            let marks1 = marks.insert(mem, &total, index, pos);
+                            st = State {
+                                marks: marks1,
+                                lvl: max(lvl, pos),
+                                ..st
+                            };
+                        }
+                        Some(lvl1) => {
+                            let state1 = State {
+                                lvl: max(lvl, lvl1),
+                                ..st
+                            };
+                            let offset = _get_offset(state1);
+                            st = _inc_pos(offset, state1);
+                        }
+                    }
+                    stack.push(MFrame::RestoreLvl(lvl));
+                    stack.push(MFrame::Obj(obj1));
+                }
+                DocObj::Comp(left, _right, _pad) => stack.push(MFrame::Obj(left)),
+            },
+            MFrame::Fix(f) => match f {
+                DocObjFix::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObjFix::Comp(left, right, pad) => {
+                    stack.push(MFrame::FixCompMid(right, *pad));
+                    stack.push(MFrame::Fix(left));
+                }
+            },
+            MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
+            MFrame::FixCompMid(right, pad) => {
+                st = _inc_pos(if pad { 1 } else { 0 }, st);
+                stack.push(MFrame::Fix(right));
+            }
+            // `_next_comp` visits only the left of a `Comp` and never touches
+            // `head`, so it never pushes these; they are reachable only from
+            // `_measure`.
+            MFrame::CompMid(..) | MFrame::RestoreHead(_) => {
+                unreachable!("_next_comp never pushes CompMid/RestoreHead")
+            }
+        }
+    }
+    st.pos
+}
+
+fn _will_fit<'b>(mem: &'b Bump, obj: &DocObj, state: State<'b>) -> bool {
+    _measure(mem, obj, state) <= state.width
+}
+
+fn _should_break<'b>(mem: &'b Bump, obj: &DocObj, state: State<'b>) -> bool {
+    if state.broken {
+        true
+    } else {
+        state.width < _next_comp(mem, obj, state)
+    }
+}
+
+/// Frame for the output-producing object traversal.
+///
+/// The current [`State`] and the growing output buffer are threaded as mutable
+/// registers; a frame carries only the remaining work and the state field to
+/// restore once a child subtree has been rendered.
+enum RFrame<'t> {
+    Obj(&'t DocObj),
+    Fix(&'t DocObjFix),
+    RestoreLvl(usize),
+    RestoreBreak(bool),
+    /// After rendering the left of a `Comp`: decide the break, then render the
+    /// right. `state` at this point is the state produced by the left.
+    CompMid(&'t DocObj, bool),
+    /// After rendering the left of a fixed `Comp`: pad, then render the right.
+    FixCompMid(&'t DocObjFix, bool),
+}
+
+/// Render one document object into `result`, threading `state` (iterative).
+fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, result: &mut String) {
+    let mut st: State<'b> = *state;
+    let mut stack: Vec<RFrame<'t>> = vec![RFrame::Obj(obj)];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            RFrame::Obj(o) => match o {
+                DocObj::Text(data) => {
+                    st = _inc_pos(_text_width(data), st);
+                    result.push_str(data);
+                }
+                DocObj::Fix(fix) => stack.push(RFrame::Fix(fix)),
+                DocObj::Grp(obj1) => {
+                    let broken = st.broken;
+                    st = State {
+                        broken: false,
+                        ..st
+                    };
+                    stack.push(RFrame::RestoreBreak(broken));
+                    stack.push(RFrame::Obj(obj1));
+                }
+                DocObj::Seq(obj1) => {
+                    if _will_fit(mem, obj1, st) {
+                        stack.push(RFrame::Obj(obj1));
+                    } else {
+                        let broken = st.broken;
+                        st = State { broken: true, ..st };
+                        stack.push(RFrame::RestoreBreak(broken));
+                        stack.push(RFrame::Obj(obj1));
+                    }
+                }
+                DocObj::Nest(obj1) => {
+                    let lvl = st.lvl;
+                    let state1 = _indent(st.tab, st);
+                    let offset = _get_offset(state1);
+                    st = _inc_pos(offset, state1);
+                    _pad(result, offset);
+                    stack.push(RFrame::RestoreLvl(lvl));
+                    stack.push(RFrame::Obj(obj1));
+                }
+                DocObj::Pack(index, obj1) => {
+                    let index = *index as usize;
+                    let lvl = st.lvl;
+                    let marks = st.marks;
+                    match marks.lookup(&total, index) {
+                        None => {
+                            let pos = st.pos;
+                            let marks1 = marks.insert(mem, &total, index, pos);
+                            st = State {
+                                marks: marks1,
+                                lvl: max(lvl, pos),
+                                ..st
+                            };
+                        }
+                        Some(lvl1) => {
+                            let state1 = State {
+                                lvl: max(lvl, lvl1),
+                                ..st
+                            };
+                            let offset = _get_offset(state1);
+                            st = _inc_pos(offset, state1);
+                            _pad(result, offset);
+                        }
+                    }
+                    stack.push(RFrame::RestoreLvl(lvl));
+                    stack.push(RFrame::Obj(obj1));
+                }
+                DocObj::Comp(left, right, pad) => {
+                    stack.push(RFrame::CompMid(right, *pad));
+                    stack.push(RFrame::Obj(left));
+                }
+            },
+            RFrame::Fix(f) => match f {
+                DocObjFix::Text(data) => {
+                    st = _inc_pos(_text_width(data), st);
+                    result.push_str(data);
+                }
+                DocObjFix::Comp(left, right, pad) => {
+                    stack.push(RFrame::FixCompMid(right, *pad));
+                    stack.push(RFrame::Fix(left));
+                }
+            },
+            RFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
+            RFrame::RestoreBreak(broken) => st = State { broken, ..st },
+            RFrame::CompMid(right, pad) => {
+                // `st` is the state produced by the left operand.
+                let state1 = st;
+                let state3 = State {
+                    head: false,
+                    .._inc_pos(if pad { 1 } else { 0 }, state1)
+                };
+                if _should_break(mem, right, state3) {
+                    let state2 = _newline(state1);
+                    let offset = _get_offset(state2);
+                    st = _inc_pos(offset, state2);
+                    result.push('\n');
+                    _pad(result, offset);
+                } else {
+                    _pad(result, if pad { 1 } else { 0 });
+                    st = state3;
+                }
+                stack.push(RFrame::Obj(right));
+            }
+            RFrame::FixCompMid(right, pad) => {
+                let padding = if pad { 1 } else { 0 };
+                _pad(result, padding);
+                st = _inc_pos(padding, st);
+                stack.push(RFrame::Fix(right));
+            }
+        }
+    }
+    *state = st;
+}
+
 /// Renders a compiled document into a formatted string
 ///
 /// # Arguments
@@ -93,315 +417,32 @@ fn _get_offset<'a>(state: State<'a>) -> usize {
 /// # Returns
 /// A formatted string representation of the document
 pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
-    fn _whitespace(n: usize) -> String {
-        " ".repeat(n)
-    }
-    fn _pad(n: usize, result: String) -> String {
-        result + &_whitespace(n)
-    }
-    fn _measure<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> usize {
-        fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> State<'b> {
-            match obj {
-                DocObj::Text(data) => _inc_pos(_text_width(data), state),
-                DocObj::Fix(fix) => _visit_fix(fix, state),
-                DocObj::Grp(obj1) => _visit_obj(mem, obj1, state),
-                DocObj::Seq(obj1) => _visit_obj(mem, obj1, state),
-                DocObj::Nest(obj1) => {
-                    let lvl = state.lvl;
-                    let state1 = _indent(state.tab, state);
-                    let offset = _get_offset(state1);
-                    let state2 = _inc_pos(offset, state1);
-                    let state3 = _visit_obj(mem, obj1, state2);
-                    State { lvl, ..state3 }
-                }
-                DocObj::Pack(index, obj1) => {
-                    let index = *index as usize;
-                    let lvl = state.lvl;
-                    let marks = state.marks;
-                    match marks.lookup(&total, index) {
-                        None => {
-                            let pos = state.pos;
-                            let marks1 = marks.insert(mem, &total, index, pos);
-                            let state1 = State {
-                                marks: marks1,
-                                ..state
-                            };
-                            let state2 = State {
-                                lvl: max(lvl, pos),
-                                ..state1
-                            };
-                            let state3 = _visit_obj(mem, obj1, state2);
-                            State { lvl, ..state3 }
-                        }
-                        Some(lvl1) => {
-                            let state1 = State {
-                                lvl: max(lvl, lvl1),
-                                ..state
-                            };
-                            let offset = _get_offset(state1);
-                            let state2 = _inc_pos(offset, state1);
-                            let state3 = _visit_obj(mem, obj1, state2);
-                            State { lvl, ..state3 }
-                        }
-                    }
-                }
-                DocObj::Comp(left, right, pad) => {
-                    let state1 = _visit_obj(mem, left, state);
-                    let state2 = _inc_pos(if *pad { 1 } else { 0 }, state1);
-                    let head = state2.head;
-                    let state3 = State {
-                        head: false,
-                        ..state2
-                    };
-                    let state4 = _visit_obj(mem, right, state3);
-                    State { head, ..state4 }
-                }
-            }
-        }
-        fn _visit_fix<'b, 'a: 'b>(fix: &DocObjFix, state: State<'a>) -> State<'a> {
-            match fix {
-                DocObjFix::Text(data) => _inc_pos(_text_width(data), state),
-                DocObjFix::Comp(left, right, pad) => {
-                    let state1 = _visit_fix(left, state);
-                    let state2 = _inc_pos(if *pad { 1 } else { 0 }, state1);
-                    _visit_fix(right, state2)
-                }
-            }
-        }
-        let state1 = _visit_obj(mem, obj, state);
-        state1.pos
-    }
-    fn _next_comp<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> usize {
-        fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State<'a>) -> State<'b> {
-            match obj {
-                DocObj::Text(data) => _inc_pos(_text_width(data), state),
-                DocObj::Fix(fix) => _visit_fix(mem, fix, state),
-                DocObj::Grp(obj1) => {
-                    let head = state.head;
-                    if head {
-                        _visit_obj(mem, obj1, state)
-                    } else {
-                        let obj_end_pos = _measure(mem, obj1, state);
-                        State {
-                            pos: obj_end_pos,
-                            ..state
-                        }
-                    }
-                }
-                DocObj::Seq(obj1) => _visit_obj(mem, obj1, state),
-                DocObj::Nest(obj1) => {
-                    let lvl = state.lvl;
-                    let state1 = _indent(state.tab, state);
-                    let offset = _get_offset(state1);
-                    let state2 = _inc_pos(offset, state1);
-                    let state3 = _visit_obj(mem, obj1, state2);
-                    State { lvl, ..state3 }
-                }
-                DocObj::Pack(index, obj1) => {
-                    let index = *index as usize;
-                    let lvl = state.lvl;
-                    let marks = state.marks;
-                    match marks.lookup(&total, index) {
-                        None => {
-                            let pos = state.pos;
-                            let marks1 = marks.insert(mem, &total, index, pos);
-                            let state1 = State {
-                                marks: marks1,
-                                ..state
-                            };
-                            let state2 = State {
-                                lvl: max(lvl, pos),
-                                ..state1
-                            };
-                            let state3 = _visit_obj(mem, obj1, state2);
-                            State { lvl, ..state3 }
-                        }
-                        Some(lvl1) => {
-                            let state1 = State {
-                                lvl: max(lvl, lvl1),
-                                ..state
-                            };
-                            let offset = _get_offset(state1);
-                            let state2 = _inc_pos(offset, state1);
-                            let state3 = _visit_obj(mem, obj1, state2);
-                            State { lvl, ..state3 }
-                        }
-                    }
-                }
-                DocObj::Comp(left, _right, _pad) => _visit_obj(mem, left, state),
-            }
-        }
-        #[allow(clippy::only_used_in_recursion)]
-        fn _visit_fix<'b, 'a: 'b>(_mem: &'b Bump, fix: &DocObjFix, state: State<'a>) -> State<'a> {
-            match fix {
-                DocObjFix::Text(data) => _inc_pos(_text_width(data), state),
-                DocObjFix::Comp(left, right, pad) => {
-                    let state1 = _visit_fix(_mem, left, state);
-                    let state2 = _inc_pos(if *pad { 1 } else { 0 }, state1);
-                    _visit_fix(_mem, right, state2)
-                }
-            }
-        }
-        let state1 = _visit_obj(mem, obj, state);
-        state1.pos
-    }
-    fn _will_fit<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State) -> bool {
-        let obj_end_pos = _measure(mem, obj, state);
-        obj_end_pos <= state.width
-    }
-    fn _should_break<'b, 'a: 'b>(mem: &'b Bump, obj: &DocObj, state: State) -> bool {
-        let broken = state.broken;
-        if broken {
-            true
-        } else {
-            let next_comp_pos = _next_comp(mem, obj, state);
-            state.width < next_comp_pos
-        }
-    }
-    #[allow(clippy::boxed_local)]
-    fn _visit_doc<'b, 'a: 'b>(
-        mem: &'b Bump,
-        doc: Box<Doc>,
-        state: State<'a>,
-    ) -> (State<'b>, String) {
-        let state1 = _reset(state);
-        match *doc {
-            Doc::Eod => (state1, "".to_string()),
+    let mem = Bump::new();
+    let mut st = _make_state(&mem, width, tab);
+    let mut result = String::new();
+    // The document spine (`Empty` / `Break` / `Line` / `Eod`) is a linear list,
+    // so it is walked with a plain loop rather than recursion. `marks` and `lvl`
+    // survive `_reset`, so they carry across lines exactly as the recursive
+    // formulation threaded them.
+    let mut node: &Doc = &doc;
+    loop {
+        st = _reset(st);
+        match node {
+            Doc::Eod => break,
             Doc::Empty(doc1) => {
-                let (state2, doc2) = _visit_doc(mem, doc1, state1);
-                (state2, format!("\n{}", doc2))
+                result.push('\n');
+                node = doc1;
             }
             Doc::Break(obj, doc1) => {
-                let (state2, obj1) = _visit_obj(mem, *obj, state1, "".to_string());
-                let state3 = _reset(state2);
-                let (state4, doc2) = _visit_doc(mem, doc1, state3);
-                (state4, format!("{}\n{}", obj1, doc2))
+                _render_obj(&mem, obj, &mut st, &mut result);
+                result.push('\n');
+                node = doc1;
             }
-            Doc::Line(obj) => _visit_obj(mem, *obj, state1, "".to_string()),
-        }
-    }
-    fn _visit_obj<'b, 'a: 'b>(
-        mem: &'b Bump,
-        obj: DocObj,
-        state: State<'a>,
-        result: String,
-    ) -> (State<'b>, String) {
-        match obj {
-            DocObj::Text(data) => {
-                let state1 = _inc_pos(_text_width(&data), state);
-                (state1, result.clone() + &data)
-            }
-            DocObj::Fix(fix) => _visit_fix(mem, *fix, state, result),
-            DocObj::Grp(obj1) => {
-                let broken = state.broken;
-                let state1 = State {
-                    broken: false,
-                    ..state
-                };
-                let (state2, result1) = _visit_obj(mem, *obj1, state1, result.clone());
-                let state3 = State { broken, ..state2 };
-                (state3, result1.clone())
-            }
-            DocObj::Seq(obj1) => {
-                if _will_fit(mem, &obj1, state) {
-                    _visit_obj(mem, *obj1, state, result)
-                } else {
-                    let broken = state.broken;
-                    let state1 = State {
-                        broken: true,
-                        ..state
-                    };
-                    let (state2, result1) = _visit_obj(mem, *obj1, state1, result.clone());
-                    let state3 = State { broken, ..state2 };
-                    (state3, result1.clone())
-                }
-            }
-            DocObj::Nest(obj1) => {
-                let lvl = state.lvl;
-                let state1 = _indent(state.tab, state);
-                let offset = _get_offset(state1);
-                let state2 = _inc_pos(offset, state1);
-                let result1 = _pad(offset, result.clone());
-                let (state3, result2) = _visit_obj(mem, *obj1, state2, result1.clone());
-                let state4 = State { lvl, ..state3 };
-                (state4, result2.clone())
-            }
-            DocObj::Pack(index, obj1) => {
-                let index = index as usize;
-                let lvl = state.lvl;
-                let marks = state.marks;
-                match marks.lookup(&total, index) {
-                    None => {
-                        let pos = state.pos;
-                        let marks1 = marks.insert(mem, &total, index, pos);
-                        let state1 = State {
-                            marks: marks1,
-                            ..state
-                        };
-                        let state2 = State {
-                            lvl: max(lvl, pos),
-                            ..state1
-                        };
-                        let (state3, result1) = _visit_obj(mem, *obj1, state2, result.clone());
-                        let state4 = State { lvl, ..state3 };
-                        (state4, result1.clone())
-                    }
-                    Some(lvl1) => {
-                        let state1 = State {
-                            lvl: max(lvl, lvl1),
-                            ..state
-                        };
-                        let offset = _get_offset(state1);
-                        let state2 = _inc_pos(offset, state1);
-                        let result1 = _pad(offset, result.clone());
-                        let (state3, result2) = _visit_obj(mem, *obj1, state2, result1.clone());
-                        let state4 = State { lvl, ..state3 };
-                        (state4, result2.clone())
-                    }
-                }
-            }
-            DocObj::Comp(left, right, pad) => {
-                let (state1, result1) = _visit_obj(mem, *left, state, result);
-                let state2 = _inc_pos(if pad { 1 } else { 0 }, state1);
-                let state3 = State {
-                    head: false,
-                    ..state2
-                };
-                if _should_break(mem, &right, state3) {
-                    let state2 = _newline(state1);
-                    let offset = _get_offset(state2);
-                    let state3 = _inc_pos(offset, state2);
-                    let result2 = _pad(offset, result1.clone() + "\n");
-                    _visit_obj(mem, *right, state3, result2)
-                } else {
-                    let result2 = _pad(if pad { 1 } else { 0 }, result1.clone());
-                    _visit_obj(mem, *right, state3, result2)
-                }
+            Doc::Line(obj) => {
+                _render_obj(&mem, obj, &mut st, &mut result);
+                break;
             }
         }
     }
-    #[allow(clippy::only_used_in_recursion)]
-    fn _visit_fix<'b, 'a: 'b>(
-        _mem: &'b Bump,
-        fix: DocObjFix,
-        state: State<'a>,
-        result: String,
-    ) -> (State<'a>, String) {
-        match fix {
-            DocObjFix::Text(data) => {
-                let state1 = _inc_pos(_text_width(&data), state);
-                (state1, result.clone() + &data)
-            }
-            DocObjFix::Comp(left, right, pad) => {
-                let (state1, result1) = _visit_fix(_mem, *left, state, result);
-                let padding = if pad { 1 } else { 0 };
-                let result2 = _pad(padding, result1);
-                let state2 = _inc_pos(padding, state1);
-                _visit_fix(_mem, *right, state2, result2.clone())
-            }
-        }
-    }
-    let mem = Bump::new();
-    let (_state, result) = _visit_doc(&mem, doc, _make_state(&mem, width, tab));
     result
 }
