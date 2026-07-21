@@ -13,7 +13,12 @@ The project uses automated GitHub Actions workflows for continuous integration, 
 - **Formatting**: `cargo fmt --check` (must pass)
 - **Linting**: `cargo clippy` (warnings allowed, errors blocked)  
 - **Type Checking**: `cargo check --all-targets --all-features`
-- **Testing**: Both Rust (`cargo test`) and OCaml property-based tests
+- **Testing**: Rust tests (`cargo test --all`)
+- **Differential correctness** (`differential` job): builds the OCaml reference
+  oracle (the `typeset` opam package) plus the Rust `unit` binary and compares
+  their rendered output. Runs the grp/seq-biased differential fuzzer
+  (`tests/fuzz.py`) and the QCheck oracle (`tests/run.sh`). This is the primary
+  guard against silent renderer divergence, which uniform QCheck rarely catches.
 
 **Matrix Testing**:
 - Rust stable and MSRV (1.89.0)

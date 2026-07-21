@@ -59,6 +59,51 @@ jobs:
     - uses: actions/checkout@v7
     - uses: EmbarkStudios/cargo-deny-action@v2
 
+  differential:
+    name: Differential (Rust vs OCaml oracle)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: differential
+
+    - name: Setup OCaml
+      uses: ocaml/setup-ocaml@v3
+      with:
+        ocaml-compiler: "5"
+
+    - name: Install OCaml dependencies
+      run: opam install --yes typeset qcheck dune
+
+    # Builds the OCaml reference oracle/tester and the Rust `unit` binary the
+    # differential checks compare. `opam exec` puts dune on PATH; cargo comes
+    # from the Rust toolchain step.
+    - name: Build differential harness
+      run: cd tests && opam exec -- ./build.sh
+
+    # The renderer is the part most prone to silent divergence, so the primary
+    # correctness gate is the differential fuzzer, biased toward the grp/seq
+    # nestings the uniform QCheck generator rarely produces.
+    - name: Differential fuzzer (grp/seq-biased)
+      run: |
+        cd tests
+        for seed in 1 2 3; do
+          echo "--- seed $seed ---"
+          python3 fuzz.py 3000 "$seed"
+        done
+
+    - name: QCheck oracle
+      run: |
+        cd tests
+        for i in 1 2 3; do opam exec -- ./run.sh; done
+
   build:
     name: Build and Test
     needs: [check]
