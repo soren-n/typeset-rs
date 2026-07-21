@@ -31,7 +31,7 @@ fn make_node<'a>(mem: &'a Bump, index: u64, term: &'a GraphTerm<'a>) -> &'a Grap
 // Helper function to create graph edges
 fn make_edge<'a>(
     mem: &'a Bump,
-    prop: Property<()>,
+    prop: Property,
     source: &'a GraphNode<'a>,
     target: &'a GraphNode<'a>,
 ) -> &'a GraphEdge<'a> {
@@ -52,19 +52,19 @@ fn scope_index(scope: &Scope) -> u64 {
     }
 }
 
-fn scope_prop(scope: &Scope) -> Property<()> {
+fn scope_prop(scope: &Scope) -> Property {
     match scope {
-        Scope::Grp(_) => Property::Grp(()),
-        Scope::Seq(_) => Property::Seq(()),
+        Scope::Grp(_) => Property::Grp,
+        Scope::Seq(_) => Property::Seq,
     }
 }
 
 // The scopes open across the current point of a line, keyed by scope index:
 // each records the scope's kind and the node it opened at.
-type OpenScopes = BTreeMap<u64, (Property<()>, u64)>;
+type OpenScopes = BTreeMap<u64, (Property, u64)>;
 // A resolved scope edge: (scope index, kind, from node, to node). Collected per
 // line, then materialized in scope-index order.
-type Edge = (u64, Property<()>, u64, u64);
+type Edge = (u64, Property, u64, u64);
 
 // Applies one composition's scope deltas at `node`: close each scope that ends
 // here (pairing it with its recorded open into an edge), then open each scope

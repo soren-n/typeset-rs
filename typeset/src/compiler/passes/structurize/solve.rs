@@ -95,8 +95,8 @@ fn resolve<'a>(edge: &'a GraphEdge<'a>, outs: &'a GraphEdge<'a>) -> Option<&'a G
         match maybe_curr {
             None => break None,
             Some(curr) => match curr.prop {
-                Property::Grp(()) => break Some(curr),
-                Property::Seq(()) => {
+                Property::Grp => break Some(curr),
+                Property::Seq => {
                     let curr1 = curr.outs_next.get();
                     move_out(curr, edge);
                     edge = curr;

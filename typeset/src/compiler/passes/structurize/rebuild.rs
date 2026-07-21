@@ -75,8 +75,8 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             }
             num
         }
-        fn prop_outs(node: &GraphNode) -> Vec<Property<()>> {
-            let mut props: Vec<Property<()>> = Vec::new();
+        fn prop_outs(node: &GraphNode) -> Vec<Property> {
+            let mut props: Vec<Property> = Vec::new();
             let mut cur = node.outs_head.get();
             while let Some(edge) = cur {
                 props.push(edge.prop);
@@ -95,11 +95,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
     }
     // Composes `partial` into the top continuation, then pushes a grp/seq
     // continuation for each property.
-    fn open<'b>(
-        props: &[Property<()>],
-        mut stack: RStack<'b>,
-        partial: RPartial<'b>,
-    ) -> RStack<'b> {
+    fn open<'b>(props: &[Property], mut stack: RStack<'b>, partial: RPartial<'b>) -> RStack<'b> {
         // Prepend a Partial step onto the current top continuation (a `push`
         // in the reversed-storage convention), then push a fresh single-step
         // continuation per property.
@@ -108,8 +104,8 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         stack.push(top);
         for prop in props {
             stack.push(match prop {
-                Property::Grp(()) => vec![RStep::Grp],
-                Property::Seq(()) => vec![RStep::Seq],
+                Property::Grp => vec![RStep::Grp],
+                Property::Seq => vec![RStep::Seq],
             });
         }
         stack

@@ -13,12 +13,13 @@ use crate::compiler::passes::term_chain::{TermChain, TermSink, TermStep};
 use bumpalo::Bump;
 use std::cell::Cell;
 
-/// A grp or seq scope, carrying a phase-specific payload `T` (unit once the
-/// edge is materialized; scope indices or endpoints while graphify builds it).
+/// The kind of a grp or seq scope edge. (`graphify` tracks scope *indices*
+/// while building the graph via the separate `Scope` type from the shared IR;
+/// once an edge is materialized only its kind matters, which is this.)
 #[derive(Debug, Copy, Clone)]
-pub(super) enum Property<T> {
-    Grp(T),
-    Seq(T),
+pub(super) enum Property {
+    Grp,
+    Seq,
 }
 
 #[derive(Debug)]
@@ -39,7 +40,7 @@ pub(super) struct GraphNode<'a> {
 
 #[derive(Debug)]
 pub(super) struct GraphEdge<'a> {
-    pub prop: Property<()>,
+    pub prop: Property,
     pub ins_next: Cell<Option<&'a GraphEdge<'a>>>,
     pub ins_prev: Cell<Option<&'a GraphEdge<'a>>>,
     pub outs_next: Cell<Option<&'a GraphEdge<'a>>>,
@@ -70,7 +71,7 @@ pub(super) enum GraphFix<'a> {
 pub(super) struct NodeInfo<'a> {
     pub term: &'a GraphTerm<'a>,
     pub in_degree: u64,
-    pub outs: Vec<Property<()>>,
+    pub outs: Vec<Property>,
 }
 
 // `GraphTerm` participates in the shared nest/pack term-chain mapping: graphify

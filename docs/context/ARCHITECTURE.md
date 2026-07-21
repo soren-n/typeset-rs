@@ -25,7 +25,8 @@ custom data-structure layer is gone. Sequences and LIFO working stacks are
 `Vec<T>` (or, when they must outlive a pass in the bump arena, arena slices
 `&'a [T]` built with `alloc_slice_copy`); integer-keyed maps are `HashMap` (the
 renderer's pack marks — point lookup/insert only, no ordering needed) or
-`BTreeMap` (`structurize`'s open-scope property map — see below). The former
+`BTreeMap` (`structurize`'s open-scope map, keyed by scope index — see below).
+The former
 custom `avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
 `cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
 used, have been removed.
@@ -36,7 +37,13 @@ accumulators. Unlike the removed `List`, these are genuinely persistent: at a
 `Comp`/`Line` node both operands capture the same parent accumulator, and comp
 accumulators are also captured into the emitted entries, so the tails are shared
 across branches. A `Vec` would force a clone at every branch, so the shared
-cons-list is the right structure here and stays.
+cons-list is the right structure here and stays. That sharing is also load-
+bearing for speed: `serialize` turns each composition's enclosing-scope list
+into scope open/close *deltas* by diffing it against the previous composition's
+list, and because the two lists share their outer tail by pointer the diff is a
+short longest-common-suffix walk (`CompList` carries a `depth` field for it).
+Carrying deltas — rather than each composition's full enclosing scope stack —
+keeps the grp/seq passes linear on deeply nested scopes instead of O(n^2).
 
 ### Upstream references
 
@@ -46,13 +53,17 @@ source sits at:
 
 - `~/.opam/default/lib/typeset/Typeset.ml` — the compiler passes and renderer
 
-Ordering matters in `structurize`: it feeds the property map's values straight
-into its graph construction, so the values must come out in key order. This is
-why that map is a `BTreeMap` (ascending-key iteration) and not a `HashMap` — the
-in-order guarantee is load-bearing for grp/seq nesting, not just a convenience.
-The map is keyed by small integers and threaded linearly (each update replaces
-the binding; no earlier version is retained), so an owned map mutated in place
-is a faithful replacement for the former persistent map.
+Ordering matters in `structurize`: each grp/seq scope becomes one graph edge,
+and the order edges are created fixes every node's incoming/outgoing edge lists,
+which `solve` and `rebuild` then consume. Scopes arrive as per-composition
+open/close deltas (computed in `serialize`); `graphify` replays them per line —
+an open records a scope's `from` node, a close pairs it with a `to` node — then
+sorts the resulting edges by scope index before materializing them, so the graph
+is always built in a deterministic, ascending-index sequence. That sort is the
+load-bearing ordering guarantee for grp/seq nesting, not just a convenience. The
+still-open scopes are held in a `BTreeMap` keyed by their small integer index;
+the map is threaded linearly (an open inserts, a close removes) and its
+iteration order does not matter, since the edges are sorted explicitly.
 
 ### typeset-parser crate (`typeset-parser/src/`)
 
