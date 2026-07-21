@@ -9,25 +9,31 @@
 //! stacks (`Vec<...Frame>`) instead of stack frames. Borrowing rather than
 //! moving is also what lets [`Doc`](crate::compiler::types::Doc) carry an
 //! iterative `Drop`.
+//!
+//! Pack marks are held in a plain owned [`HashMap`] threaded as `&mut`. The
+//! renderer only ever looks a mark up by index or inserts one, never iterating
+//! in key order, so an unordered map is the right fit. In the real output pass
+//! (`_render_obj`) marks accumulate forward and are never rolled back. The
+//! look-ahead measuring passes (`_measure`/`_next_comp`) must not leak their
+//! marks into the caller, so each records the indices it inserts and removes
+//! them before returning — measurement only ever inserts a mark when the index
+//! is absent, so removing exactly those keys restores the caller's map.
 
 use crate::compiler::types::{Doc, DocObj, DocObjFix};
-use crate::{map::Map, order::total};
-use bumpalo::Bump;
 use std::cmp::max;
+use std::collections::HashMap;
 
 #[derive(Debug, Copy, Clone)]
-struct State<'a> {
+struct State {
     width: usize,
     tab: usize,
     head: bool,
     broken: bool,
     lvl: usize,
     pos: usize,
-    marks: &'a Map<'a, usize, usize>,
 }
 
-fn _make_state<'a>(mem: &'a Bump, width: usize, tab: usize) -> State<'a> {
-    use crate::map;
+fn _make_state(width: usize, tab: usize) -> State {
     State {
         width,
         tab,
@@ -35,7 +41,6 @@ fn _make_state<'a>(mem: &'a Bump, width: usize, tab: usize) -> State<'a> {
         broken: false,
         lvl: 0,
         pos: 0,
-        marks: map::empty(mem),
     }
 }
 
@@ -48,14 +53,14 @@ fn _text_width(data: &str) -> usize {
     data.chars().count()
 }
 
-fn _inc_pos<'a>(n: usize, state: State<'a>) -> State<'a> {
+fn _inc_pos(n: usize, state: State) -> State {
     State {
         pos: state.pos + n,
         ..state
     }
 }
 
-fn _indent<'a>(tab: usize, state: State<'a>) -> State<'a> {
+fn _indent(tab: usize, state: State) -> State {
     if tab == 0 {
         state
     } else {
@@ -65,7 +70,7 @@ fn _indent<'a>(tab: usize, state: State<'a>) -> State<'a> {
     }
 }
 
-fn _newline<'a>(state: State<'a>) -> State<'a> {
+fn _newline(state: State) -> State {
     State {
         head: true,
         pos: 0,
@@ -73,7 +78,7 @@ fn _newline<'a>(state: State<'a>) -> State<'a> {
     }
 }
 
-fn _reset<'a>(state: State<'a>) -> State<'a> {
+fn _reset(state: State) -> State {
     State {
         head: true,
         broken: false,
@@ -82,7 +87,7 @@ fn _reset<'a>(state: State<'a>) -> State<'a> {
     }
 }
 
-fn _get_offset<'a>(state: State<'a>) -> usize {
+fn _get_offset(state: State) -> usize {
     if !state.head {
         0
     } else {
@@ -113,8 +118,12 @@ enum MFrame<'t> {
 }
 
 /// Position at which `obj` finishes if laid out from `state` (iterative fold).
-fn _measure<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize {
-    let mut st: State<'b> = state;
+///
+/// Marks inserted while measuring are undone before returning, so `marks` is
+/// left exactly as the caller passed it.
+fn _measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+    let mut st = state;
+    let mut inserted: Vec<usize> = Vec::new();
     let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
         match frame {
@@ -134,18 +143,17 @@ fn _measure<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize {
                 DocObj::Pack(index, obj1) => {
                     let index = *index as usize;
                     let lvl = st.lvl;
-                    let marks = st.marks;
-                    match marks.lookup(&total, index) {
+                    match marks.get(&index) {
                         None => {
                             let pos = st.pos;
-                            let marks1 = marks.insert(mem, &total, index, pos);
+                            marks.insert(index, pos);
+                            inserted.push(index);
                             st = State {
-                                marks: marks1,
                                 lvl: max(lvl, pos),
                                 ..st
                             };
                         }
-                        Some(lvl1) => {
+                        Some(&lvl1) => {
                             let state1 = State {
                                 lvl: max(lvl, lvl1),
                                 ..st
@@ -184,12 +192,19 @@ fn _measure<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize {
             }
         }
     }
+    for index in inserted {
+        marks.remove(&index);
+    }
     st.pos
 }
 
 /// Position of the next composition boundary reachable from `obj` (iterative).
-fn _next_comp<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize {
-    let mut st: State<'b> = state;
+///
+/// Like [`_measure`], any marks inserted while looking ahead are undone before
+/// returning.
+fn _next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+    let mut st = state;
+    let mut inserted: Vec<usize> = Vec::new();
     let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
         match frame {
@@ -200,7 +215,7 @@ fn _next_comp<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize
                     if st.head {
                         stack.push(MFrame::Obj(obj1));
                     } else {
-                        let end = _measure(mem, obj1, st);
+                        let end = _measure(obj1, st, marks);
                         st = State { pos: end, ..st };
                     }
                 }
@@ -216,18 +231,17 @@ fn _next_comp<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize
                 DocObj::Pack(index, obj1) => {
                     let index = *index as usize;
                     let lvl = st.lvl;
-                    let marks = st.marks;
-                    match marks.lookup(&total, index) {
+                    match marks.get(&index) {
                         None => {
                             let pos = st.pos;
-                            let marks1 = marks.insert(mem, &total, index, pos);
+                            marks.insert(index, pos);
+                            inserted.push(index);
                             st = State {
-                                marks: marks1,
                                 lvl: max(lvl, pos),
                                 ..st
                             };
                         }
-                        Some(lvl1) => {
+                        Some(&lvl1) => {
                             let state1 = State {
                                 lvl: max(lvl, lvl1),
                                 ..st
@@ -261,18 +275,21 @@ fn _next_comp<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: State<'b>) -> usize
             }
         }
     }
+    for index in inserted {
+        marks.remove(&index);
+    }
     st.pos
 }
 
-fn _will_fit<'b>(mem: &'b Bump, obj: &DocObj, state: State<'b>) -> bool {
-    _measure(mem, obj, state) <= state.width
+fn _will_fit(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
+    _measure(obj, state, marks) <= state.width
 }
 
-fn _should_break<'b>(mem: &'b Bump, obj: &DocObj, state: State<'b>) -> bool {
+fn _should_break(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
     if state.broken {
         true
     } else {
-        state.width < _next_comp(mem, obj, state)
+        state.width < _next_comp(obj, state, marks)
     }
 }
 
@@ -294,8 +311,17 @@ enum RFrame<'t> {
 }
 
 /// Render one document object into `result`, threading `state` (iterative).
-fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, result: &mut String) {
-    let mut st: State<'b> = *state;
+///
+/// Unlike the measuring passes, marks inserted here are kept: they accumulate
+/// forward across the whole document exactly as the recursive formulation
+/// threaded them.
+fn _render_obj<'t>(
+    obj: &'t DocObj,
+    state: &mut State,
+    marks: &mut HashMap<usize, usize>,
+    result: &mut String,
+) {
+    let mut st = *state;
     let mut stack: Vec<RFrame<'t>> = vec![RFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
         match frame {
@@ -315,7 +341,7 @@ fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, re
                     stack.push(RFrame::Obj(obj1));
                 }
                 DocObj::Seq(obj1) => {
-                    if _will_fit(mem, obj1, st) {
+                    if _will_fit(obj1, st, marks) {
                         stack.push(RFrame::Obj(obj1));
                     } else {
                         let broken = st.broken;
@@ -336,18 +362,16 @@ fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, re
                 DocObj::Pack(index, obj1) => {
                     let index = *index as usize;
                     let lvl = st.lvl;
-                    let marks = st.marks;
-                    match marks.lookup(&total, index) {
+                    match marks.get(&index) {
                         None => {
                             let pos = st.pos;
-                            let marks1 = marks.insert(mem, &total, index, pos);
+                            marks.insert(index, pos);
                             st = State {
-                                marks: marks1,
                                 lvl: max(lvl, pos),
                                 ..st
                             };
                         }
-                        Some(lvl1) => {
+                        Some(&lvl1) => {
                             let state1 = State {
                                 lvl: max(lvl, lvl1),
                                 ..st
@@ -384,7 +408,7 @@ fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, re
                     head: false,
                     .._inc_pos(if pad { 1 } else { 0 }, state1)
                 };
-                if _should_break(mem, right, state3) {
+                if _should_break(right, state3, marks) {
                     let state2 = _newline(state1);
                     let offset = _get_offset(state2);
                     st = _inc_pos(offset, state2);
@@ -421,8 +445,8 @@ fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, re
 /// # Returns
 /// A formatted string representation of the document
 pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
-    let mem = Bump::new();
-    let mut st = _make_state(&mem, width, tab);
+    let mut st = _make_state(width, tab);
+    let mut marks: HashMap<usize, usize> = HashMap::new();
     let mut result = String::new();
     // The document spine (`Empty` / `Break` / `Line` / `Eod`) is a linear list,
     // so it is walked with a plain loop rather than recursion. `marks` and `lvl`
@@ -438,12 +462,12 @@ pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
                 node = doc1;
             }
             Doc::Break(obj, doc1) => {
-                _render_obj(&mem, obj, &mut st, &mut result);
+                _render_obj(obj, &mut st, &mut marks, &mut result);
                 result.push('\n');
                 node = doc1;
             }
             Doc::Line(obj) => {
-                _render_obj(&mem, obj, &mut st, &mut result);
+                _render_obj(obj, &mut st, &mut marks, &mut result);
                 break;
             }
         }
