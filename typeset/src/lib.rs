@@ -152,7 +152,6 @@
 
 mod compiler;
 mod list;
-mod util;
 
 pub use self::compiler::{
     // Error handling

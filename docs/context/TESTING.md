@@ -45,8 +45,8 @@ OCaml QCheck suite (below) that validates rendering against the reference.
 
 **Known coverage gap**: the QCheck generator picks constructors close to
 uniformly, so it almost never produces the stacked `grp`/`seq` nestings where
-breaking decisions actually diverge. The `grp(seq(x))` bug fixed in `to_list`
-survived 15 consecutive clean runs of this suite. Passing runs here are not
+breaking decisions actually diverge. The historical `grp(seq(x))` map-ordering
+bug survived 15 consecutive clean runs of this suite. Passing runs here are not
 evidence that breaking semantics are correct — use the differential tools below
 for that.
 

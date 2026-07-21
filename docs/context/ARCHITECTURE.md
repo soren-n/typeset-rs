@@ -18,13 +18,14 @@ This is a Rust workspace containing two main crates:
   - `render/`: Text rendering engine
   - `types/`: Core data structures (Layout, Doc, intermediate representations)
 - `list.rs`: Persistent (bump-allocated, structurally-shared) singly-linked list
-  used by the compiler passes; `util.rs`: supporting utilities
+  used by the compiler passes (`structurize`, `rescope`)
 
 Integer-keyed maps use standard-library collections: the renderer's pack marks
 are a `HashMap` (point lookup/insert only, no ordering needed), and
 `structurize`'s open-scope property map is a `BTreeMap` (see below). The former
 custom `avl.rs`/`map.rs`/`order.rs` layer (a faithful port of the OCaml
-`cps_toolbox` AVL/Map) has been removed.
+`cps_toolbox` AVL/Map), and the `util.rs` closure-composition helper that only
+its list folds used, have been removed.
 
 ### Upstream references
 

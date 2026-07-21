@@ -268,11 +268,12 @@ fn test_edge_cases() {
 /// A `seq` nested directly inside a `grp` must still coordinate every
 /// composition in the sequence: if one breaks, all break.
 ///
-/// This regressed because `avl::to_list` did not produce in-order output, so
-/// `Map::values` handed the structurize pass the grp/seq properties in reverse
-/// index order and the rebuilt tree came out as `Seq(Grp(..))` instead of
-/// `Grp(Seq(..))`. The renderer resets the break state at a `Grp`, so the
-/// sequence lost its decision and broke only partially.
+/// This regressed once when the structurize property map handed its values to
+/// the graph pass in reverse index order, so the rebuilt tree came out as
+/// `Seq(Grp(..))` instead of `Grp(Seq(..))`. The renderer resets the break
+/// state at a `Grp`, so the sequence lost its decision and broke only
+/// partially. The map is now a `BTreeMap`, whose `values()` are ascending by
+/// key, which is the order this pass depends on.
 #[test]
 fn test_seq_inside_grp_breaks_all_or_nothing() {
     let layout = grp(seq(comp(
