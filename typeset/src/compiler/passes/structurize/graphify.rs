@@ -104,22 +104,22 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
     fn update(
         node: u64,
         mut props: Graph,
-        scope: &[Property<u64>],
+        scope: &mut Vec<Property<u64>>,
         stack: &[Property<u64>],
-    ) -> (Vec<Property<u64>>, Graph) {
+    ) -> Graph {
         // Walk scope and stack in lockstep: matching grp/seq scopes are kept
         // (the common prefix `scope[..k]`); the first divergence closes the
         // remaining scope and opens the remaining stack.
         let mut k = 0;
-        let rest_stack: &[Property<u64>] = loop {
+        loop {
             match (scope.get(k), stack.get(k)) {
                 (_, None) => {
                     props = close(node, props, &scope[k..]);
-                    break &[];
+                    break;
                 }
                 (None, _) => {
                     props = open(node, props, &stack[k..]);
-                    break &stack[k..];
+                    break;
                 }
                 (Some(sp), Some(stp)) => {
                     let matched = match (sp, stp) {
@@ -142,15 +142,21 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     } else {
                         props = close(node, props, &scope[k..]);
                         props = open(node, props, &stack[k..]);
-                        break &stack[k..];
+                        break;
                     }
                 }
             }
-        };
-        // The new scope is the matched common prefix followed by the rest.
-        let mut result = scope[..k].to_vec();
-        result.extend_from_slice(rest_stack);
-        (result, props)
+        }
+        // Rebuild the scope stack in place: keep the matched common prefix
+        // `scope[..k]` and append the diverging `stack[k..]`. `truncate` drops
+        // no elements (Property is Copy), so this costs O(|stack[k..]|) and
+        // allocates nothing, where a fresh `scope[..k].to_vec()` was O(|scope|)
+        // plus a per-node allocation. This trims the constant factor only; the
+        // lockstep comparison above is still O(|scope|) per node, so deeply
+        // nested scopes remain O(n^2) overall (see the module docs).
+        scope.truncate(k);
+        scope.extend_from_slice(&stack[k..]);
+        props
     }
     fn transpose<'a>(
         mem: &'a Bump,
@@ -253,8 +259,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     let term1 = match item {
                         FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
-                            let (fix1, scope1, props1) = visit_fix(mem, fix, index, scope, props);
-                            scope = scope1;
+                            let (fix1, props1) = visit_fix(mem, fix, index, &mut scope, props);
                             props = props1;
                             mem.alloc(GraphTerm::Fix(fix1))
                         }
@@ -262,9 +267,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     nodes_vec.push(make_node(mem, index, term1));
                     let (stack, pad) = lift_stack(comp);
                     pads_vec.push(pad);
-                    let (scope2, props2) = update(index, props, &scope, &stack);
-                    scope = scope2;
-                    props = props2;
+                    props = update(index, props, &mut scope, &stack);
                     index += 1;
                     cur = obj1;
                 }
@@ -272,8 +275,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     let term1 = match item {
                         FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
-                            let (fix1, scope1, props1) = visit_fix(mem, fix, index, scope, props);
-                            scope = scope1;
+                            let (fix1, props1) = visit_fix(mem, fix, index, &mut scope, props);
                             props = props1;
                             mem.alloc(GraphTerm::Fix(fix1))
                         }
@@ -293,9 +295,9 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         mem: &'b Bump,
         fix: &'a FixedFix<'a>,
         index: u64,
-        mut scope: Vec<Property<u64>>,
+        scope: &mut Vec<Property<u64>>,
         mut props: Graph,
-    ) -> (&'b GraphFix<'b>, Vec<Property<u64>>, Graph) {
+    ) -> (&'b GraphFix<'b>, Graph) {
         // Walk the fix chain forward, threading scope/props; rebuild the
         // GraphFix bottom-up from the recorded (term, pad) pairs.
         let mut recorded: Vec<(&'b GraphTerm<'b>, bool)> = Vec::new();
@@ -305,10 +307,8 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                 FixedFix::Next(term, comp, fix1) => {
                     let term1 = map_term_chain(mem, *term);
                     let (stack, pad) = lift_stack(comp);
-                    let (scope1, props1) = update(index, props, &scope, &stack);
+                    props = update(index, props, scope, &stack);
                     recorded.push((term1, pad));
-                    scope = scope1;
-                    props = props1;
                     cur = fix1;
                 }
                 FixedFix::Last(term) => break map_term_chain(mem, *term),
@@ -318,7 +318,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         for &(term1, pad) in recorded.iter().rev() {
             gfix = mem.alloc(GraphFix::Next(term1, gfix, pad));
         }
-        (gfix, scope, props)
+        (gfix, props)
     }
     visit_doc(mem, doc)
 }

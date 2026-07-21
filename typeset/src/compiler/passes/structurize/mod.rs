@@ -4,6 +4,17 @@
 //! 1. [`graphify`] — FixedDoc → GraphDoc: build the grp/seq scope graph.
 //! 2. [`solve`]    — GraphDoc → GraphDoc: resolve the scope graph in place.
 //! 3. [`rebuild`]  — GraphDoc → RebuildDoc: rebuild the composition spine.
+//!
+//! Known O(n^2): deeply *nested* grp/seq scopes (e.g. `seq(a + seq(b + …))`)
+//! are quadratic — but the cost is in `graphify`, not `solve`. Each
+//! composition point carries its entire enclosing scope stack (materialized
+//! per-comp, without sharing, back in `serialize`'s `apply_comps`), so
+//! `graphify`'s `lift_stack` + `update` do O(depth) work at every node,
+//! summing to O(n^2). `solve`'s edge splices stay O(1) and rebuild is linear.
+//! A flat comp line or independent sibling scopes are already linear. A real
+//! fix is representational: carry scope open/close *deltas* through
+//! serialize → linearize → fixed → graphify instead of the full stack per
+//! comp — a cross-pass change, not a local one.
 
 mod graph;
 mod graphify;
@@ -34,9 +45,10 @@ mod tests {
     #[test]
     fn structurize_handles_deep_comp_line() {
         let mem = Bump::new();
-        // A single line of many plain compositions (no grp/seq scopes). Indexed
-        // node access in solve/rebuild makes this path O(n^2), so use a depth
-        // that is well past the ~400-level overflow threshold but still quick.
+        // A single line of many plain compositions (no grp/seq scopes). This
+        // path is linear (no scope stacks to carry), so a large depth well past
+        // the ~400-level native-recursion overflow threshold stays quick and
+        // still proves the phases iterate rather than recurse.
         let depth = 20_000usize;
         let mut obj: &FixedObj = mem.alloc(FixedObj::Last(
             mem.alloc(FixedItem::Term(mem.alloc(Term::Text("z")))),
