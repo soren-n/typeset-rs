@@ -1,7 +1,6 @@
 use super::layout::Attr;
 use crate::list::List;
 use std::cell::Cell;
-use std::fmt;
 
 // First intermediate representation: Broken
 #[derive(Debug)]
@@ -207,17 +206,6 @@ pub enum RebuildTerm<'a> {
     Pack(u64, &'a RebuildTerm<'a>),
 }
 
-#[derive(Copy, Clone)]
-pub struct RebuildCont<'a>(
-    pub &'a dyn Fn(&'a bumpalo::Bump, &'a RebuildObj<'a>) -> &'a RebuildObj<'a>,
-);
-
-impl<'a> fmt::Debug for RebuildCont<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "RebuildCont(<fn>)")
-    }
-}
-
 // Seventh intermediate representation: DenullDoc
 #[derive(Debug)]
 pub enum DenullDoc<'a> {
@@ -279,10 +267,5 @@ pub enum FinalDocObjFix<'a> {
 pub type GraphTermList<'b> = &'b List<'b, &'b GraphTerm<'b>>;
 pub type U64List<'b> = &'b List<'b, u64>;
 pub type PropertyListList<'b> = &'b List<'b, &'b List<'b, Property<()>>>;
-pub type TermTransformer<'b> =
-    &'b dyn Fn(&'b bumpalo::Bump, GraphTermList<'b>) -> GraphTermList<'b>;
-pub type U64Transformer<'b> = &'b dyn Fn(&'b bumpalo::Bump, U64List<'b>) -> U64List<'b>;
-pub type PropertyTransformer<'b> =
-    &'b dyn Fn(&'b bumpalo::Bump, PropertyListList<'b>) -> PropertyListList<'b>;
 
 pub type TopologyResult<'b> = (GraphTermList<'b>, U64List<'b>, PropertyListList<'b>);
