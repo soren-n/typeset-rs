@@ -1,21 +1,8 @@
 use super::layout::Attr;
-use std::cell::Cell;
 
-// First intermediate representation: Broken
-#[derive(Debug)]
-pub enum Broken<'a> {
-    Null,
-    Text(&'a str),
-    Fix(&'a Broken<'a>),
-    Grp(&'a Broken<'a>),
-    Seq(bool, &'a Broken<'a>),
-    Nest(&'a Broken<'a>),
-    Pack(&'a Broken<'a>),
-    Line(&'a Broken<'a>, &'a Broken<'a>),
-    Comp(&'a Broken<'a>, &'a Broken<'a>, Attr),
-}
-
-// Second intermediate representation: Edsl
+// First intermediate representation: Edsl. (`Broken`, the internal step the
+// `broken` pass lowers Layout through on the way to `Edsl`, lives privately in
+// that pass rather than here.)
 #[derive(Debug)]
 pub enum Edsl<'a> {
     Null,
@@ -112,56 +99,6 @@ pub enum FixedFix<'a> {
     Last(&'a Term<'a>),
 }
 
-// Property type for graph algorithms
-#[derive(Debug, Copy, Clone)]
-pub enum Property<T> {
-    Grp(T),
-    Seq(T),
-}
-
-// Graph representation types
-#[derive(Debug)]
-pub enum GraphDoc<'a> {
-    Eod,
-    Break(&'a [&'a GraphNode<'a>], &'a [bool], &'a GraphDoc<'a>),
-}
-
-#[derive(Debug)]
-pub struct GraphNode<'a> {
-    pub index: u64,
-    pub term: &'a GraphTerm<'a>,
-    pub ins_head: Cell<Option<&'a GraphEdge<'a>>>,
-    pub ins_tail: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_head: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_tail: Cell<Option<&'a GraphEdge<'a>>>,
-}
-
-#[derive(Debug)]
-pub struct GraphEdge<'a> {
-    pub prop: Property<()>,
-    pub ins_next: Cell<Option<&'a GraphEdge<'a>>>,
-    pub ins_prev: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_next: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_prev: Cell<Option<&'a GraphEdge<'a>>>,
-    pub source: Cell<&'a GraphNode<'a>>,
-    pub target: Cell<&'a GraphNode<'a>>,
-}
-
-#[derive(Debug)]
-pub enum GraphTerm<'a> {
-    Null,
-    Text(&'a str),
-    Fix(&'a GraphFix<'a>),
-    Nest(&'a GraphTerm<'a>),
-    Pack(u64, &'a GraphTerm<'a>),
-}
-
-#[derive(Debug)]
-pub enum GraphFix<'a> {
-    Last(&'a GraphTerm<'a>),
-    Next(&'a GraphTerm<'a>, &'a GraphFix<'a>, bool),
-}
-
 // Sixth intermediate representation: RebuildDoc
 #[derive(Debug)]
 pub enum RebuildDoc<'a> {
@@ -239,14 +176,4 @@ pub enum FinalDocObj<'a> {
 pub enum FinalDocObjFix<'a> {
     Text(&'a str),
     Comp(&'a FinalDocObjFix<'a>, &'a FinalDocObjFix<'a>, bool),
-}
-
-/// Per-node data the rebuild pass reads from the solved scope graph: the node's
-/// term, its in-degree, and its out-properties. Owned and transient within that
-/// pass. One `NodeInfo` per graph node, in node-index order.
-#[derive(Debug)]
-pub struct NodeInfo<'a> {
-    pub term: &'a GraphTerm<'a>,
-    pub in_degree: u64,
-    pub outs: Vec<Property<()>>,
 }

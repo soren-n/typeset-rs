@@ -3,11 +3,9 @@
 //! Walks the fixed spine, assigns a node index per item, and materializes the
 //! grp/seq scopes as graph edges (the scope graph that `solve` then resolves).
 
+use super::graph::{GraphDoc, GraphEdge, GraphFix, GraphNode, GraphTerm, Property};
 use crate::compiler::passes::term_chain::map_term_chain;
-use crate::compiler::types::{
-    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, GraphDoc, GraphEdge, GraphFix, GraphNode,
-    GraphTerm, Property,
-};
+use crate::compiler::types::{FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj};
 use bumpalo::Bump;
 use std::cell::Cell;
 use std::collections::BTreeMap;

@@ -3,11 +3,9 @@
 //! Reads the solved scope graph per line and rebuilds an explicit composition
 //! spine (grp/seq wrappers and left compositions) as a RebuildDoc.
 
+use super::graph::{GraphDoc, GraphFix, GraphNode, GraphTerm, NodeInfo, Property};
 use crate::compiler::passes::term_chain::map_term_chain;
-use crate::compiler::types::{
-    GraphDoc, GraphFix, GraphNode, GraphTerm, NodeInfo, Property, RebuildDoc, RebuildFix,
-    RebuildObj, Term,
-};
+use crate::compiler::types::{RebuildDoc, RebuildFix, RebuildObj, Term};
 use bumpalo::Bump;
 
 // Defunctionalized rebuild continuations (replacing the `partial` closure and

@@ -9,9 +9,26 @@
 //! hundred nesting levels), each stage walks the tree with an explicit
 //! heap-allocated frame stack and a descend/ascend trampoline.
 
-use crate::compiler::types::{Attr, Broken, Edsl, Layout};
+use crate::compiler::types::{Attr, Edsl, Layout};
 use bumpalo::Bump;
 use std::mem;
+
+/// Internal representation the `broken` pass lowers `Layout` through on the way
+/// to `Edsl`: like `Edsl` but with a `Seq` that records whether its subtree
+/// contains a hard line break (the flag `mark` propagates and `remove` reads).
+/// Private to this pass — no later pass sees it.
+#[derive(Debug)]
+enum Broken<'a> {
+    Null,
+    Text(&'a str),
+    Fix(&'a Broken<'a>),
+    Grp(&'a Broken<'a>),
+    Seq(bool, &'a Broken<'a>),
+    Nest(&'a Broken<'a>),
+    Pack(&'a Broken<'a>),
+    Line(&'a Broken<'a>, &'a Broken<'a>),
+    Comp(&'a Broken<'a>, &'a Broken<'a>, Attr),
+}
 
 /// Transforms Layout into Edsl by collapsing broken sequences
 pub fn broken<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Edsl<'b> {

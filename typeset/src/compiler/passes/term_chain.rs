@@ -4,12 +4,13 @@
 //! next representation's arena, and a term is always a linear chain of
 //! `Nest`/`Pack` wrappers over a `Null`/`Text` leaf. Most passes keep the shared
 //! [`Term`] type on both sides; graphify/rebuild convert between `Term` and
-//! [`GraphTerm`]. That strip-and-rebuild is identical modulo the source and
-//! destination enums. [`map_term_chain`] captures the one shape; [`TermChain`]
-//! classifies each step of the input and [`TermSink`] abstracts the leaf/wrapper
+//! structurize's `GraphTerm` (whose `TermChain`/`TermSink` impls live with that
+//! type). That strip-and-rebuild is identical modulo the source and destination
+//! enums. [`map_term_chain`] captures the one shape; [`TermChain`] classifies
+//! each step of the input and [`TermSink`] abstracts the leaf/wrapper
 //! constructors of the output.
 
-use crate::compiler::types::{GraphTerm, Term};
+use crate::compiler::types::Term;
 use bumpalo::Bump;
 
 /// One step down a term chain toward its leaf: either the `Null`/`Text` leaf,
@@ -85,18 +86,6 @@ impl<'a> TermChain<'a> for Term<'a> {
     }
 }
 
-impl<'a> TermChain<'a> for GraphTerm<'a> {
-    fn step(&'a self) -> TermStep<'a, Self> {
-        match self {
-            GraphTerm::Null => TermStep::Null,
-            GraphTerm::Text(data) => TermStep::Text(data),
-            GraphTerm::Nest(term1) => TermStep::Nest(term1),
-            GraphTerm::Pack(index, term1) => TermStep::Pack(*index, term1),
-            GraphTerm::Fix(_fix) => unreachable!("Invariant"),
-        }
-    }
-}
-
 impl<'b> TermSink<'b> for Term<'b> {
     fn null(mem: &'b Bump) -> &'b Self {
         mem.alloc(Term::Null)
@@ -109,20 +98,5 @@ impl<'b> TermSink<'b> for Term<'b> {
     }
     fn pack(mem: &'b Bump, index: u64, inner: &'b Self) -> &'b Self {
         mem.alloc(Term::Pack(index, inner))
-    }
-}
-
-impl<'b> TermSink<'b> for GraphTerm<'b> {
-    fn null(mem: &'b Bump) -> &'b Self {
-        mem.alloc(GraphTerm::Null)
-    }
-    fn text(mem: &'b Bump, data: &'b str) -> &'b Self {
-        mem.alloc(GraphTerm::Text(data))
-    }
-    fn nest(mem: &'b Bump, inner: &'b Self) -> &'b Self {
-        mem.alloc(GraphTerm::Nest(inner))
-    }
-    fn pack(mem: &'b Bump, index: u64, inner: &'b Self) -> &'b Self {
-        mem.alloc(GraphTerm::Pack(index, inner))
     }
 }

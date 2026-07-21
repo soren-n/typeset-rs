@@ -5,6 +5,7 @@
 //! 2. [`solve`]    — GraphDoc → GraphDoc: resolve the scope graph in place.
 //! 3. [`rebuild`]  — GraphDoc → RebuildDoc: rebuild the composition spine.
 
+mod graph;
 mod graphify;
 mod rebuild;
 mod solve;

@@ -4,7 +4,7 @@
 //! incoming scope edges past any seq edges, leaving a graph the rebuild phase
 //! can walk as a plain composition spine.
 
-use crate::compiler::types::{GraphDoc, GraphEdge, GraphNode, Property};
+use super::graph::{GraphDoc, GraphEdge, GraphNode, Property};
 use bumpalo::Bump;
 
 fn move_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
