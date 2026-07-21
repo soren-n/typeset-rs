@@ -106,7 +106,7 @@ use crate::compiler::{
         broken, denull, fixed, identities, linearize, move_to_heap, reassociate, rescope,
         serialize, structurize,
     },
-    render::render as render_doc,
+    render::{render as render_doc, render_ref as render_ref_doc},
     types::{Doc, Layout},
 };
 
@@ -617,8 +617,11 @@ pub fn compile_safe_with_depth(
 ///
 /// This is the final step in the pretty printing process. It takes a compiled [`Doc`] structure
 /// and produces the final formatted text output according to the specified formatting parameters.
-/// The rendering process is deterministic and can be called multiple times with different
-/// parameters without recompilation.
+/// The rendering process is deterministic.
+///
+/// This variant consumes the document. To render the same document more than
+/// once (for example at several widths) without cloning it, use [`render_ref()`]
+/// instead.
 ///
 /// The renderer implements sophisticated line breaking algorithms that respect the layout
 /// decisions made during compilation while applying the final formatting constraints.
@@ -652,7 +655,7 @@ pub fn compile_safe_with_depth(
 ///
 /// - **Time**: O(n) where n is the size of the final output text
 /// - **Memory**: O(n) for the output string allocation
-/// - **Reusability**: Same document can be rendered multiple times with different parameters
+/// - **Reusability**: Render the same document multiple times via [`render_ref()`]
 /// - **No Side Effects**: Pure function with no global state or side effects
 ///
 /// # Formatting Behavior
@@ -682,15 +685,15 @@ pub fn compile_safe_with_depth(
 /// ## Comparing Different Tab Widths
 ///
 /// ```rust
-/// use typeset::{compile, render, text, nest};
+/// use typeset::{compile, render_ref, text, nest};
 ///
 /// let layout = nest(text("indented content".to_string()));
 /// let doc = compile(layout);
 ///
-/// // Compare different indentation widths
-/// let narrow = render(doc.clone(), 2, 80);
-/// let standard = render(doc.clone(), 4, 80);
-/// let wide = render(doc, 8, 80);
+/// // Compare different indentation widths by borrowing the same document.
+/// let narrow = render_ref(&doc, 2, 80);
+/// let standard = render_ref(&doc, 4, 80);
+/// let wide = render_ref(&doc, 8, 80);
 ///
 /// // Each will have different indentation spacing
 /// ```
@@ -698,7 +701,7 @@ pub fn compile_safe_with_depth(
 /// ## Width Constraint Comparison
 ///
 /// ```rust
-/// use typeset::{compile, render, text, comp};
+/// use typeset::{compile, render_ref, text, comp};
 ///
 /// let layout = comp(
 ///     text("This is a long line that might need".to_string()),
@@ -708,10 +711,10 @@ pub fn compile_safe_with_depth(
 /// let doc = compile(layout);
 ///
 /// // Narrow width forces breaking
-/// let narrow = render(doc.clone(), 2, 40);
+/// let narrow = render_ref(&doc, 2, 40);
 ///
 /// // Wide width allows single line
-/// let wide = render(doc, 2, 120);
+/// let wide = render_ref(&doc, 2, 120);
 ///
 /// println!("Narrow (40 chars):\n{}", narrow);
 /// println!("Wide (120 chars):\n{}", wide);
@@ -720,7 +723,7 @@ pub fn compile_safe_with_depth(
 /// ## Complex Document Rendering
 ///
 /// ```rust
-/// use typeset::{compile, render, text, comp, nest, grp};
+/// use typeset::{compile, render_ref, text, comp, nest, grp};
 ///
 /// // Build a function definition layout
 /// let function_layout = grp(comp(
@@ -743,9 +746,9 @@ pub fn compile_safe_with_depth(
 ///
 /// let doc = compile(function_layout);
 ///
-/// // Render with different formatting styles
-/// let compact = render(doc.clone(), 2, 60);
-/// let spacious = render(doc, 4, 100);
+/// // Render with different formatting styles from one compiled document.
+/// let compact = render_ref(&doc, 2, 60);
+/// let spacious = render_ref(&doc, 4, 100);
 ///
 /// println!("Compact style:\n{}", compact);
 /// println!("Spacious style:\n{}", spacious);
@@ -754,7 +757,7 @@ pub fn compile_safe_with_depth(
 /// ## Batch Rendering with Different Parameters
 ///
 /// ```rust
-/// use typeset::{compile, render, text, comp, nest};
+/// use typeset::{compile, render_ref, text, comp, nest};
 ///
 /// let layout = nest(comp(
 ///     text("if condition {".to_string()),
@@ -772,7 +775,7 @@ pub fn compile_safe_with_depth(
 /// ];
 ///
 /// for (name, tab, width) in configurations {
-///     let output = render(doc.clone(), tab, width);
+///     let output = render_ref(&doc, tab, width);
 ///     println!("{} format:\n{}\n", name, output);
 /// }
 /// ```
@@ -803,6 +806,44 @@ pub fn compile_safe_with_depth(
 /// - [Layout constructors](crate#layout-constructors) - Functions for building layouts
 pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
     render_doc(doc, tab, width)
+}
+
+/// Renders a compiled document by reference, without consuming it
+///
+/// This is the borrowing counterpart to [`render()`]. Because rendering only
+/// reads the document, this lets you render the same compiled [`Doc`] multiple
+/// times — for example at several widths — without cloning or recompiling it.
+///
+/// # Arguments
+///
+/// * `doc` - The compiled document to render, borrowed
+/// * `tab` - Number of spaces per indentation level
+/// * `width` - Maximum line width for line breaking, counted in characters
+///
+/// # Returns
+///
+/// A [`String`] containing the formatted output, identical to what
+/// [`render()`] would produce for the same document and parameters.
+///
+/// # Examples
+///
+/// ```rust
+/// use typeset::{compile, render_ref, text, comp};
+///
+/// let doc = compile(comp(
+///     text("hello".to_string()),
+///     text("world".to_string()),
+///     true, false,
+/// ));
+///
+/// // Render the same document at several widths without cloning it.
+/// let narrow = render_ref(&doc, 2, 5);
+/// let wide = render_ref(&doc, 2, 80);
+/// assert!(narrow.contains('\n'));
+/// assert_eq!(wide, "hello world");
+/// ```
+pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
+    render_ref_doc(doc, tab, width)
 }
 
 #[cfg(test)]
@@ -885,6 +926,24 @@ mod tests {
         let output = render(doc, 2, 1);
         assert!(output.contains('\n'));
         assert!(output.ends_with('b'));
+    }
+
+    #[test]
+    fn render_ref_matches_render_and_is_reusable() {
+        let layout = comp(
+            text("hello".to_string()),
+            text("world".to_string()),
+            true,
+            false,
+        );
+        let doc = compile(layout);
+        // Borrowing renders the same document repeatedly without moving it.
+        let a = render_ref(&doc, 2, 5);
+        let b = render_ref(&doc, 2, 80);
+        assert_eq!(b, "hello world");
+        assert!(a.contains('\n'));
+        // Consuming render produces identical output to the borrowing variant.
+        assert_eq!(render(doc, 2, 80), b);
     }
 
     #[test]

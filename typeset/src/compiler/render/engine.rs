@@ -407,7 +407,11 @@ fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, re
     *state = st;
 }
 
-/// Renders a compiled document into a formatted string
+/// Renders a compiled document into a formatted string, borrowing it.
+///
+/// The renderer only reads the document, so this is the primary entry point: it
+/// takes `&Doc` and can be called repeatedly on the same document (e.g. to
+/// render at several widths) without cloning it.
 ///
 /// # Arguments
 /// * `doc` - The compiled document to render
@@ -416,7 +420,7 @@ fn _render_obj<'t, 'b>(mem: &'b Bump, obj: &'t DocObj, state: &mut State<'b>, re
 ///
 /// # Returns
 /// A formatted string representation of the document
-pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
+pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
     let mem = Bump::new();
     let mut st = _make_state(&mem, width, tab);
     let mut result = String::new();
@@ -424,7 +428,7 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
     // so it is walked with a plain loop rather than recursion. `marks` and `lvl`
     // survive `_reset`, so they carry across lines exactly as the recursive
     // formulation threaded them.
-    let mut node: &Doc = &doc;
+    let mut node: &Doc = doc;
     loop {
         st = _reset(st);
         match node {
@@ -445,4 +449,21 @@ pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
         }
     }
     result
+}
+
+/// Renders a compiled document into a formatted string, consuming it.
+///
+/// Convenience wrapper over [`render_ref`] for the common case of rendering a
+/// document once. When rendering the same document more than once, prefer
+/// [`render_ref`] to avoid moving (or cloning) it.
+///
+/// # Arguments
+/// * `doc` - The compiled document to render
+/// * `tab` - Tab size for indentation
+/// * `width` - Target line width for formatting
+///
+/// # Returns
+/// A formatted string representation of the document
+pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
+    render_ref(&doc, tab, width)
 }

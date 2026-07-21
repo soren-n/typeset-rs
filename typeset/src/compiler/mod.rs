@@ -35,7 +35,7 @@ pub use types::{Doc, Layout};
 // Legacy implementation removed - now using modular architecture
 
 // Re-export the main compilation functions using new modular pipeline
-pub use pipeline::{compile, compile_safe, compile_safe_with_depth, render};
+pub use pipeline::{compile, compile_safe, compile_safe_with_depth, render, render_ref};
 
 // Re-export constructor functions using new modular types
 // pub use constructors::{

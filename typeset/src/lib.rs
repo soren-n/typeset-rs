@@ -166,6 +166,7 @@ pub use self::compiler::{
 
     // Rendering
     render,
+    render_ref,
 };
 
 // Re-export constructor functions
