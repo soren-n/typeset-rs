@@ -10,9 +10,10 @@
 //!
 //! Each intermediate pass allocates its output in a fresh bump arena; the final
 //! pass ([`rescope`](crate::compiler::passes::rescope)) builds the owned heap
-//! [`Doc`] directly. The whole pipeline — passes, renderer, and dropping the
-//! [`Doc`] — is iterative, so it runs in constant native stack and deep layouts
-//! never overflow it. Depth shows up as O(depth) heap instead.
+//! [`Doc`] directly. The passes and renderer are iterative, and the output
+//! [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop` are non-recursive
+//! by construction, so the whole pipeline runs in constant native stack and deep
+//! layouts never overflow it. Depth shows up as O(depth) heap instead.
 //!
 //! Two entry points: [`compile`] is infallible (the fast path — the pipeline is
 //! iterative, so no layout is too deep and there is no depth cap);

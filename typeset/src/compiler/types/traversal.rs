@@ -1,21 +1,23 @@
-//! Shared iterative traversal machinery for the recursive `Box`-tree types.
+//! Iterative traversal machinery for the input `Layout` tree.
 //!
-//! `Layout`, `Doc`, `DocObj`, and `DocObjFix` are all deep recursive trees, so
-//! the compiler-generated `Drop` — which recurses down the `Box` chain — would
-//! overflow the native stack when a deep value goes out of scope. Each type
-//! instead frees itself with a heap-allocated worklist. The worklist *driver*
-//! is identical across all of them and lives here once; only the per-type step
-//! that moves a node's children onto the worklist differs.
+//! `Layout` is a deep `Box`-recursive tree, so the compiler-generated `Drop` —
+//! which recurses down the `Box` chain — would overflow the native stack when a
+//! deep value goes out of scope. `Layout` instead frees itself with a
+//! heap-allocated worklist. The worklist *driver* lives here as a trait so the
+//! per-type dismantling step stays separate from the fixed drain loop.
+//!
+//! (The output `Doc` used to share this machinery, but it is now a flat
+//! `Vec`-backed arena whose `Drop` is derived and non-recursive by construction,
+//! so `Layout` is the sole implementor.)
 
 /// A recursive tree freed iteratively via a heap worklist.
 ///
 /// Implementors provide [`dismantle`](DismantleTree::dismantle), which moves a
-/// node's same-typed children onto the worklist (taking them out of their
-/// `Box` and leaving a leaf placeholder), so the child's own `Box` drop
-/// terminates in O(1). Cross-typed children (e.g. a `DocObj` inside a `Doc`)
-/// are left in place and freed by their own type's iterative `Drop`.
+/// node's children onto the worklist (taking them out of their `Box` and
+/// leaving a leaf placeholder), so the child's own `Box` drop terminates in
+/// O(1).
 ///
-/// The `Drop` impl of each type is then just `self.drain()`.
+/// The `Drop` impl is then just `self.drain()`.
 pub(crate) trait DismantleTree: Sized {
     /// Move this node's same-typed children onto `stack`, leaving leaves in
     /// their place.
