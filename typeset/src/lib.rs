@@ -150,11 +150,8 @@
 // hard error under `cargo doc`, so broken references cannot silently rot.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-mod avl;
 mod compiler;
 mod list;
-mod map;
-mod order;
 mod util;
 
 pub use self::compiler::{
