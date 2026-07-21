@@ -6,41 +6,38 @@
 //! recursive/continuation version could exhaust on deep inputs.
 
 use super::term_chain::map_term_chain;
-use crate::compiler::types::{LinearComp, LinearDoc, LinearObj, Serial, SerialComp, Term};
+use crate::compiler::types::{
+    LinearComp, LinearDoc, LinearObj, Serial, SerialComp, SerialEntry, Term,
+};
 use bumpalo::Bump;
 
-pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> LinearDoc<'b> {
+pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: Serial<'a>) -> LinearDoc<'b> {
     // Completed line objects, in document order.
     let mut lines: Vec<&'b LinearObj<'b>> = Vec::new();
     // Elements of the line currently being built, in visitation order.
     let mut acc: Vec<(&'b Term<'b>, &'b LinearComp<'b>)> = Vec::new();
 
-    let mut cur = serial;
-    loop {
-        match cur {
+    for entry in serial {
+        match entry {
             // A `Line` composition ends the current line: flush the accumulated
-            // elements (with this node's term as the final element) as one
+            // elements (with this entry's term as the final element) as one
             // object, then start a fresh line.
-            Serial::Next(term, SerialComp::Line, serial1) => {
+            SerialEntry::Next(term, SerialComp::Line) => {
                 let term1 = map_term_chain(mem, *term);
                 lines.push(build_line(mem, &acc, term1));
                 acc.clear();
-                cur = serial1;
             }
             // Any other composition extends the current line.
-            Serial::Next(term, comp, serial1) => {
+            SerialEntry::Next(term, comp) => {
                 let term1 = map_term_chain(mem, *term);
                 let comp1 = visit_comp(mem, comp);
                 acc.push((term1, comp1));
-                cur = serial1;
             }
-            // End of the serial: flush the final line.
-            Serial::Last(term, Serial::Past) => {
+            // The document's final term: flush the last line.
+            SerialEntry::Last(term) => {
                 let term1 = map_term_chain(mem, *term);
                 lines.push(build_line(mem, &acc, term1));
-                break;
             }
-            _ => unreachable!("Invariant"),
         }
     }
 
@@ -94,18 +91,16 @@ mod tests {
             pad: false,
             fix: false,
         };
-        // Build Next(Text, Comp, Next(...)) ending in Last(Text, Past).
-        let mut serial: &Serial = mem.alloc(Serial::Last(
-            mem.alloc(Term::Text("end")),
-            mem.alloc(Serial::Past),
-        ));
+        // Build DEEP Comp entries followed by a final Last entry.
+        let mut entries: Vec<SerialEntry> = Vec::new();
         for _ in 0..DEEP {
-            serial = mem.alloc(Serial::Next(
+            entries.push(SerialEntry::Next(
                 mem.alloc(Term::Text("x")),
                 mem.alloc(SerialComp::Comp(attr, &[], &[])),
-                serial,
             ));
         }
+        entries.push(SerialEntry::Last(mem.alloc(Term::Text("end"))));
+        let serial: Serial = mem.alloc_slice_copy(&entries);
         let doc = linearize(&mem, serial);
         // One line (no Line comps), a Next-chain of DEEP + 1 terms.
         assert_eq!(doc.len(), 1, "expected one line");
@@ -137,14 +132,10 @@ mod tests {
             &[],
             &[],
         ));
-        let serial: &Serial = mem.alloc(Serial::Next(
-            term,
-            comp,
-            mem.alloc(Serial::Last(
-                mem.alloc(Term::Text("end")),
-                mem.alloc(Serial::Past),
-            )),
-        ));
+        let serial: Serial = mem.alloc_slice_copy(&[
+            SerialEntry::Next(term, comp),
+            SerialEntry::Last(mem.alloc(Term::Text("end"))),
+        ]);
         let doc = linearize(&mem, serial);
         // Confirm the deep term nesting survived.
         let [obj, ..] = doc else {

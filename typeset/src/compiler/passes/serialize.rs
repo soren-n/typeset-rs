@@ -18,7 +18,7 @@
 //! folded from the right onto `Past` to build the Serial — byte-identical to
 //! the recursive version.
 
-use crate::compiler::types::{Attr, Edsl, Scope, Serial, SerialComp, Term};
+use crate::compiler::types::{Attr, Edsl, Scope, Serial, SerialComp, SerialEntry, Term};
 use bumpalo::Bump;
 
 /// A nest/pack wrapper accumulated on the path to a term.
@@ -83,7 +83,7 @@ struct Work<'b, 'a> {
     fixed: bool,
 }
 
-pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<'b> {
+pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> {
     let mut i: u64 = 0;
     let mut j: u64 = 0;
     let mut entries: Vec<Entry<'b>> = Vec::new();
@@ -223,46 +223,39 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
         }
     }
 
-    // Compute each composition's scope open/close deltas in document order.
-    // `prev` is the previous composition's enclosing scope list *on the same
-    // line*; it resets at every line break (Line/Last), because grp/seq scopes
-    // never cross a hard line — structurize resolves each line independently.
-    // Diffing the shared-tail `CompList`s is O(delta), so this whole pass stays
-    // linear even when scopes nest n deep.
-    let mut deltas: Vec<(&'b [Scope], &'b [Scope])> = Vec::with_capacity(entries.len());
+    // Resolve each leaf entry into a `SerialEntry`, computing every
+    // composition's scope open/close deltas in the same forward pass. `prev` is
+    // the previous composition's enclosing scope list *on the same line*; it
+    // resets at every line break (Line/Last), because grp/seq scopes never cross
+    // a hard line — structurize resolves each line independently. Diffing the
+    // shared-tail `CompList`s is O(delta), so this whole pass stays linear even
+    // when scopes nest n deep.
+    let mut items: Vec<SerialEntry<'b>> = Vec::with_capacity(entries.len());
     let mut prev: Option<&'b CompList<'b>> = None;
     for entry in entries.iter() {
-        match entry.glue {
-            Glue::Comp { comps, .. } => {
-                let (opens, closes) = diff_comps(prev, comps);
-                deltas.push((mem.alloc_slice_copy(&opens), mem.alloc_slice_copy(&closes)));
-                prev = comps;
-            }
-            Glue::Line | Glue::Last => {
-                deltas.push((&[], &[]));
+        let item = match entry.glue {
+            Glue::Last => {
                 prev = None;
+                SerialEntry::Last(entry.term)
             }
-        }
-    }
-
-    // Fold the leaf entries (document order) from the right onto Past.
-    let mut serial: &'b Serial<'b> = mem.alloc(Serial::Past);
-    for (idx, entry) in entries.iter().enumerate().rev() {
-        serial = match entry.glue {
-            Glue::Last => mem.alloc(Serial::Last(entry.term, serial)),
-            Glue::Line => mem.alloc(Serial::Next(
-                entry.term,
-                mem.alloc(SerialComp::Line),
-                serial,
-            )),
-            Glue::Comp { attr, .. } => {
-                let (opens, closes) = deltas[idx];
-                let comp = mem.alloc(SerialComp::Comp(attr, opens, closes));
-                mem.alloc(Serial::Next(entry.term, comp, serial))
+            Glue::Line => {
+                prev = None;
+                SerialEntry::Next(entry.term, mem.alloc(SerialComp::Line))
+            }
+            Glue::Comp { comps, attr } => {
+                let (opens, closes) = diff_comps(prev, comps);
+                prev = comps;
+                let comp = mem.alloc(SerialComp::Comp(
+                    attr,
+                    mem.alloc_slice_copy(&opens),
+                    mem.alloc_slice_copy(&closes),
+                ));
+                SerialEntry::Next(entry.term, comp)
             }
         };
+        items.push(item);
     }
-    serial
+    mem.alloc_slice_copy(&items)
 }
 
 /// Diffs two enclosing-scope lists (innermost-first, sharing an outer tail by
@@ -358,15 +351,13 @@ mod tests {
             edsl = mem.alloc(Edsl::Comp(mem.alloc(Edsl::Text("y")), edsl, attr));
         }
         let serial = serialize(&mem, edsl);
-        let mut count = 0usize;
-        let mut cur = serial;
-        while let Serial::Next(_, _, rest) = cur {
-            count += 1;
-            cur = rest;
-        }
-        // DEEP Next nodes, then a Last, then Past.
+        // DEEP Next entries, then a final Last entry.
+        let count = serial
+            .iter()
+            .filter(|e| matches!(e, SerialEntry::Next(..)))
+            .count();
         assert_eq!(count, DEEP);
-        assert!(matches!(cur, Serial::Last(_, _)));
+        assert!(matches!(serial.last(), Some(SerialEntry::Last(_))));
     }
 
     #[test]
@@ -378,8 +369,8 @@ mod tests {
         }
         let serial = serialize(&mem, edsl);
         // Single leaf: one Last carrying a Nest^DEEP term.
-        let Serial::Last(term, _) = serial else {
-            panic!("expected Last")
+        let [SerialEntry::Last(term)] = serial else {
+            panic!("expected a single Last")
         };
         let mut count = 0usize;
         let mut cur: &Term = term;
@@ -398,8 +389,8 @@ mod tests {
             edsl = mem.alloc(Edsl::Pack(edsl));
         }
         let serial = serialize(&mem, edsl);
-        let Serial::Last(term, _) = serial else {
-            panic!("expected Last")
+        let [SerialEntry::Last(term)] = serial else {
+            panic!("expected a single Last")
         };
         // The outermost Pack is entered first and gets index 0; indices then
         // increase inward.
@@ -421,8 +412,8 @@ mod tests {
         for _ in 0..DEEP {
             edsl = mem.alloc(Edsl::Grp(edsl));
         }
-        // Should not overflow; a single leaf yields a trivial Last serial.
+        // Should not overflow; a single leaf yields a trivial one-Last serial.
         let serial = serialize(&mem, edsl);
-        assert!(matches!(serial, Serial::Last(_, _)));
+        assert!(matches!(serial, [SerialEntry::Last(_)]));
     }
 }

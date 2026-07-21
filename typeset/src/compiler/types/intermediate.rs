@@ -16,12 +16,23 @@ pub enum Edsl<'a> {
     Comp(&'a Edsl<'a>, &'a Edsl<'a>, Attr),
 }
 
-// Third intermediate representation: Serial
-#[derive(Debug)]
-pub enum Serial<'a> {
-    Next(&'a Term<'a>, &'a SerialComp<'a>, &'a Serial<'a>),
-    Last(&'a Term<'a>, &'a Serial<'a>),
-    Past,
+// Third intermediate representation: Serial.
+//
+// A flat slice of leaf entries in document order; each entry is a term plus how
+// it glues to what follows. The slice is always non-empty and its final entry
+// is always `Last`. (Formerly a `Next`/`Last`/`Past` cons-list, but the spine
+// has no structural sharing — `serialize` builds it from a `Vec` — so a slice
+// is the honest shape. The load-bearing persistent lists are `serialize`'s
+// internal `TermList`/`CompList` scope accumulators, not this output.)
+pub type Serial<'a> = &'a [SerialEntry<'a>];
+
+#[derive(Debug, Copy, Clone)]
+pub enum SerialEntry<'a> {
+    /// A term followed by a composition — a hard line break
+    /// (`SerialComp::Line`) or a composition separator (`SerialComp::Comp`).
+    Next(&'a Term<'a>, &'a SerialComp<'a>),
+    /// The document's final term, with nothing following.
+    Last(&'a Term<'a>),
 }
 
 /// A layout term: a chain of `Nest`/`Pack` wrappers over a `Null`/`Text` leaf.
