@@ -146,6 +146,10 @@
 //!
 //! The public API remains unchanged, ensuring seamless migration from v1.x.
 
+// Keep the doc-comment cross-references honest: a stale intra-doc link is a
+// hard error under `cargo doc`, so broken references cannot silently rot.
+#![deny(rustdoc::broken_intra_doc_links)]
+
 mod avl;
 mod compiler;
 mod list;
