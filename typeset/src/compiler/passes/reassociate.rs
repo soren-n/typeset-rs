@@ -1,123 +1,212 @@
 //! Pass 8: DenullDoc → DenullDoc (reassociate after grp/seq removals)
+//!
+//! Right-associates composition trees (e.g. `Comp(Comp(a, b, p1), c, p2)`
+//! becomes `Comp(a, Comp(b, c, p2), p1)`), treating Term/Fix/Grp/Seq as atoms
+//! and reassociating inside each Grp/Seq independently. The original expressed
+//! this with two nested continuations (a `partial` left-wrapper and a `cont`),
+//! recursing on the native stack and aborting on deep inputs.
+//!
+//! Here the object walk is a descend/ascend trampoline: `partial` is a small
+//! enum applied at each leaf, and `cont` is a heap-allocated frame stack. The
+//! doc spine is a plain loop.
 
-use crate::compiler::types::{DenullDoc, DenullFix, DenullObj, DenullTerm};
-use crate::util::compose;
+use crate::compiler::types::{DenullDoc, DenullObj};
 use bumpalo::Bump;
+
+/// A pending left-wrapper applied to a reassociated object at a leaf.
+#[derive(Copy, Clone)]
+enum Partial<'b> {
+    /// Identity: pass the object through unchanged.
+    Id,
+    /// Wrap the object as the left operand of a composition with `right`.
+    Comp { right: &'b DenullObj<'b>, pad: bool },
+}
+
+/// A pending continuation frame (the defunctionalized `cont`).
+enum Frame<'b, 'a> {
+    /// Wrap the ascending value in a Grp, then apply the saved partial.
+    Grp(Partial<'b>),
+    /// Wrap the ascending value in a Seq, then apply the saved partial.
+    Seq(Partial<'b>),
+    /// The left operand of a composition, still to be reassociated with the
+    /// ascending value (the reassociated right operand) as its `right`.
+    Comp { left: &'a DenullObj<'a>, pad: bool },
+}
+
+/// A doc-spine element with a tail (terminals are handled separately).
+enum DocItem<'b> {
+    Empty,
+    Break(&'b DenullObj<'b>),
+}
 
 /// Reassociate after grp and seq removals
 pub fn reassociate<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    fn _eod<'a>(mem: &'a Bump) -> &'a DenullDoc<'a> {
-        mem.alloc(DenullDoc::Eod)
-    }
-    fn _empty<'a>(mem: &'a Bump, doc: &'a DenullDoc<'a>) -> &'a DenullDoc<'a> {
-        mem.alloc(DenullDoc::Empty(doc))
-    }
-    fn _break<'a>(
-        mem: &'a Bump,
-        obj: &'a DenullObj<'a>,
-        doc: &'a DenullDoc<'a>,
-    ) -> &'a DenullDoc<'a> {
-        mem.alloc(DenullDoc::Break(obj, doc))
-    }
-    fn _line<'a>(mem: &'a Bump, obj: &'a DenullObj<'a>) -> &'a DenullDoc<'a> {
-        mem.alloc(DenullDoc::Line(obj))
-    }
-    fn _term<'a>(mem: &'a Bump, term: &'a DenullTerm<'a>) -> &'a DenullObj<'a> {
-        mem.alloc(DenullObj::Term(term))
-    }
-    fn _fix<'a>(mem: &'a Bump, fix: &'a DenullFix<'a>) -> &'a DenullObj<'a> {
-        mem.alloc(DenullObj::Fix(fix))
-    }
-    fn _grp<'a>(mem: &'a Bump, obj: &'a DenullObj<'a>) -> &'a DenullObj<'a> {
-        mem.alloc(DenullObj::Grp(obj))
-    }
-    fn _seq<'a>(mem: &'a Bump, obj: &'a DenullObj<'a>) -> &'a DenullObj<'a> {
-        mem.alloc(DenullObj::Seq(obj))
-    }
-    fn _comp<'a>(
-        mem: &'a Bump,
-        left: &'a DenullObj<'a>,
-        right: &'a DenullObj<'a>,
-        pad: bool,
-    ) -> &'a DenullObj<'a> {
-        mem.alloc(DenullObj::Comp(left, right, pad))
-    }
-    fn __comp<'a>(
-        mem: &'a Bump,
-        pad: bool,
-        right: &'a DenullObj<'a>,
-        left: &'a DenullObj<'a>,
-    ) -> &'a DenullObj<'a> {
-        _comp(mem, left, right, pad)
-    }
-    fn _visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-        match doc {
-            DenullDoc::Eod => _eod(mem),
+    // Walk the linear spine to its terminal (Eod or Line), reassociating each
+    // object, then fold the collected items back on.
+    let mut items: Vec<DocItem<'b>> = Vec::new();
+    let mut cur = doc;
+    let terminal: &'b DenullDoc<'b> = loop {
+        match cur {
+            DenullDoc::Eod => break mem.alloc(DenullDoc::Eod),
+            DenullDoc::Line(obj) => break mem.alloc(DenullDoc::Line(_reassoc_obj(mem, obj))),
             DenullDoc::Empty(doc1) => {
-                let doc2 = _visit_doc(mem, doc1);
-                _empty(mem, doc2)
+                items.push(DocItem::Empty);
+                cur = doc1;
             }
             DenullDoc::Break(obj, doc1) => {
-                let partial = mem.alloc(move |_mem, obj1| obj1);
-                _visit_obj(
-                    mem,
-                    obj,
-                    partial,
-                    mem.alloc(move |mem, obj2| {
-                        let doc2 = _visit_doc(mem, doc1);
-                        _break(mem, obj2, doc2)
-                    }),
-                )
+                items.push(DocItem::Break(_reassoc_obj(mem, obj)));
+                cur = doc1;
             }
-            DenullDoc::Line(obj) => {
-                let partial = mem.alloc(|_mem, obj1| obj1);
-                _visit_obj(mem, obj, partial, mem.alloc(|mem, obj2| _line(mem, obj2)))
+        }
+    };
+    let mut result = terminal;
+    for item in items.iter().rev() {
+        result = match item {
+            DocItem::Empty => mem.alloc(DenullDoc::Empty(result)),
+            DocItem::Break(obj) => mem.alloc(DenullDoc::Break(obj, result)),
+        };
+    }
+    result
+}
+
+/// Reassociates a single object, right-associating its compositions.
+fn _reassoc_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b DenullObj<'b> {
+    let mut stack: Vec<Frame<'b, 'a>> = Vec::new();
+    let mut cur = obj;
+    let mut partial = Partial::Id;
+    'machine: loop {
+        // Descend, visiting a composition's right operand first, until a leaf
+        // produces an ascending value.
+        let mut value: &'b DenullObj<'b> = loop {
+            match cur {
+                DenullObj::Term(term) => {
+                    break _apply_partial(mem, partial, mem.alloc(DenullObj::Term(term)));
+                }
+                DenullObj::Fix(fix) => {
+                    break _apply_partial(mem, partial, mem.alloc(DenullObj::Fix(fix)));
+                }
+                DenullObj::Grp(obj1) => {
+                    // Grp is a boundary: reassociate its contents afresh.
+                    stack.push(Frame::Grp(partial));
+                    partial = Partial::Id;
+                    cur = obj1;
+                }
+                DenullObj::Seq(obj1) => {
+                    stack.push(Frame::Seq(partial));
+                    partial = Partial::Id;
+                    cur = obj1;
+                }
+                DenullObj::Comp(left, right, pad) => {
+                    stack.push(Frame::Comp { left, pad: *pad });
+                    cur = right;
+                }
+            }
+        };
+        // Ascend, applying frames until we must descend a Comp's left operand.
+        loop {
+            match stack.pop() {
+                None => return value,
+                Some(Frame::Grp(p)) => {
+                    value = _apply_partial(mem, p, mem.alloc(DenullObj::Grp(value)));
+                }
+                Some(Frame::Seq(p)) => {
+                    value = _apply_partial(mem, p, mem.alloc(DenullObj::Seq(value)));
+                }
+                Some(Frame::Comp { left, pad }) => {
+                    cur = left;
+                    partial = Partial::Comp { right: value, pad };
+                    continue 'machine;
+                }
             }
         }
     }
-    fn _visit_obj<'b, 'a: 'b, R>(
-        mem: &'b Bump,
-        obj: &'a DenullObj<'a>,
-        partial: &'b dyn Fn(&'b Bump, &'b DenullObj<'b>) -> &'b DenullObj<'b>,
-        cont: &'b dyn Fn(&'b Bump, &'b DenullObj<'b>) -> R,
-    ) -> R {
-        match obj {
-            DenullObj::Term(term) => cont(mem, partial(mem, _term(mem, term))),
-            DenullObj::Fix(fix) => cont(mem, partial(mem, _fix(mem, fix))),
-            DenullObj::Grp(obj1) => _visit_obj(
-                mem,
-                obj1,
-                mem.alloc(|_mem, obj2| obj2),
-                compose(
-                    mem,
-                    cont,
-                    compose(mem, partial, mem.alloc(|mem, obj3| _grp(mem, obj3))),
-                ),
-            ),
-            DenullObj::Seq(obj1) => _visit_obj(
-                mem,
-                obj1,
-                mem.alloc(|_mem, obj2| obj2),
-                compose(
-                    mem,
-                    cont,
-                    compose(mem, partial, mem.alloc(|mem, obj3| _seq(mem, obj3))),
-                ),
-            ),
-            DenullObj::Comp(left, right, pad) => _visit_obj(
-                mem,
-                right,
-                partial,
-                mem.alloc(move |mem, result| {
-                    _visit_obj(
-                        mem,
-                        left,
-                        mem.alloc(move |mem, obj1| __comp(mem, *pad, result, obj1)),
-                        cont,
-                    )
-                }),
-            ),
-        }
+}
+
+/// Applies a pending left-wrapper to a reassociated object.
+fn _apply_partial<'b>(
+    mem: &'b Bump,
+    partial: Partial<'b>,
+    obj: &'b DenullObj<'b>,
+) -> &'b DenullObj<'b> {
+    match partial {
+        Partial::Id => obj,
+        Partial::Comp { right, pad } => mem.alloc(DenullObj::Comp(obj, right, pad)),
     }
-    _visit_doc(mem, doc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::types::DenullTerm;
+
+    /// Deeper than a native-stack recursion could survive (~hundreds of levels
+    /// on a 2 MB stack). Reaching it without aborting proves iteration.
+    const DEEP: usize = 50_000;
+
+    fn term<'b>(mem: &'b Bump, s: &'b str) -> &'b DenullObj<'b> {
+        mem.alloc(DenullObj::Term(mem.alloc(DenullTerm::Text(s))))
+    }
+
+    #[test]
+    fn reassociate_right_associates_deep_left_nested_comp() {
+        let mem = Bump::new();
+        // Left-nested: Comp(Comp(... Comp(a, b) ..., b), b).
+        let mut obj: &DenullObj = term(&mem, "a");
+        for _ in 0..DEEP {
+            obj = mem.alloc(DenullObj::Comp(obj, term(&mem, "b"), false));
+        }
+        let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
+        let out = reassociate(&mem, doc);
+        let DenullDoc::Line(result) = out else {
+            panic!("expected a line")
+        };
+        // The result is right-nested: a right spine of DEEP compositions.
+        let mut count = 0usize;
+        let mut cur: &DenullObj = result;
+        while let DenullObj::Comp(_left, right, _pad) = cur {
+            count += 1;
+            cur = right;
+        }
+        assert!(matches!(cur, DenullObj::Term(_)));
+        assert_eq!(count, DEEP);
+    }
+
+    #[test]
+    fn reassociate_handles_deep_grp_nesting() {
+        let mem = Bump::new();
+        let mut obj: &DenullObj = term(&mem, "x");
+        for _ in 0..DEEP {
+            obj = mem.alloc(DenullObj::Grp(obj));
+        }
+        let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
+        let out = reassociate(&mem, doc);
+        let DenullDoc::Line(result) = out else {
+            panic!("expected a line")
+        };
+        let mut count = 0usize;
+        let mut cur: &DenullObj = result;
+        while let DenullObj::Grp(inner) = cur {
+            count += 1;
+            cur = inner;
+        }
+        assert_eq!(count, DEEP);
+    }
+
+    #[test]
+    fn reassociate_handles_long_doc_spine() {
+        let mem = Bump::new();
+        let mut doc: &DenullDoc = mem.alloc(DenullDoc::Eod);
+        for _ in 0..DEEP {
+            doc = mem.alloc(DenullDoc::Break(term(&mem, "x"), doc));
+        }
+        let out = reassociate(&mem, doc);
+        let mut count = 0usize;
+        let mut cur = out;
+        while let DenullDoc::Break(_, rest) = cur {
+            count += 1;
+            cur = rest;
+        }
+        assert!(matches!(cur, DenullDoc::Eod));
+        assert_eq!(count, DEEP);
+    }
 }
