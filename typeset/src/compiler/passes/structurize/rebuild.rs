@@ -3,6 +3,7 @@
 //! Reads the solved scope graph per line and rebuilds an explicit composition
 //! spine (grp/seq wrappers and left compositions) as a RebuildDoc.
 
+use crate::compiler::passes::term_chain::map_term_chain;
 use crate::compiler::types::{
     GraphDoc, GraphFix, GraphNode, GraphTerm, Property, RebuildDoc, RebuildFix, RebuildObj,
     RebuildTerm, TopologyResult,
@@ -184,7 +185,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             let term = terms[i];
             let obj = match term {
                 GraphTerm::Fix(fix) => mem.alloc(RebuildObj::Fix(_visit_fix(mem, fix))),
-                _ => mem.alloc(RebuildObj::Term(_visit_term(mem, term))),
+                _ => mem.alloc(RebuildObj::Term(map_term_chain(mem, term))),
             };
             let in_deg = ins[i];
             let out_props = outs[i].as_slice();
@@ -224,45 +225,15 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             i += 1;
         }
     }
-    fn _visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a GraphTerm<'a>) -> &'b RebuildTerm<'b> {
-        enum Wrap {
-            Nest,
-            Pack(u64),
-        }
-        let mut wraps: Vec<Wrap> = Vec::new();
-        let mut cur = term;
-        let mut val: &'b RebuildTerm<'b> = loop {
-            match cur {
-                GraphTerm::Null => break mem.alloc(RebuildTerm::Null),
-                GraphTerm::Text(data) => break mem.alloc(RebuildTerm::Text(data)),
-                GraphTerm::Nest(term1) => {
-                    wraps.push(Wrap::Nest);
-                    cur = term1;
-                }
-                GraphTerm::Pack(index, term1) => {
-                    wraps.push(Wrap::Pack(*index));
-                    cur = term1;
-                }
-                GraphTerm::Fix(_fix) => unreachable!("Invariant"),
-            }
-        };
-        while let Some(wrap) = wraps.pop() {
-            val = match wrap {
-                Wrap::Nest => mem.alloc(RebuildTerm::Nest(val)),
-                Wrap::Pack(index) => mem.alloc(RebuildTerm::Pack(index, val)),
-            };
-        }
-        val
-    }
     fn _visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a GraphFix<'a>) -> &'b RebuildFix<'b> {
         // Walk the fix chain, then rebuild the RebuildFix bottom-up.
         let mut recorded: Vec<(&'b RebuildTerm<'b>, bool)> = Vec::new();
         let mut cur = fix;
         let last: &'b RebuildTerm<'b> = loop {
             match cur {
-                GraphFix::Last(term) => break _visit_term(mem, term),
+                GraphFix::Last(term) => break map_term_chain(mem, *term),
                 GraphFix::Next(term, fix1, pad) => {
-                    recorded.push((_visit_term(mem, term), *pad));
+                    recorded.push((map_term_chain(mem, *term), *pad));
                     cur = fix1;
                 }
             }

@@ -7,17 +7,11 @@
 //! `FixedItem::Fix`. This keeps the pass off the native stack, which the
 //! recursive/continuation version could exhaust on deep inputs.
 
+use super::term_chain::map_term_chain;
 use crate::compiler::types::{
-    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, FixedTerm, LinearComp, LinearDoc,
-    LinearObj, LinearTerm,
+    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, FixedTerm, LinearComp, LinearDoc, LinearObj,
 };
 use bumpalo::Bump;
-
-/// A `LinearTerm` wrapper, recorded outermost-first while descending.
-enum TermWrap {
-    Nest,
-    Pack(u64),
-}
 
 /// A `LinearComp` wrapper, recorded outermost-first while descending.
 enum CompWrap {
@@ -60,7 +54,7 @@ fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj
     loop {
         match cur {
             LinearObj::Next(term, comp, obj1) => {
-                let term1 = _visit_term(mem, term);
+                let term1 = map_term_chain(mem, *term);
                 let (is_fixed, comp1) = _visit_comp(mem, comp);
                 if is_fixed {
                     // A fixed composition: extend (or start) the current run.
@@ -82,7 +76,7 @@ fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj
                 cur = obj1;
             }
             LinearObj::Last(term) => {
-                let term1 = _visit_term(mem, term);
+                let term1 = map_term_chain(mem, *term);
                 if in_fix {
                     let fix = _build_fix(mem, &fix_run, term1);
                     items.push(mem.alloc(FixedItem::Fix(fix)));
@@ -145,37 +139,10 @@ fn _visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a LinearComp<'a>) -> (bool, &'
     (is_fixed, val)
 }
 
-/// Rebuilds a term chain, preserving nest/pack nesting.
-fn _visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a LinearTerm<'a>) -> &'b FixedTerm<'b> {
-    let mut wraps: Vec<TermWrap> = Vec::new();
-    let mut cur = term;
-    let mut val: &'b FixedTerm<'b> = loop {
-        match cur {
-            LinearTerm::Null => break mem.alloc(FixedTerm::Null),
-            LinearTerm::Text(data) => break mem.alloc(FixedTerm::Text(data)),
-            LinearTerm::Nest(term1) => {
-                wraps.push(TermWrap::Nest);
-                cur = term1;
-            }
-            LinearTerm::Pack(index, term1) => {
-                wraps.push(TermWrap::Pack(*index));
-                cur = term1;
-            }
-        }
-    };
-    while let Some(wrap) = wraps.pop() {
-        val = match wrap {
-            TermWrap::Nest => mem.alloc(FixedTerm::Nest(val)),
-            TermWrap::Pack(index) => mem.alloc(FixedTerm::Pack(index, val)),
-        };
-    }
-    val
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::Attr;
+    use crate::compiler::types::{Attr, LinearTerm};
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration.

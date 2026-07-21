@@ -3,9 +3,10 @@
 //! Walks the fixed spine, assigns a node index per item, and materializes the
 //! grp/seq scopes as graph edges (the scope graph that `solve` then resolves).
 
+use crate::compiler::passes::term_chain::map_term_chain;
 use crate::compiler::types::{
-    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, FixedTerm, GraphDoc, GraphEdge, GraphFix,
-    GraphNode, GraphTerm, Property,
+    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, GraphDoc, GraphEdge, GraphFix, GraphNode,
+    GraphTerm, Property,
 };
 use bumpalo::Bump;
 use std::cell::Cell;
@@ -252,7 +253,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
             match cur {
                 FixedObj::Next(item, comp, obj1) => {
                     let term1 = match item {
-                        FixedItem::Term(term) => _visit_term(mem, term),
+                        FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
                             let (fix1, scope1, props1) = _visit_fix(mem, fix, index, scope, props);
                             scope = scope1;
@@ -271,7 +272,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                 }
                 FixedObj::Last(item) => {
                     let term1 = match item {
-                        FixedItem::Term(term) => _visit_term(mem, term),
+                        FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
                             let (fix1, scope1, props1) = _visit_fix(mem, fix, index, scope, props);
                             scope = scope1;
@@ -290,35 +291,6 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
             final_props,
         )
     }
-    fn _visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a FixedTerm<'a>) -> &'b GraphTerm<'b> {
-        enum Wrap {
-            Nest,
-            Pack(u64),
-        }
-        let mut wraps: Vec<Wrap> = Vec::new();
-        let mut cur = term;
-        let mut val: &'b GraphTerm<'b> = loop {
-            match cur {
-                FixedTerm::Null => break mem.alloc(GraphTerm::Null),
-                FixedTerm::Text(data) => break mem.alloc(GraphTerm::Text(data)),
-                FixedTerm::Nest(term1) => {
-                    wraps.push(Wrap::Nest);
-                    cur = term1;
-                }
-                FixedTerm::Pack(index, term1) => {
-                    wraps.push(Wrap::Pack(*index));
-                    cur = term1;
-                }
-            }
-        };
-        while let Some(wrap) = wraps.pop() {
-            val = match wrap {
-                Wrap::Nest => mem.alloc(GraphTerm::Nest(val)),
-                Wrap::Pack(index) => mem.alloc(GraphTerm::Pack(index, val)),
-            };
-        }
-        val
-    }
     fn _visit_fix<'b, 'a: 'b>(
         mem: &'b Bump,
         fix: &'a FixedFix<'a>,
@@ -333,7 +305,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         let last_term: &'b GraphTerm<'b> = loop {
             match cur {
                 FixedFix::Next(term, comp, fix1) => {
-                    let term1 = _visit_term(mem, term);
+                    let term1 = map_term_chain(mem, *term);
                     let (stack, pad) = _lift_stack(comp);
                     let (scope1, props1) = _update(index, props, &scope, &stack);
                     recorded.push((term1, pad));
@@ -341,7 +313,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     props = props1;
                     cur = fix1;
                 }
-                FixedFix::Last(term) => break _visit_term(mem, term),
+                FixedFix::Last(term) => break map_term_chain(mem, *term),
             }
         };
         let mut gfix: &'b GraphFix<'b> = mem.alloc(GraphFix::Last(last_term));

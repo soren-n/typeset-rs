@@ -5,16 +5,9 @@
 //! wrapper stacks. This keeps the pass off the native stack, which the
 //! recursive/continuation version could exhaust on deep inputs.
 
-use crate::compiler::types::{
-    LinearComp, LinearDoc, LinearObj, LinearTerm, Serial, SerialComp, SerialTerm,
-};
+use super::term_chain::map_term_chain;
+use crate::compiler::types::{LinearComp, LinearDoc, LinearObj, LinearTerm, Serial, SerialComp};
 use bumpalo::Bump;
-
-/// A `SerialTerm` wrapper, recorded outermost-first while descending.
-enum TermWrap {
-    Nest,
-    Pack(u64),
-}
 
 /// A `SerialComp` wrapper, recorded outermost-first while descending.
 enum CompWrap {
@@ -35,21 +28,21 @@ pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b Linea
             // elements (with this node's term as the final element) as one
             // object, then start a fresh line.
             Serial::Next(term, SerialComp::Line, serial1) => {
-                let term1 = _visit_term(mem, term);
+                let term1 = map_term_chain(mem, *term);
                 lines.push(_build_line(mem, &acc, term1));
                 acc.clear();
                 cur = serial1;
             }
             // Any other composition extends the current line.
             Serial::Next(term, comp, serial1) => {
-                let term1 = _visit_term(mem, term);
+                let term1 = map_term_chain(mem, *term);
                 let comp1 = _visit_comp(mem, comp);
                 acc.push((term1, comp1));
                 cur = serial1;
             }
             // End of the serial: flush the final line.
             Serial::Last(term, Serial::Past) => {
-                let term1 = _visit_term(mem, term);
+                let term1 = map_term_chain(mem, *term);
                 lines.push(_build_line(mem, &acc, term1));
                 break;
             }
@@ -78,33 +71,6 @@ fn _build_line<'b>(
         obj = mem.alloc(LinearObj::Next(term, comp, obj));
     }
     obj
-}
-
-/// Linearizes a `SerialTerm` chain into a `LinearTerm`, preserving nesting.
-fn _visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a SerialTerm<'a>) -> &'b LinearTerm<'b> {
-    let mut wraps: Vec<TermWrap> = Vec::new();
-    let mut cur = term;
-    let mut val: &'b LinearTerm<'b> = loop {
-        match cur {
-            SerialTerm::Null => break mem.alloc(LinearTerm::Null),
-            SerialTerm::Text(data) => break mem.alloc(LinearTerm::Text(data)),
-            SerialTerm::Nest(term1) => {
-                wraps.push(TermWrap::Nest);
-                cur = term1;
-            }
-            SerialTerm::Pack(index, term1) => {
-                wraps.push(TermWrap::Pack(*index));
-                cur = term1;
-            }
-        }
-    };
-    while let Some(wrap) = wraps.pop() {
-        val = match wrap {
-            TermWrap::Nest => mem.alloc(LinearTerm::Nest(val)),
-            TermWrap::Pack(index) => mem.alloc(LinearTerm::Pack(index, val)),
-        };
-    }
-    val
 }
 
 /// Linearizes a non-`Line` `SerialComp` chain into a `LinearComp`.
@@ -137,7 +103,7 @@ fn _visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a SerialComp<'a>) -> &'b Linea
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::Attr;
+    use crate::compiler::types::{Attr, SerialTerm};
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
