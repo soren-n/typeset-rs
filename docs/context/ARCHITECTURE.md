@@ -16,7 +16,10 @@ This is a Rust workspace containing two main crates:
   - `constructors/`: Layout building primitives (text, composition, control, format, etc.)
   - `passes/`: Compilation passes (denull, reassociate, linearize, serialize, etc.)
   - `render/`: Text rendering engine
-  - `types/`: Core data structures (Layout, Doc, intermediate representations)
+  - `types/`: Core data structures (Layout, Doc, and the intermediate
+    representations shared between passes; an IR used by only one pass lives with
+    that pass instead — e.g. `Broken` in `passes/broken.rs` and the structurize
+    scope graph in `passes/structurize/graph.rs`)
 The compiler passes use standard-library collections throughout — the shared
 custom data-structure layer is gone. Sequences and LIFO working stacks are
 `Vec<T>` (or, when they must outlive a pass in the bump arena, arena slices
@@ -80,9 +83,11 @@ stage therefore uses constant native stack regardless of layout depth, so deep
 layouts never overflow the stack; depth shows up as O(depth) heap instead. The
 tree-walking traits on the public AST types (`Doc`/`DocObj`/`DocObjFix` and
 `Layout`) — `Drop`, `Clone`, `Display`, and `Debug` — are iterative for the same
-reason, so no operation on a deep document recurses on the native stack. The
-`max_depth` bound in `compile_safe_with_depth` is now a resource limit rather
-than a stack-safety guard.
+reason, so no operation on a deep document recurses on the native stack.
+`compile()` is therefore infallible and imposes no depth cap; the `max_depth`
+bound in `compile_safe_with_depth` is an opt-in resource limit (capping the
+O(depth) heap an untrusted layout can allocate) rather than a stack-safety
+guard.
 
 ## Key Layout Concepts
 

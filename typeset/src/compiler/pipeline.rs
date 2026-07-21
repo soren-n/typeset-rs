@@ -14,9 +14,11 @@
 //! native stack and deep layouts never overflow it. Depth shows up as O(depth)
 //! heap instead.
 //!
-//! Two entry points: [`compile`] panics on internal error (fast path);
+//! Two entry points: [`compile`] is infallible (the fast path — the pipeline is
+//! iterative, so no layout is too deep and there is no depth cap);
 //! [`compile_safe`]/[`compile_safe_with_depth`] return a [`Result`] and reject
-//! layouts deeper than a configurable bound.
+//! layouts deeper than a configurable bound before compiling, to cap the
+//! O(depth) heap an untrusted layout can allocate.
 
 use crate::compiler::{
     error::CompilerError,
