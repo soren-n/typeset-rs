@@ -8,7 +8,7 @@ use syn::{
     parse_macro_input,
 };
 
-fn _parsed<T: Parse>(input: ParseStream) -> Result<T> {
+fn parsed<T: Parse>(input: ParseStream) -> Result<T> {
     let _input = input.fork();
     match _input.parse::<T>() {
         Err(error) => Err(error),
@@ -19,7 +19,7 @@ fn _parsed<T: Parse>(input: ParseStream) -> Result<T> {
     }
 }
 
-fn _parse_any<T>(input: ParseStream, parsers: Vec<fn(ParseStream) -> Result<T>>) -> Result<T> {
+fn parse_any<T>(input: ParseStream, parsers: Vec<fn(ParseStream) -> Result<T>>) -> Result<T> {
     let result = parsers.iter().try_fold(Vec::new(), |mut errors, parser| {
         let _input = input.fork();
         match parser(&_input) {
@@ -48,7 +48,7 @@ fn _parse_any<T>(input: ParseStream, parsers: Vec<fn(ParseStream) -> Result<T>>)
     }
 }
 
-fn _parse_group<T>(input: ParseStream, parser: fn(ParseStream) -> Result<T>) -> Result<T> {
+fn parse_group<T>(input: ParseStream, parser: fn(ParseStream) -> Result<T>) -> Result<T> {
     let content;
     parenthesized!(content in input);
     parser(&content)
@@ -63,7 +63,7 @@ enum UnaryOp {
     Pack,
 }
 
-fn _parse_unary_op(input: ParseStream) -> Result<UnaryOp> {
+fn parse_unary_op(input: ParseStream) -> Result<UnaryOp> {
     let item: Ident = input.parse()?;
     match item.to_string().as_str() {
         "fix" => Ok(UnaryOp::Fix),
@@ -95,17 +95,17 @@ enum BinaryOp {
     DoubleNewline,
 }
 
-fn _parse_binary_op(input: ParseStream) -> Result<BinaryOp> {
+fn parse_binary_op(input: ParseStream) -> Result<BinaryOp> {
     use binary_tokens::*;
-    _parse_any(
+    parse_any(
         input,
         vec![
-            |input| _parsed::<Unpadded>(input).map(|_| BinaryOp::Unpadded),
-            |input| _parsed::<Padded>(input).map(|_| BinaryOp::Padded),
-            |input| _parsed::<FixedUnpadded>(input).map(|_| BinaryOp::FixedUnpadded),
-            |input| _parsed::<FixedPadded>(input).map(|_| BinaryOp::FixedPadded),
-            |input| _parsed::<DoubleNewline>(input).map(|_| BinaryOp::DoubleNewline),
-            |input| _parsed::<Newline>(input).map(|_| BinaryOp::Newline),
+            |input| parsed::<Unpadded>(input).map(|_| BinaryOp::Unpadded),
+            |input| parsed::<Padded>(input).map(|_| BinaryOp::Padded),
+            |input| parsed::<FixedUnpadded>(input).map(|_| BinaryOp::FixedUnpadded),
+            |input| parsed::<FixedPadded>(input).map(|_| BinaryOp::FixedPadded),
+            |input| parsed::<DoubleNewline>(input).map(|_| BinaryOp::DoubleNewline),
+            |input| parsed::<Newline>(input).map(|_| BinaryOp::Newline),
         ],
     )
 }
@@ -119,7 +119,7 @@ enum Ast {
     Binary(BinaryOp, Box<Ast>, Box<Ast>),
 }
 
-fn _parse_null(input: ParseStream) -> Result<Box<Ast>> {
+fn parse_null(input: ParseStream) -> Result<Box<Ast>> {
     let item: Ident = input.parse()?;
     match item.to_string().as_str() {
         "null" => Ok(Box::new(Ast::Null)),
@@ -127,52 +127,52 @@ fn _parse_null(input: ParseStream) -> Result<Box<Ast>> {
     }
 }
 
-fn _parse_variable(input: ParseStream) -> Result<Box<Ast>> {
-    let name = _parsed::<Ident>(input)?;
+fn parse_variable(input: ParseStream) -> Result<Box<Ast>> {
+    let name = parsed::<Ident>(input)?;
     Ok(Box::new(Ast::Variable(name)))
 }
 
-fn _parse_text(input: ParseStream) -> Result<Box<Ast>> {
-    let data = _parsed::<LitStr>(input)?;
+fn parse_text(input: ParseStream) -> Result<Box<Ast>> {
+    let data = parsed::<LitStr>(input)?;
     Ok(Box::new(Ast::Text(data.value())))
 }
 
-fn _parse_group_ast(input: ParseStream) -> Result<Box<Ast>> {
-    _parse_group(input, _parse_ast)
+fn parse_group_ast(input: ParseStream) -> Result<Box<Ast>> {
+    parse_group(input, parse_ast)
 }
 
-fn _parse_primary(input: ParseStream) -> Result<Box<Ast>> {
-    _parse_any(
+fn parse_primary(input: ParseStream) -> Result<Box<Ast>> {
+    parse_any(
         input,
-        vec![_parse_null, _parse_variable, _parse_text, _parse_group_ast],
+        vec![parse_null, parse_variable, parse_text, parse_group_ast],
     )
 }
 
-fn _parse_atom(input: ParseStream) -> Result<Box<Ast>> {
-    _parse_any(input, vec![_parse_unary, _parse_primary])
+fn parse_atom(input: ParseStream) -> Result<Box<Ast>> {
+    parse_any(input, vec![parse_unary, parse_primary])
 }
 
-fn _parse_unary(input: ParseStream) -> Result<Box<Ast>> {
-    let op = _parse_unary_op(input)?;
-    let ast = _parse_primary(input)?;
+fn parse_unary(input: ParseStream) -> Result<Box<Ast>> {
+    let op = parse_unary_op(input)?;
+    let ast = parse_primary(input)?;
     Ok(Box::new(Ast::Unary(op, ast)))
 }
 
-fn _parse_binary(input: ParseStream) -> Result<Box<Ast>> {
-    let left = _parse_atom(input)?;
-    let op = _parse_binary_op(input)?;
-    let right = _parse_ast(input)?;
+fn parse_binary(input: ParseStream) -> Result<Box<Ast>> {
+    let left = parse_atom(input)?;
+    let op = parse_binary_op(input)?;
+    let right = parse_ast(input)?;
     Ok(Box::new(Ast::Binary(op, left, right)))
 }
 
-fn _parse_ast(input: ParseStream) -> Result<Box<Ast>> {
-    _parse_any(input, vec![_parse_binary, _parse_atom])
+fn parse_ast(input: ParseStream) -> Result<Box<Ast>> {
+    parse_any(input, vec![parse_binary, parse_atom])
 }
 
 impl Parse for Box<Ast> {
     fn parse(input: ParseStream) -> Result<Self> {
         let _input = input.fork();
-        match _parse_ast(&_input) {
+        match parse_ast(&_input) {
             Err(error) => Err(error),
             Ok(result) => {
                 input.advance_to(&_input);
@@ -189,54 +189,54 @@ impl Parse for Box<Ast> {
     }
 }
 
-fn _reify_layout(ast: Ast) -> Quoted {
+fn reify_layout(ast: Ast) -> Quoted {
     match ast {
         Ast::Null => quote! { typeset::null() },
         Ast::Variable(name) => quote! { #name.clone() },
         Ast::Text(data) => quote! { typeset::text(#data.to_string()) },
         Ast::Unary(UnaryOp::Fix, ast1) => {
-            let layout = _reify_layout(*ast1);
+            let layout = reify_layout(*ast1);
             quote! { typeset::fix(#layout) }
         }
         Ast::Unary(UnaryOp::Grp, ast1) => {
-            let layout = _reify_layout(*ast1);
+            let layout = reify_layout(*ast1);
             quote! { typeset::grp(#layout) }
         }
         Ast::Unary(UnaryOp::Seq, ast1) => {
-            let layout = _reify_layout(*ast1);
+            let layout = reify_layout(*ast1);
             quote! { typeset::seq(#layout) }
         }
         Ast::Unary(UnaryOp::Nest, ast1) => {
-            let layout = _reify_layout(*ast1);
+            let layout = reify_layout(*ast1);
             quote! { typeset::nest(#layout) }
         }
         Ast::Unary(UnaryOp::Pack, ast1) => {
-            let layout = _reify_layout(*ast1);
+            let layout = reify_layout(*ast1);
             quote! { typeset::pack(#layout) }
         }
         Ast::Binary(BinaryOp::Unpadded, left, right) => {
-            let left_layout = _reify_layout(*left);
-            let right_layout = _reify_layout(*right);
+            let left_layout = reify_layout(*left);
+            let right_layout = reify_layout(*right);
             quote! { typeset::unpad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::Padded, left, right) => {
-            let left_layout = _reify_layout(*left);
-            let right_layout = _reify_layout(*right);
+            let left_layout = reify_layout(*left);
+            let right_layout = reify_layout(*right);
             quote! { typeset::pad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::FixedUnpadded, left, right) => {
-            let left_layout = _reify_layout(*left);
-            let right_layout = _reify_layout(*right);
+            let left_layout = reify_layout(*left);
+            let right_layout = reify_layout(*right);
             quote! { typeset::fix_unpad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::FixedPadded, left, right) => {
-            let left_layout = _reify_layout(*left);
-            let right_layout = _reify_layout(*right);
+            let left_layout = reify_layout(*left);
+            let right_layout = reify_layout(*right);
             quote! { typeset::fix_pad(#left_layout, #right_layout) }
         }
         Ast::Binary(BinaryOp::Newline, left, right) => {
-            let left_layout = _reify_layout(*left);
-            let right_layout = _reify_layout(*right);
+            let left_layout = reify_layout(*left);
+            let right_layout = reify_layout(*right);
             quote! {
               typeset::line(
                 #left_layout,
@@ -245,8 +245,8 @@ fn _reify_layout(ast: Ast) -> Quoted {
             }
         }
         Ast::Binary(BinaryOp::DoubleNewline, left, right) => {
-            let left_layout = _reify_layout(*left);
-            let right_layout = _reify_layout(*right);
+            let left_layout = reify_layout(*left);
+            let right_layout = reify_layout(*right);
             quote! {
               typeset::line(
                 #left_layout,
@@ -263,6 +263,6 @@ fn _reify_layout(ast: Ast) -> Quoted {
 #[proc_macro]
 pub fn layout(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as Box<Ast>);
-    let output = _reify_layout(*ast);
+    let output = reify_layout(*ast);
     quote! { #output }.into()
 }

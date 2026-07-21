@@ -32,7 +32,7 @@ pub enum Layout {
 /// leaving a `Null` placeholder), so the recursive drop of each box terminates
 /// in O(1) and the tree is freed with a heap-allocated stack instead of the
 /// native one.
-fn _dismantle_layout(node: &mut Layout, stack: &mut Vec<Layout>) {
+fn dismantle_layout(node: &mut Layout, stack: &mut Vec<Layout>) {
     match node {
         Layout::Null | Layout::Text(_) => {}
         Layout::Fix(l) | Layout::Grp(l) | Layout::Seq(l) | Layout::Nest(l) | Layout::Pack(l) => {
@@ -48,15 +48,15 @@ fn _dismantle_layout(node: &mut Layout, stack: &mut Vec<Layout>) {
 impl Drop for Layout {
     fn drop(&mut self) {
         let mut stack: Vec<Layout> = Vec::new();
-        _dismantle_layout(self, &mut stack);
+        dismantle_layout(self, &mut stack);
         while let Some(mut node) = stack.pop() {
-            _dismantle_layout(&mut node, &mut stack);
+            dismantle_layout(&mut node, &mut stack);
         }
     }
 }
 
 /// Deep-copy a layout iteratively (bottom-up build with task/result stacks).
-fn _clone_layout(layout: &Layout) -> Box<Layout> {
+fn clone_layout(layout: &Layout) -> Box<Layout> {
     enum Task<'a> {
         Visit(&'a Layout),
         Fix,
@@ -142,7 +142,7 @@ fn _clone_layout(layout: &Layout) -> Box<Layout> {
 
 impl Clone for Layout {
     fn clone(&self) -> Self {
-        *_clone_layout(self)
+        *clone_layout(self)
     }
 }
 

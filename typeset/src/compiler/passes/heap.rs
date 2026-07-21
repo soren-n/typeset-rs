@@ -9,7 +9,7 @@
 use crate::compiler::types::{Doc, DocObj, DocObjFix, FinalDoc, FinalDocObj, FinalDocObjFix};
 
 /// Rebuild a fixed object bottom-up (iterative).
-fn _convert_fix(fix: &FinalDocObjFix) -> Box<DocObjFix> {
+fn convert_fix(fix: &FinalDocObjFix) -> Box<DocObjFix> {
     enum Task<'a> {
         Visit(&'a FinalDocObjFix<'a>),
         Comp(bool),
@@ -37,7 +37,7 @@ fn _convert_fix(fix: &FinalDocObjFix) -> Box<DocObjFix> {
 }
 
 /// Rebuild an object bottom-up (iterative).
-fn _convert_obj(obj: &FinalDocObj) -> Box<DocObj> {
+fn convert_obj(obj: &FinalDocObj) -> Box<DocObj> {
     enum Task<'a> {
         Visit(&'a FinalDocObj<'a>),
         Grp,
@@ -54,7 +54,7 @@ fn _convert_obj(obj: &FinalDocObj) -> Box<DocObj> {
                 FinalDocObj::Text(data) => out.push(Box::new(DocObj::Text(data.to_string()))),
                 // Fixed subtrees are self-contained and rebuilt by their own
                 // iterative pass.
-                FinalDocObj::Fix(fix) => out.push(Box::new(DocObj::Fix(_convert_fix(fix)))),
+                FinalDocObj::Fix(fix) => out.push(Box::new(DocObj::Fix(convert_fix(fix)))),
                 FinalDocObj::Grp(obj1) => {
                     tasks.push(Task::Grp);
                     tasks.push(Task::Visit(obj1));
@@ -120,10 +120,10 @@ pub fn move_to_heap<'a>(doc: &'a FinalDoc<'a>) -> Box<Doc> {
     for node in spine.into_iter().rev() {
         let built = match node {
             FinalDoc::Eod => Box::new(Doc::Eod),
-            FinalDoc::Line(obj) => Box::new(Doc::Line(_convert_obj(obj))),
+            FinalDoc::Line(obj) => Box::new(Doc::Line(convert_obj(obj))),
             FinalDoc::Empty(_) => Box::new(Doc::Empty(acc.take().expect("empty: tail"))),
             FinalDoc::Break(obj, _) => Box::new(Doc::Break(
-                _convert_obj(obj),
+                convert_obj(obj),
                 acc.take().expect("break: tail"),
             )),
         };

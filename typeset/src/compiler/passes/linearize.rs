@@ -29,21 +29,21 @@ pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b Linea
             // object, then start a fresh line.
             Serial::Next(term, SerialComp::Line, serial1) => {
                 let term1 = map_term_chain(mem, *term);
-                lines.push(_build_line(mem, &acc, term1));
+                lines.push(build_line(mem, &acc, term1));
                 acc.clear();
                 cur = serial1;
             }
             // Any other composition extends the current line.
             Serial::Next(term, comp, serial1) => {
                 let term1 = map_term_chain(mem, *term);
-                let comp1 = _visit_comp(mem, comp);
+                let comp1 = visit_comp(mem, comp);
                 acc.push((term1, comp1));
                 cur = serial1;
             }
             // End of the serial: flush the final line.
             Serial::Last(term, Serial::Past) => {
                 let term1 = map_term_chain(mem, *term);
-                lines.push(_build_line(mem, &acc, term1));
+                lines.push(build_line(mem, &acc, term1));
                 break;
             }
             _ => unreachable!("Invariant"),
@@ -61,7 +61,7 @@ pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: &'a Serial<'a>) -> &'b Linea
 /// Builds one line object: `Next(t0, c0, Next(t1, c1, ... Last(term_last)))`,
 /// where `acc` holds the `(term, comp)` pairs in visitation order and
 /// `term_last` is the line's final term.
-fn _build_line<'b>(
+fn build_line<'b>(
     mem: &'b Bump,
     acc: &[(&'b LinearTerm<'b>, &'b LinearComp<'b>)],
     term_last: &'b LinearTerm<'b>,
@@ -74,7 +74,7 @@ fn _build_line<'b>(
 }
 
 /// Linearizes a non-`Line` `SerialComp` chain into a `LinearComp`.
-fn _visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a SerialComp<'a>) -> &'b LinearComp<'b> {
+fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a SerialComp<'a>) -> &'b LinearComp<'b> {
     let mut wraps: Vec<CompWrap> = Vec::new();
     let mut cur = comp;
     let mut val: &'b LinearComp<'b> = loop {

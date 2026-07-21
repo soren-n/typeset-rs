@@ -45,7 +45,7 @@ fn zero_max_depth_is_still_rejected() {
 #[test]
 fn depth_limit_is_not_off_by_one() {
     // A layout of exactly the limit must compile; one deeper must not.
-    let depth = _probe_depth();
+    let depth = probe_depth();
     assert!(
         compile_safe_with_depth(nested(depth), depth + 1).is_ok(),
         "layout at exactly the limit was rejected"
@@ -57,6 +57,6 @@ fn depth_limit_is_not_off_by_one() {
 }
 
 /// nest(n) produces n + 1 levels (the wrappers plus the inner text).
-fn _probe_depth() -> usize {
+fn probe_depth() -> usize {
     20
 }

@@ -4,7 +4,7 @@
 //! compositions in a subtree so a grp/seq wrapping fewer than two of them can
 //! be dropped as an identity. The folds were already direct-style but recursed
 //! on the native stack (Comp branches), aborting on deep inputs. Here each
-//! `_visit_obj` runs as a descend/ascend trampoline over a heap-allocated frame
+//! each object visitor runs as a descend/ascend trampoline over a heap-allocated frame
 //! stack, and the doc spines are plain loops.
 
 use super::walk::map_denull_spine;
@@ -18,7 +18,7 @@ enum Count {
     Many,
 }
 
-fn _add(left: Count, right: Count) -> Count {
+fn add(left: Count, right: Count) -> Count {
     match (left, right) {
         (Count::Zero, _) => right,
         (_, Count::Zero) => left,
@@ -61,17 +61,17 @@ enum GrpFrame<'b, 'a> {
 
 /// Remove grp and seq identities
 pub fn identities<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    let doc1 = _elim_seqs(mem, doc);
-    _elim_grps(mem, doc1)
+    let doc1 = elim_seqs(mem, doc);
+    elim_grps(mem, doc1)
 }
 
-fn _elim_seqs<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    map_denull_spine(mem, doc, |mem, obj| _visit_obj_seqs(mem, obj, false).1)
+fn elim_seqs<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
+    map_denull_spine(mem, doc, |mem, obj| visit_obj_seqs(mem, obj, false).1)
 }
 
 /// Bottom-up fold eliminating seq wrappers that group fewer than two
 /// compositions, and absorbing directly nested seqs.
-fn _visit_obj_seqs<'b, 'a: 'b>(
+fn visit_obj_seqs<'b, 'a: 'b>(
     mem: &'b Bump,
     obj: &'a DenullObj<'a>,
     under_seq: bool,
@@ -132,7 +132,7 @@ fn _visit_obj_seqs<'b, 'a: 'b>(
                     continue 'machine;
                 }
                 Some(SeqFrame::CompRight { left, pad }) => {
-                    let count = _add(Count::One, _add(left.0, val.0));
+                    let count = add(Count::One, add(left.0, val.0));
                     val = (count, mem.alloc(DenullObj::Comp(left.1, val.1, pad)));
                 }
             }
@@ -140,13 +140,13 @@ fn _visit_obj_seqs<'b, 'a: 'b>(
     }
 }
 
-fn _elim_grps<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    map_denull_spine(mem, doc, |mem, obj| _visit_obj_grps(mem, obj, true).1)
+fn elim_grps<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
+    map_denull_spine(mem, doc, |mem, obj| visit_obj_grps(mem, obj, true).1)
 }
 
 /// Bottom-up fold eliminating grp wrappers that group fewer than two
 /// compositions, and absorbing grps at the head of their enclosing group.
-fn _visit_obj_grps<'b, 'a: 'b>(
+fn visit_obj_grps<'b, 'a: 'b>(
     mem: &'b Bump,
     obj: &'a DenullObj<'a>,
     in_head: bool,
@@ -203,7 +203,7 @@ fn _visit_obj_grps<'b, 'a: 'b>(
                     continue 'machine;
                 }
                 Some(GrpFrame::CompRight { left, pad }) => {
-                    let count = _add(Count::One, _add(left.0, val.0));
+                    let count = add(Count::One, add(left.0, val.0));
                     val = (count, mem.alloc(DenullObj::Comp(left.1, val.1, pad)));
                 }
             }

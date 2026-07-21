@@ -27,7 +27,7 @@ pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: &'a LinearDoc<'a>) -> &'b FixedDoc<
         match cur {
             LinearDoc::Nil => break,
             LinearDoc::Cons(obj, doc1) => {
-                objs.push(_visit_obj(mem, obj));
+                objs.push(visit_obj(mem, obj));
                 cur = doc1;
             }
         }
@@ -42,7 +42,7 @@ pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: &'a LinearDoc<'a>) -> &'b FixedDoc<
 /// Coalesces one object's term/comp chain. Terms connected by fixed
 /// compositions are grouped into a `FixedItem::Fix`; the remaining
 /// (non-fixed) compositions separate the resulting items.
-fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj<'b> {
+fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj<'b> {
     // The resulting items and the non-fixed comps that separate them.
     let mut items: Vec<&'b FixedItem<'b>> = Vec::new();
     let mut seps: Vec<&'b FixedComp<'b>> = Vec::new();
@@ -55,7 +55,7 @@ fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj
         match cur {
             LinearObj::Next(term, comp, obj1) => {
                 let term1 = map_term_chain(mem, *term);
-                let (is_fixed, comp1) = _visit_comp(mem, comp);
+                let (is_fixed, comp1) = visit_comp(mem, comp);
                 if is_fixed {
                     // A fixed composition: extend (or start) the current run.
                     fix_run.push((term1, comp1));
@@ -63,7 +63,7 @@ fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj
                 } else if in_fix {
                     // A non-fixed composition closes the run; term1 is its last
                     // term, comp1 becomes the object-level separator.
-                    let fix = _build_fix(mem, &fix_run, term1);
+                    let fix = build_fix(mem, &fix_run, term1);
                     items.push(mem.alloc(FixedItem::Fix(fix)));
                     seps.push(comp1);
                     fix_run.clear();
@@ -78,7 +78,7 @@ fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj
             LinearObj::Last(term) => {
                 let term1 = map_term_chain(mem, *term);
                 if in_fix {
-                    let fix = _build_fix(mem, &fix_run, term1);
+                    let fix = build_fix(mem, &fix_run, term1);
                     items.push(mem.alloc(FixedItem::Fix(fix)));
                 } else {
                     items.push(mem.alloc(FixedItem::Term(term1)));
@@ -101,7 +101,7 @@ fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj
 /// Builds a fix group: `Next(t0, c0, Next(t1, c1, ... Last(last_term)))`, where
 /// `run` holds the `(term, fixed-comp)` pairs in order and `last_term` is the
 /// group's final term.
-fn _build_fix<'b>(
+fn build_fix<'b>(
     mem: &'b Bump,
     run: &[(&'b FixedTerm<'b>, &'b FixedComp<'b>)],
     last_term: &'b FixedTerm<'b>,
@@ -114,7 +114,7 @@ fn _build_fix<'b>(
 }
 
 /// Rebuilds a comp chain, reporting whether its innermost composition is fixed.
-fn _visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a LinearComp<'a>) -> (bool, &'b FixedComp<'b>) {
+fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a LinearComp<'a>) -> (bool, &'b FixedComp<'b>) {
     let mut wraps: Vec<CompWrap> = Vec::new();
     let mut cur = comp;
     let (is_fixed, mut val): (bool, &'b FixedComp<'b>) = loop {

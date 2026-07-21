@@ -7,14 +7,14 @@
 use crate::compiler::types::{GraphDoc, GraphEdge, GraphNode, Property};
 use bumpalo::Bump;
 
-fn _move_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
-    fn _remove_ins<'a>(ins: &'a GraphEdge<'a>) {
+fn move_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
+    fn remove_ins<'a>(ins: &'a GraphEdge<'a>) {
         let node = ins.target.get();
         node.ins_head.set(None);
         node.ins_tail.set(None)
     }
-    fn _append_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
-        fn _set_targets<'a>(node: &'a GraphNode<'a>, ins: Option<&'a GraphEdge<'a>>) {
+    fn append_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
+        fn set_targets<'a>(node: &'a GraphNode<'a>, ins: Option<&'a GraphEdge<'a>>) {
             let mut cur = ins;
             while let Some(edge) = cur {
                 edge.target.set(node);
@@ -22,7 +22,7 @@ fn _move_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a Gra
             }
         }
         let node = edge.target.get();
-        _set_targets(node, Some(head));
+        set_targets(node, Some(head));
         match edge.ins_next.get() {
             None => {
                 edge.ins_next.set(Some(head));
@@ -37,11 +37,11 @@ fn _move_ins<'a>(head: &'a GraphEdge<'a>, tail: &'a GraphEdge<'a>, edge: &'a Gra
             }
         }
     }
-    _remove_ins(head);
-    _append_ins(head, tail, edge)
+    remove_ins(head);
+    append_ins(head, tail, edge)
 }
-fn _move_out<'a>(curr: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
-    fn _remove_out<'a>(curr: &'a GraphEdge<'a>) {
+fn move_out<'a>(curr: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
+    fn remove_out<'a>(curr: &'a GraphEdge<'a>) {
         let node = curr.source.get();
         match (curr.outs_prev.get(), curr.outs_next.get()) {
             (None, None) => {
@@ -66,7 +66,7 @@ fn _move_out<'a>(curr: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
             }
         }
     }
-    fn _prepend_out<'a>(curr: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
+    fn prepend_out<'a>(curr: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
         let node = edge.source.get();
         curr.source.set(node);
         match edge.outs_prev.get() {
@@ -83,12 +83,12 @@ fn _move_out<'a>(curr: &'a GraphEdge<'a>, edge: &'a GraphEdge<'a>) {
             }
         }
     }
-    _remove_out(curr);
-    _prepend_out(curr, edge)
+    remove_out(curr);
+    prepend_out(curr, edge)
 }
 // Walks the outs edges from `outs`, moving each Seq edge out of the way,
 // and returns the first Grp edge (or None if the edges are exhausted).
-fn _resolve<'a>(edge: &'a GraphEdge<'a>, outs: &'a GraphEdge<'a>) -> Option<&'a GraphEdge<'a>> {
+fn resolve<'a>(edge: &'a GraphEdge<'a>, outs: &'a GraphEdge<'a>) -> Option<&'a GraphEdge<'a>> {
     let mut maybe_curr = Some(outs);
     let mut edge = edge;
     loop {
@@ -98,7 +98,7 @@ fn _resolve<'a>(edge: &'a GraphEdge<'a>, outs: &'a GraphEdge<'a>) -> Option<&'a 
                 Property::Grp(()) => break Some(curr),
                 Property::Seq(()) => {
                     let curr1 = curr.outs_next.get();
-                    _move_out(curr, edge);
+                    move_out(curr, edge);
                     edge = curr;
                     maybe_curr = curr1;
                 }
@@ -106,7 +106,7 @@ fn _resolve<'a>(edge: &'a GraphEdge<'a>, outs: &'a GraphEdge<'a>) -> Option<&'a 
         }
     }
 }
-fn _leftmost<'a>(head: &'a GraphEdge<'a>) -> &'a GraphEdge<'a> {
+fn leftmost<'a>(head: &'a GraphEdge<'a>) -> &'a GraphEdge<'a> {
     let mut curr = head;
     let mut index = head.source.get().index;
     let mut result = head;
@@ -120,16 +120,16 @@ fn _leftmost<'a>(head: &'a GraphEdge<'a>) -> &'a GraphEdge<'a> {
     }
     result
 }
-fn _visit_node<'a>(nodes: &'a [&'a GraphNode<'a>]) {
+fn visit_node<'a>(nodes: &'a [&'a GraphNode<'a>]) {
     for node in nodes {
         match (
             (node.ins_head.get(), node.ins_tail.get()),
             (node.outs_head.get(), node.outs_tail.get()),
         ) {
             ((Some(ins_head), Some(ins_tail)), (Some(outs_head), Some(_outs_tail))) => {
-                let ins_first = _leftmost(ins_head);
-                if let Some(outs_head1) = _resolve(ins_first, outs_head) {
-                    _move_ins(ins_head, ins_tail, outs_head1);
+                let ins_first = leftmost(ins_head);
+                if let Some(outs_head1) = resolve(ins_first, outs_head) {
+                    move_ins(ins_head, ins_tail, outs_head1);
                 }
             }
             ((Some(_), None), _)
@@ -150,7 +150,7 @@ pub(super) fn solve<'a>(mem: &'a Bump, doc: &'a GraphDoc<'a>) -> &'a GraphDoc<'a
         match cur {
             GraphDoc::Eod => break,
             GraphDoc::Break(nodes, pads, doc1) => {
-                _visit_node(nodes);
+                visit_node(nodes);
                 breaks.push((nodes, pads));
                 cur = doc1;
             }

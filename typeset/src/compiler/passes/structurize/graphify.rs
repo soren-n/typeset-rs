@@ -43,7 +43,7 @@ fn make_edge<'a>(
 }
 
 pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
-    fn _lift_stack(comp: &FixedComp) -> (Vec<Property<u64>>, bool) {
+    fn lift_stack(comp: &FixedComp) -> (Vec<Property<u64>>, bool) {
         // Linear chain of grp/seq wrappers around a leaf Comp(pad). Index 0
         // is the outermost wrapper (what used to be the list head).
         let mut props: Vec<Property<u64>> = Vec::new();
@@ -67,9 +67,9 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
     // linearly (each update replaces the binding; no earlier version is ever
     // retained), so a plain owned `BTreeMap` mutated in place is a faithful
     // replacement for the former persistent map. `BTreeMap` also gives the
-    // key-ordered `values()` iteration `_transpose` depends on.
+    // key-ordered `values()` iteration `transpose` depends on.
     type Graph = BTreeMap<u64, Property<(u64, Option<u64>)>>;
-    fn _close(to_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
+    fn close(to_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
         // Close each open grp/seq scope on the stack by recording to_node.
         for prop in stack {
             match prop {
@@ -89,7 +89,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         }
         props
     }
-    fn _open(from_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
+    fn open(from_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
         // Open a fresh grp/seq scope on the stack, anchored at from_node.
         for prop in stack {
             match prop {
@@ -103,7 +103,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         }
         props
     }
-    fn _update(
+    fn update(
         node: u64,
         mut props: Graph,
         scope: &[Property<u64>],
@@ -116,11 +116,11 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         let rest_stack: &[Property<u64>] = loop {
             match (scope.get(k), stack.get(k)) {
                 (_, None) => {
-                    props = _close(node, props, &scope[k..]);
+                    props = close(node, props, &scope[k..]);
                     break &[];
                 }
                 (None, _) => {
-                    props = _open(node, props, &stack[k..]);
+                    props = open(node, props, &stack[k..]);
                     break &stack[k..];
                 }
                 (Some(sp), Some(stp)) => {
@@ -142,8 +142,8 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     if matched {
                         k += 1;
                     } else {
-                        props = _close(node, props, &scope[k..]);
-                        props = _open(node, props, &stack[k..]);
+                        props = close(node, props, &scope[k..]);
+                        props = open(node, props, &stack[k..]);
                         break &stack[k..];
                     }
                 }
@@ -154,12 +154,12 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         result.extend_from_slice(rest_stack);
         (result, props)
     }
-    fn _transpose<'a>(
+    fn transpose<'a>(
         mem: &'a Bump,
         nodes: &'a [&'a GraphNode<'a>],
         props: &[Property<(u64, Option<u64>)>],
     ) {
-        fn _push_ins<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
+        fn push_ins<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
             match node.ins_tail.get() {
                 None => {
                     node.ins_head.set(Some(edge));
@@ -172,7 +172,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                 }
             }
         }
-        fn _push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
+        fn push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
             match node.outs_tail.get() {
                 None => {
                     node.outs_head.set(Some(edge));
@@ -193,8 +193,8 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                         let from_node = nodes[*from_index as usize];
                         let to_node = nodes[*to_index as usize];
                         let curr = make_edge(mem, Property::Grp(()), from_node, to_node);
-                        _push_ins(curr, to_node);
-                        _push_outs(curr, from_node);
+                        push_ins(curr, to_node);
+                        push_outs(curr, from_node);
                     }
                 }
                 Property::Seq((from_index, Some(to_index))) => {
@@ -202,15 +202,15 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                         let from_node = nodes[*from_index as usize];
                         let to_node = nodes[*to_index as usize];
                         let curr = make_edge(mem, Property::Seq(()), from_node, to_node);
-                        _push_ins(curr, to_node);
-                        _push_outs(curr, from_node);
+                        push_ins(curr, to_node);
+                        push_outs(curr, from_node);
                     }
                 }
                 _ => unreachable!("Invariant"),
             }
         }
     }
-    fn _visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
+    fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
         // Walk the linear FixedDoc spine, graphifying each line's object.
         type Line<'b> = (&'b [&'b GraphNode<'b>], &'b [bool]);
         let mut breaks: Vec<Line<'b>> = Vec::new();
@@ -219,12 +219,12 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
             match cur {
                 FixedDoc::Eod => break,
                 FixedDoc::Break(obj, doc1) => {
-                    let (nodes2, pads1, props1) = _visit_obj(mem, obj);
+                    let (nodes2, pads1, props1) = visit_obj(mem, obj);
                     // BTreeMap::values yields the properties in key order,
-                    // which is the order _transpose consumes them in.
+                    // which is the order transpose consumes them in.
                     let props2: Vec<Property<(u64, Option<u64>)>> =
                         props1.values().copied().collect();
-                    _transpose(mem, nodes2, &props2);
+                    transpose(mem, nodes2, &props2);
                     breaks.push((nodes2, pads1));
                     cur = doc1;
                 }
@@ -237,7 +237,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         gdoc
     }
     #[allow(clippy::type_complexity)]
-    fn _visit_obj<'b, 'a: 'b>(
+    fn visit_obj<'b, 'a: 'b>(
         mem: &'b Bump,
         obj: &'a FixedObj<'a>,
     ) -> (&'b [&'b GraphNode<'b>], &'b [bool], Graph) {
@@ -255,16 +255,16 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     let term1 = match item {
                         FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
-                            let (fix1, scope1, props1) = _visit_fix(mem, fix, index, scope, props);
+                            let (fix1, scope1, props1) = visit_fix(mem, fix, index, scope, props);
                             scope = scope1;
                             props = props1;
                             mem.alloc(GraphTerm::Fix(fix1))
                         }
                     };
                     nodes_vec.push(make_node(mem, index, term1));
-                    let (stack, pad) = _lift_stack(comp);
+                    let (stack, pad) = lift_stack(comp);
                     pads_vec.push(pad);
-                    let (scope2, props2) = _update(index, props, &scope, &stack);
+                    let (scope2, props2) = update(index, props, &scope, &stack);
                     scope = scope2;
                     props = props2;
                     index += 1;
@@ -274,14 +274,14 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
                     let term1 = match item {
                         FixedItem::Term(term) => map_term_chain(mem, *term),
                         FixedItem::Fix(fix) => {
-                            let (fix1, scope1, props1) = _visit_fix(mem, fix, index, scope, props);
+                            let (fix1, scope1, props1) = visit_fix(mem, fix, index, scope, props);
                             scope = scope1;
                             props = props1;
                             mem.alloc(GraphTerm::Fix(fix1))
                         }
                     };
                     nodes_vec.push(make_node(mem, index, term1));
-                    break _close(index, props, &scope);
+                    break close(index, props, &scope);
                 }
             }
         };
@@ -291,7 +291,7 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
             final_props,
         )
     }
-    fn _visit_fix<'b, 'a: 'b>(
+    fn visit_fix<'b, 'a: 'b>(
         mem: &'b Bump,
         fix: &'a FixedFix<'a>,
         index: u64,
@@ -306,8 +306,8 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
             match cur {
                 FixedFix::Next(term, comp, fix1) => {
                     let term1 = map_term_chain(mem, *term);
-                    let (stack, pad) = _lift_stack(comp);
-                    let (scope1, props1) = _update(index, props, &scope, &stack);
+                    let (stack, pad) = lift_stack(comp);
+                    let (scope1, props1) = update(index, props, &scope, &stack);
                     recorded.push((term1, pad));
                     scope = scope1;
                     props = props1;
@@ -322,5 +322,5 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b 
         }
         (gfix, scope, props)
     }
-    _visit_doc(mem, doc)
+    visit_doc(mem, doc)
 }

@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn structurize_handles_deep_nest_term() {
         let mem = Bump::new();
-        // A deep Nest term exercises _visit_term at depth in graphify/rebuild.
+        // A deep Nest term exercises visit_term at depth in graphify/rebuild.
         let mut term: &FixedTerm = mem.alloc(FixedTerm::Text("x"));
         for _ in 0..DEEP {
             term = mem.alloc(FixedTerm::Nest(term));

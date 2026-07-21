@@ -3,7 +3,7 @@
 //! Drops `Null`/empty-text terms, collapsing objects that reduce to nothing.
 //! The original expressed this as a multi-continuation CPS fold (none / some /
 //! next_none) recursing on the native stack. Here each visitor instead returns
-//! an explicit result enum, and the tree visitors (`_visit_obj`, `_visit_fix`)
+//! an explicit result enum, and the tree visitors (`visit_obj`, `visit_fix`)
 //! run as descend/ascend trampolines over a heap-allocated frame stack so deep
 //! inputs no longer overflow.
 
@@ -34,7 +34,7 @@ enum TermWrap {
     Pack(u64),
 }
 
-/// Frames for the `_visit_obj` trampoline.
+/// Frames for the `visit_obj` trampoline.
 enum ObjFrame<'b, 'a> {
     Grp,
     Seq,
@@ -48,7 +48,7 @@ enum ObjFrame<'b, 'a> {
     },
 }
 
-/// Frames for the `_visit_fix` trampoline.
+/// Frames for the `visit_fix` trampoline.
 enum FixFrame<'b, 'a> {
     CompLeft {
         right: &'a RebuildFix<'a>,
@@ -76,7 +76,7 @@ pub fn denull<'b, 'a: 'b>(mem: &'b Bump, doc: &'a RebuildDoc<'a>) -> &'b DenullD
         match cur {
             RebuildDoc::Eod => break,
             RebuildDoc::Break(obj, doc1) => {
-                let kind = match _visit_obj(mem, obj) {
+                let kind = match visit_obj(mem, obj) {
                     ObjRes::None => Kind::Empty,
                     ObjRes::Some(obj1) | ObjRes::NextNone(_, obj1) => Kind::Obj(obj1),
                 };
@@ -104,16 +104,16 @@ pub fn denull<'b, 'a: 'b>(mem: &'b Bump, doc: &'a RebuildDoc<'a>) -> &'b DenullD
 
 /// Denulls an object tree. `Comp` branches into left then right; `Grp`/`Seq`
 /// wrap their child; `Term`/`Fix` are leaves.
-fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a RebuildObj<'a>) -> ObjRes<'b> {
+fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a RebuildObj<'a>) -> ObjRes<'b> {
     let mut stack: Vec<ObjFrame<'b, 'a>> = Vec::new();
     let mut cur = obj;
     'descend: loop {
         let mut val: ObjRes<'b> = match cur {
-            RebuildObj::Term(term) => match _visit_term(mem, term) {
+            RebuildObj::Term(term) => match visit_term(mem, term) {
                 None => ObjRes::None,
                 Some(term1) => ObjRes::Some(mem.alloc(DenullObj::Term(term1))),
             },
-            RebuildObj::Fix(fix) => match _visit_fix(mem, fix) {
+            RebuildObj::Fix(fix) => match visit_fix(mem, fix) {
                 FixRes::None => ObjRes::None,
                 FixRes::Some(fix1) | FixRes::NextNone(_, fix1) => {
                     ObjRes::Some(mem.alloc(DenullObj::Fix(fix1)))
@@ -188,14 +188,14 @@ fn _visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a RebuildObj<'a>) -> ObjRes<'b> 
     }
 }
 
-/// Denulls a fixed sub-object tree. Mirrors `_visit_obj` but only `Comp`
+/// Denulls a fixed sub-object tree. Mirrors `visit_obj` but only `Comp`
 /// branches and `Term` is the sole leaf.
-fn _visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a RebuildFix<'a>) -> FixRes<'b> {
+fn visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a RebuildFix<'a>) -> FixRes<'b> {
     let mut stack: Vec<FixFrame<'b, 'a>> = Vec::new();
     let mut cur = fix;
     'descend: loop {
         let mut val: FixRes<'b> = match cur {
-            RebuildFix::Term(term) => match _visit_term(mem, term) {
+            RebuildFix::Term(term) => match visit_term(mem, term) {
                 None => FixRes::None,
                 Some(term1) => FixRes::Some(mem.alloc(DenullFix::Term(term1))),
             },
@@ -243,7 +243,7 @@ fn _visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a RebuildFix<'a>) -> FixRes<'b> 
 
 /// Denulls a term chain: `Null` and empty text vanish; `Nest`/`Pack` wrappers
 /// are preserved over a surviving term and dropped over nothing.
-fn _visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a RebuildTerm<'a>) -> Option<&'b DenullTerm<'b>> {
+fn visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a RebuildTerm<'a>) -> Option<&'b DenullTerm<'b>> {
     let mut wraps: Vec<TermWrap> = Vec::new();
     let mut cur = term;
     let mut val: Option<&'b DenullTerm<'b>> = loop {

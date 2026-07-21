@@ -7,8 +7,8 @@
 //! tree recursion with `compose`d continuations, aborting on deep inputs.
 //!
 //! Here the object and fix walks are descend/ascend trampolines over
-//! heap-allocated frame stacks; the prop helpers (`_strip_term`,
-//! `_common_prefix_len`, `_wrap_props`) and the doc spine are plain loops.
+//! heap-allocated frame stacks; the prop helpers (`strip_term`,
+//! `common_prefix_len`, `wrap_props`) and the doc spine are plain loops.
 
 use super::walk::map_denull_spine;
 use crate::compiler::types::{
@@ -53,14 +53,14 @@ enum FixFrame<'b, 'a> {
 /// Rescope nest and pack
 pub fn rescope<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b FinalDoc<'b> {
     map_denull_spine(mem, doc, |mem, obj| {
-        let (props, obj1) = _visit_obj(mem, obj);
-        _wrap_props(mem, &props, obj1)
+        let (props, obj1) = visit_obj(mem, obj);
+        wrap_props(mem, &props, obj1)
     })
 }
 
 /// Rescopes one object, returning its stripped prop prefix and the rescoped
 /// object.
-fn _visit_obj<'b, 'a: 'b>(
+fn visit_obj<'b, 'a: 'b>(
     mem: &'b Bump,
     obj: &'a DenullObj<'a>,
 ) -> (Vec<Prop>, &'b FinalDocObj<'b>) {
@@ -69,9 +69,9 @@ fn _visit_obj<'b, 'a: 'b>(
     'machine: loop {
         let mut val: (Vec<Prop>, &'b FinalDocObj<'b>) = loop {
             match cur {
-                DenullObj::Term(term) => break _visit_term(mem, term),
+                DenullObj::Term(term) => break visit_term(mem, term),
                 DenullObj::Fix(fix) => {
-                    let (props, fix1) = _visit_fix(mem, fix);
+                    let (props, fix1) = visit_fix(mem, fix);
                     break (props, mem.alloc(FinalDocObj::Fix(fix1)));
                 }
                 DenullObj::Grp(obj1) => {
@@ -111,9 +111,9 @@ fn _visit_obj<'b, 'a: 'b>(
                     // Factor the common prop prefix out around the composition;
                     // apply the leftovers to each operand individually. `l_props`
                     // is reused as the common prefix (truncated in place).
-                    let k = _common_prefix_len(&l_props, &r_props);
-                    let left2 = _wrap_props(mem, &l_props[k..], left1);
-                    let right2 = _wrap_props(mem, &r_props[k..], right1);
+                    let k = common_prefix_len(&l_props, &r_props);
+                    let left2 = wrap_props(mem, &l_props[k..], left1);
+                    let right2 = wrap_props(mem, &r_props[k..], right1);
                     let comp = mem.alloc(FinalDocObj::Comp(left2, right2, pad));
                     l_props.truncate(k);
                     val = (l_props, comp);
@@ -125,7 +125,7 @@ fn _visit_obj<'b, 'a: 'b>(
 
 /// Rescopes a fixed sub-object. A fix composition keeps only its left operand's
 /// props (the right operand's are dropped, matching the original).
-fn _visit_fix<'b, 'a: 'b>(
+fn visit_fix<'b, 'a: 'b>(
     mem: &'b Bump,
     fix: &'a DenullFix<'a>,
 ) -> (Vec<Prop>, &'b FinalDocObjFix<'b>) {
@@ -134,7 +134,7 @@ fn _visit_fix<'b, 'a: 'b>(
     'machine: loop {
         let mut val: (Vec<Prop>, &'b FinalDocObjFix<'b>) = loop {
             match cur {
-                DenullFix::Term(term) => break _visit_fix_term(mem, term),
+                DenullFix::Term(term) => break visit_fix_term(mem, term),
                 DenullFix::Comp(left, right, pad) => {
                     stack.push(FixFrame::CompLeft { right, pad: *pad });
                     cur = left;
@@ -167,25 +167,25 @@ fn _visit_fix<'b, 'a: 'b>(
 }
 
 /// Strips a term chain into its prop prefix (index 0 = outermost) and a text obj.
-fn _visit_term<'b, 'a: 'b>(
+fn visit_term<'b, 'a: 'b>(
     mem: &'b Bump,
     term: &'a DenullTerm<'a>,
 ) -> (Vec<Prop>, &'b FinalDocObj<'b>) {
-    let (props, data) = _strip_term(term);
+    let (props, data) = strip_term(term);
     (props, mem.alloc(FinalDocObj::Text(data)))
 }
 
 /// Strips a fix term chain into its prop prefix and a fixed text obj.
-fn _visit_fix_term<'b, 'a: 'b>(
+fn visit_fix_term<'b, 'a: 'b>(
     mem: &'b Bump,
     term: &'a DenullTerm<'a>,
 ) -> (Vec<Prop>, &'b FinalDocObjFix<'b>) {
-    let (props, data) = _strip_term(term);
+    let (props, data) = strip_term(term);
     (props, mem.alloc(FinalDocObjFix::Text(data)))
 }
 
 /// Collects a term's nest/pack wrappers (outermost first) and its text data.
-fn _strip_term<'a>(term: &'a DenullTerm<'a>) -> (Vec<Prop>, &'a str) {
+fn strip_term<'a>(term: &'a DenullTerm<'a>) -> (Vec<Prop>, &'a str) {
     let mut props: Vec<Prop> = Vec::new();
     let mut cur = term;
     let data: &'a str = loop {
@@ -206,7 +206,7 @@ fn _strip_term<'a>(term: &'a DenullTerm<'a>) -> (Vec<Prop>, &'a str) {
 
 /// Length of the common prop prefix of `l` and `r` (matching Nest/Nest or
 /// Pack/Pack with the same index).
-fn _common_prefix_len(l: &[Prop], r: &[Prop]) -> usize {
+fn common_prefix_len(l: &[Prop], r: &[Prop]) -> usize {
     let mut k = 0;
     while k < l.len() && k < r.len() {
         let same = match (l[k], r[k]) {
@@ -223,11 +223,7 @@ fn _common_prefix_len(l: &[Prop], r: &[Prop]) -> usize {
 }
 
 /// Wraps a term with its props, index 0 outermost.
-fn _wrap_props<'b>(
-    mem: &'b Bump,
-    props: &[Prop],
-    term: &'b FinalDocObj<'b>,
-) -> &'b FinalDocObj<'b> {
+fn wrap_props<'b>(mem: &'b Bump, props: &[Prop], term: &'b FinalDocObj<'b>) -> &'b FinalDocObj<'b> {
     // Apply from the tail so the first prop ends up outermost.
     let mut obj = term;
     for prop in props.iter().rev() {

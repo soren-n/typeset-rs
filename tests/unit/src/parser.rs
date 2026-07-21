@@ -48,7 +48,7 @@ enum Syntax {
 #[doc(hidden)]
 #[allow(clippy::vec_box)]
 pub fn parse(input: &str, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String> {
-    fn _parse_syntax(tokens: Pairs<Rule>) -> Result<Box<Syntax>, String> {
+    fn parse_syntax(tokens: Pairs<Rule>) -> Result<Box<Syntax>, String> {
         PRATT_PARSER
             .map_primary(|primary| match primary.as_rule() {
                 Rule::null => Ok(Box::new(Syntax::Null)),
@@ -96,7 +96,7 @@ pub fn parse(input: &str, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String
                         _ => Err(format!("Unexpected token: {part:?}")),
                     })
                     .map(|result| Box::new(Syntax::Text(result))),
-                Rule::expr => _parse_syntax(primary.into_inner()),
+                Rule::expr => parse_syntax(primary.into_inner()),
                 rule => Err(format!("expected atom, found {:?}", rule)),
             })
             .map_infix(|left, op, right| match op.as_rule() {
@@ -119,7 +119,7 @@ pub fn parse(input: &str, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String
             .parse(tokens)
     }
     #[allow(clippy::vec_box)]
-    fn _interp_syntax(syntax: Syntax, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String> {
+    fn interp_syntax(syntax: Syntax, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String> {
         match syntax {
             Syntax::Null => Ok(null()),
             Syntax::Index(index) => {
@@ -132,60 +132,60 @@ pub fn parse(input: &str, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String
             }
             Syntax::Text(data) => Ok(text(data)),
             Syntax::Fix(syntax1) => {
-                let layout = _interp_syntax(*syntax1, args);
+                let layout = interp_syntax(*syntax1, args);
                 Ok(fix(layout?))
             }
             Syntax::Grp(syntax1) => {
-                let layout = _interp_syntax(*syntax1, args);
+                let layout = interp_syntax(*syntax1, args);
                 Ok(grp(layout?))
             }
             Syntax::Seq(syntax1) => {
-                let layout = _interp_syntax(*syntax1, args);
+                let layout = interp_syntax(*syntax1, args);
                 Ok(seq(layout?))
             }
             Syntax::Nest(syntax1) => {
-                let layout = _interp_syntax(*syntax1, args);
+                let layout = interp_syntax(*syntax1, args);
                 Ok(nest(layout?))
             }
             Syntax::Pack(syntax1) => {
-                let layout = _interp_syntax(*syntax1, args);
+                let layout = interp_syntax(*syntax1, args);
                 Ok(pack(layout?))
             }
             Syntax::SingleLine(left, right) => {
-                let left1 = _interp_syntax(*left, args);
-                let right1 = _interp_syntax(*right, args);
+                let left1 = interp_syntax(*left, args);
+                let right1 = interp_syntax(*right, args);
                 Ok(line(left1?, right1?))
             }
             Syntax::DoubleLine(left, right) => {
-                let left1 = _interp_syntax(*left, args);
-                let right1 = _interp_syntax(*right, args);
+                let left1 = interp_syntax(*left, args);
+                let right1 = interp_syntax(*right, args);
                 Ok(line(left1?, line(null(), right1?)))
             }
             Syntax::UnpadComp(left, right) => {
-                let left1 = _interp_syntax(*left, args);
-                let right1 = _interp_syntax(*right, args);
+                let left1 = interp_syntax(*left, args);
+                let right1 = interp_syntax(*right, args);
                 Ok(comp(left1?, right1?, false, false))
             }
             Syntax::PadComp(left, right) => {
-                let left1 = _interp_syntax(*left, args);
-                let right1 = _interp_syntax(*right, args);
+                let left1 = interp_syntax(*left, args);
+                let right1 = interp_syntax(*right, args);
                 Ok(comp(left1?, right1?, true, false))
             }
             Syntax::FixUnpadComp(left, right) => {
-                let left1 = _interp_syntax(*left, args);
-                let right1 = _interp_syntax(*right, args);
+                let left1 = interp_syntax(*left, args);
+                let right1 = interp_syntax(*right, args);
                 Ok(comp(left1?, right1?, false, true))
             }
             Syntax::FixPadComp(left, right) => {
-                let left1 = _interp_syntax(*left, args);
-                let right1 = _interp_syntax(*right, args);
+                let left1 = interp_syntax(*left, args);
+                let right1 = interp_syntax(*right, args);
                 Ok(comp(left1?, right1?, true, true))
             }
         }
     }
     match LayoutParser::parse(Rule::layout, input) {
         Ok(mut tokens) => {
-            _interp_syntax(*_parse_syntax(tokens.next().unwrap().into_inner())?, args)
+            interp_syntax(*parse_syntax(tokens.next().unwrap().into_inner())?, args)
         }
         Err(error) => Err(format!("{}", error)),
     }

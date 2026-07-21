@@ -43,12 +43,12 @@ pub enum DocObjFix {
 // (partial moves are forbidden); every consumer borrows instead — see the
 // renderer and the `Display` impl below.
 
-// Each `_dismantle_*` moves the node's same-typed children onto the worklist
+// Each `dismantle_*` moves the node's same-typed children onto the worklist
 // (moving them out of their `Box`, freeing it, and leaving a leaf placeholder in
 // the parent) and leaves any cross-type child in place to be freed by that
 // type's own iterative `Drop`.
 
-fn _dismantle_doc(node: &mut Doc, stack: &mut Vec<Doc>) {
+fn dismantle_doc(node: &mut Doc, stack: &mut Vec<Doc>) {
     match node {
         Doc::Eod | Doc::Line(_) => {}
         Doc::Empty(doc1) | Doc::Break(_, doc1) => {
@@ -60,14 +60,14 @@ fn _dismantle_doc(node: &mut Doc, stack: &mut Vec<Doc>) {
 impl Drop for Doc {
     fn drop(&mut self) {
         let mut stack: Vec<Doc> = Vec::new();
-        _dismantle_doc(self, &mut stack);
+        dismantle_doc(self, &mut stack);
         while let Some(mut node) = stack.pop() {
-            _dismantle_doc(&mut node, &mut stack);
+            dismantle_doc(&mut node, &mut stack);
         }
     }
 }
 
-fn _dismantle_obj(node: &mut DocObj, stack: &mut Vec<DocObj>) {
+fn dismantle_obj(node: &mut DocObj, stack: &mut Vec<DocObj>) {
     match node {
         DocObj::Text(_) | DocObj::Fix(_) => {}
         DocObj::Grp(obj1) | DocObj::Seq(obj1) | DocObj::Nest(obj1) | DocObj::Pack(_, obj1) => {
@@ -83,14 +83,14 @@ fn _dismantle_obj(node: &mut DocObj, stack: &mut Vec<DocObj>) {
 impl Drop for DocObj {
     fn drop(&mut self) {
         let mut stack: Vec<DocObj> = Vec::new();
-        _dismantle_obj(self, &mut stack);
+        dismantle_obj(self, &mut stack);
         while let Some(mut node) = stack.pop() {
-            _dismantle_obj(&mut node, &mut stack);
+            dismantle_obj(&mut node, &mut stack);
         }
     }
 }
 
-fn _dismantle_fix(node: &mut DocObjFix, stack: &mut Vec<DocObjFix>) {
+fn dismantle_fix(node: &mut DocObjFix, stack: &mut Vec<DocObjFix>) {
     match node {
         DocObjFix::Text(_) => {}
         DocObjFix::Comp(left, right, _) => {
@@ -109,9 +109,9 @@ fn _dismantle_fix(node: &mut DocObjFix, stack: &mut Vec<DocObjFix>) {
 impl Drop for DocObjFix {
     fn drop(&mut self) {
         let mut stack: Vec<DocObjFix> = Vec::new();
-        _dismantle_fix(self, &mut stack);
+        dismantle_fix(self, &mut stack);
         while let Some(mut node) = stack.pop() {
-            _dismantle_fix(&mut node, &mut stack);
+            dismantle_fix(&mut node, &mut stack);
         }
     }
 }
@@ -123,7 +123,7 @@ impl Drop for DocObjFix {
 // `render(doc.clone(), ...)` pattern for re-rendering at multiple widths — runs
 // in constant native stack instead of overflowing.
 
-fn _clone_fix(fix: &DocObjFix) -> Box<DocObjFix> {
+fn clone_fix(fix: &DocObjFix) -> Box<DocObjFix> {
     enum Task<'a> {
         Visit(&'a DocObjFix),
         Comp(bool),
@@ -150,7 +150,7 @@ fn _clone_fix(fix: &DocObjFix) -> Box<DocObjFix> {
     out.pop().expect("fix clone produced no result")
 }
 
-fn _clone_obj(obj: &DocObj) -> Box<DocObj> {
+fn clone_obj(obj: &DocObj) -> Box<DocObj> {
     enum Task<'a> {
         Visit(&'a DocObj),
         Grp,
@@ -165,7 +165,7 @@ fn _clone_obj(obj: &DocObj) -> Box<DocObj> {
         match task {
             Task::Visit(o) => match o {
                 DocObj::Text(data) => out.push(Box::new(DocObj::Text(data.clone()))),
-                DocObj::Fix(fix) => out.push(Box::new(DocObj::Fix(_clone_fix(fix)))),
+                DocObj::Fix(fix) => out.push(Box::new(DocObj::Fix(clone_fix(fix)))),
                 DocObj::Grp(obj1) => {
                     tasks.push(Task::Grp);
                     tasks.push(Task::Visit(obj1));
@@ -214,7 +214,7 @@ fn _clone_obj(obj: &DocObj) -> Box<DocObj> {
     out.pop().expect("obj clone produced no result")
 }
 
-fn _clone_doc(doc: &Doc) -> Box<Doc> {
+fn clone_doc(doc: &Doc) -> Box<Doc> {
     let mut spine: Vec<&Doc> = Vec::new();
     let mut node = doc;
     loop {
@@ -228,12 +228,11 @@ fn _clone_doc(doc: &Doc) -> Box<Doc> {
     for node in spine.into_iter().rev() {
         let built = match node {
             Doc::Eod => Box::new(Doc::Eod),
-            Doc::Line(obj) => Box::new(Doc::Line(_clone_obj(obj))),
+            Doc::Line(obj) => Box::new(Doc::Line(clone_obj(obj))),
             Doc::Empty(_) => Box::new(Doc::Empty(acc.take().expect("empty: tail"))),
-            Doc::Break(obj, _) => Box::new(Doc::Break(
-                _clone_obj(obj),
-                acc.take().expect("break: tail"),
-            )),
+            Doc::Break(obj, _) => {
+                Box::new(Doc::Break(clone_obj(obj), acc.take().expect("break: tail")))
+            }
         };
         acc = Some(built);
     }
@@ -242,19 +241,19 @@ fn _clone_doc(doc: &Doc) -> Box<Doc> {
 
 impl Clone for Doc {
     fn clone(&self) -> Self {
-        *_clone_doc(self)
+        *clone_doc(self)
     }
 }
 
 impl Clone for DocObj {
     fn clone(&self) -> Self {
-        *_clone_obj(self)
+        *clone_obj(self)
     }
 }
 
 impl Clone for DocObjFix {
     fn clone(&self) -> Self {
-        *_clone_fix(self)
+        *clone_fix(self)
     }
 }
 
@@ -263,7 +262,7 @@ impl Clone for DocObjFix {
 /// Borrows the object (a `Drop`-carrying type cannot be moved out of) and walks
 /// it with an explicit task stack so arbitrarily deep objects print without
 /// recursing on the native stack.
-fn _print_obj(obj: &DocObj) -> String {
+fn print_obj(obj: &DocObj) -> String {
     enum Task<'a> {
         Obj(&'a DocObj),
         Fix(&'a DocObjFix),
@@ -329,7 +328,7 @@ fn _print_obj(obj: &DocObj) -> String {
 impl fmt::Display for Doc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // The document spine is a linear list, so it prints with a plain loop;
-        // objects print via the iterative `_print_obj` above.
+        // objects print via the iterative `print_obj` above.
         let mut out = String::new();
         let mut node = self;
         loop {
@@ -344,13 +343,13 @@ impl fmt::Display for Doc {
                 }
                 Doc::Break(obj, doc1) => {
                     out.push_str("Break ");
-                    out.push_str(&_print_obj(obj));
+                    out.push_str(&print_obj(obj));
                     out.push('\n');
                     node = doc1;
                 }
                 Doc::Line(obj) => {
                     out.push_str("Line ");
-                    out.push_str(&_print_obj(obj));
+                    out.push_str(&print_obj(obj));
                     break;
                 }
             }
@@ -376,7 +375,7 @@ enum DebugTask<'a> {
     Owned(String),
 }
 
-fn _debug_doc_family(f: &mut fmt::Formatter, start: DebugTask) -> fmt::Result {
+fn debug_doc_family(f: &mut fmt::Formatter, start: DebugTask) -> fmt::Result {
     let mut stack: Vec<DebugTask> = vec![start];
     while let Some(task) = stack.pop() {
         match task {
@@ -454,19 +453,19 @@ fn _debug_doc_family(f: &mut fmt::Formatter, start: DebugTask) -> fmt::Result {
 
 impl fmt::Debug for Doc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        _debug_doc_family(f, DebugTask::Doc(self))
+        debug_doc_family(f, DebugTask::Doc(self))
     }
 }
 
 impl fmt::Debug for DocObj {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        _debug_doc_family(f, DebugTask::Obj(self))
+        debug_doc_family(f, DebugTask::Obj(self))
     }
 }
 
 impl fmt::Debug for DocObjFix {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        _debug_doc_family(f, DebugTask::Fix(self))
+        debug_doc_family(f, DebugTask::Fix(self))
     }
 }
 

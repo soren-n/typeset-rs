@@ -13,8 +13,8 @@
 //! Pack marks are held in a plain owned [`HashMap`] threaded as `&mut`. The
 //! renderer only ever looks a mark up by index or inserts one, never iterating
 //! in key order, so an unordered map is the right fit. In the real output pass
-//! (`_render_obj`) marks accumulate forward and are never rolled back. The
-//! look-ahead measuring passes (`_measure`/`_next_comp`) must not leak their
+//! (`render_obj`) marks accumulate forward and are never rolled back. The
+//! look-ahead measuring passes (`measure`/`next_comp`) must not leak their
 //! marks into the caller, so each records the indices it inserts and removes
 //! them before returning — measurement only ever inserts a mark when the index
 //! is absent, so removing exactly those keys restores the caller's map.
@@ -33,7 +33,7 @@ struct State {
     pos: usize,
 }
 
-fn _make_state(width: usize, tab: usize) -> State {
+fn make_state(width: usize, tab: usize) -> State {
     State {
         width,
         tab,
@@ -49,18 +49,18 @@ fn _make_state(width: usize, tab: usize) -> State {
 /// `String::len` is the UTF-8 byte length, which over-measures any non-ASCII
 /// text and breaks lines far earlier than the requested width. Layout positions
 /// are column counts, so count characters instead.
-fn _text_width(data: &str) -> usize {
+fn text_width(data: &str) -> usize {
     data.chars().count()
 }
 
-fn _inc_pos(n: usize, state: State) -> State {
+fn inc_pos(n: usize, state: State) -> State {
     State {
         pos: state.pos + n,
         ..state
     }
 }
 
-fn _indent(tab: usize, state: State) -> State {
+fn indent(tab: usize, state: State) -> State {
     if tab == 0 {
         state
     } else {
@@ -70,7 +70,7 @@ fn _indent(tab: usize, state: State) -> State {
     }
 }
 
-fn _newline(state: State) -> State {
+fn newline(state: State) -> State {
     State {
         head: true,
         pos: 0,
@@ -78,7 +78,7 @@ fn _newline(state: State) -> State {
     }
 }
 
-fn _reset(state: State) -> State {
+fn reset(state: State) -> State {
     State {
         head: true,
         broken: false,
@@ -87,7 +87,7 @@ fn _reset(state: State) -> State {
     }
 }
 
-fn _get_offset(state: State) -> usize {
+fn get_offset(state: State) -> usize {
     if !state.head {
         0
     } else {
@@ -95,12 +95,12 @@ fn _get_offset(state: State) -> usize {
     }
 }
 
-/// Append `n` spaces to `result` (iterative `_pad`).
-fn _pad(result: &mut String, n: usize) {
+/// Append `n` spaces to `result` (iterative `push_spaces`).
+fn push_spaces(result: &mut String, n: usize) {
     result.extend(std::iter::repeat_n(' ', n));
 }
 
-/// Frame for the state-only measuring traversals (`_measure`, `_next_comp`).
+/// Frame for the state-only measuring traversals (`measure`, `next_comp`).
 ///
 /// These fold a document object into a single position without producing any
 /// output, so a frame only needs to describe the remaining work and any state
@@ -121,22 +121,22 @@ enum MFrame<'t> {
 ///
 /// Marks inserted while measuring are undone before returning, so `marks` is
 /// left exactly as the caller passed it.
-fn _measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+fn measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
     let mut st = state;
     let mut inserted: Vec<usize> = Vec::new();
     let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
         match frame {
             MFrame::Obj(o) => match o {
-                DocObj::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObj::Text(data) => st = inc_pos(text_width(data), st),
                 DocObj::Fix(fix) => stack.push(MFrame::Fix(fix)),
                 DocObj::Grp(obj1) => stack.push(MFrame::Obj(obj1)),
                 DocObj::Seq(obj1) => stack.push(MFrame::Obj(obj1)),
                 DocObj::Nest(obj1) => {
                     let lvl = st.lvl;
-                    let state1 = _indent(st.tab, st);
-                    let offset = _get_offset(state1);
-                    st = _inc_pos(offset, state1);
+                    let state1 = indent(st.tab, st);
+                    let offset = get_offset(state1);
+                    st = inc_pos(offset, state1);
                     stack.push(MFrame::RestoreLvl(lvl));
                     stack.push(MFrame::Obj(obj1));
                 }
@@ -158,8 +158,8 @@ fn _measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>
                                 lvl: max(lvl, lvl1),
                                 ..st
                             };
-                            let offset = _get_offset(state1);
-                            st = _inc_pos(offset, state1);
+                            let offset = get_offset(state1);
+                            st = inc_pos(offset, state1);
                         }
                     }
                     stack.push(MFrame::RestoreLvl(lvl));
@@ -171,7 +171,7 @@ fn _measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>
                 }
             },
             MFrame::Fix(f) => match f {
-                DocObjFix::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObjFix::Text(data) => st = inc_pos(text_width(data), st),
                 DocObjFix::Comp(left, right, pad) => {
                     stack.push(MFrame::FixCompMid(right, *pad));
                     stack.push(MFrame::Fix(left));
@@ -180,14 +180,14 @@ fn _measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>
             MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
             MFrame::RestoreHead(head) => st = State { head, ..st },
             MFrame::CompMid(right, pad) => {
-                st = _inc_pos(if pad { 1 } else { 0 }, st);
+                st = inc_pos(if pad { 1 } else { 0 }, st);
                 let head = st.head;
                 st = State { head: false, ..st };
                 stack.push(MFrame::RestoreHead(head));
                 stack.push(MFrame::Obj(right));
             }
             MFrame::FixCompMid(right, pad) => {
-                st = _inc_pos(if pad { 1 } else { 0 }, st);
+                st = inc_pos(if pad { 1 } else { 0 }, st);
                 stack.push(MFrame::Fix(right));
             }
         }
@@ -200,31 +200,31 @@ fn _measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>
 
 /// Position of the next composition boundary reachable from `obj` (iterative).
 ///
-/// Like [`_measure`], any marks inserted while looking ahead are undone before
+/// Like [`measure`], any marks inserted while looking ahead are undone before
 /// returning.
-fn _next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+fn next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
     let mut st = state;
     let mut inserted: Vec<usize> = Vec::new();
     let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
         match frame {
             MFrame::Obj(o) => match o {
-                DocObj::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObj::Text(data) => st = inc_pos(text_width(data), st),
                 DocObj::Fix(fix) => stack.push(MFrame::Fix(fix)),
                 DocObj::Grp(obj1) => {
                     if st.head {
                         stack.push(MFrame::Obj(obj1));
                     } else {
-                        let end = _measure(obj1, st, marks);
+                        let end = measure(obj1, st, marks);
                         st = State { pos: end, ..st };
                     }
                 }
                 DocObj::Seq(obj1) => stack.push(MFrame::Obj(obj1)),
                 DocObj::Nest(obj1) => {
                     let lvl = st.lvl;
-                    let state1 = _indent(st.tab, st);
-                    let offset = _get_offset(state1);
-                    st = _inc_pos(offset, state1);
+                    let state1 = indent(st.tab, st);
+                    let offset = get_offset(state1);
+                    st = inc_pos(offset, state1);
                     stack.push(MFrame::RestoreLvl(lvl));
                     stack.push(MFrame::Obj(obj1));
                 }
@@ -246,8 +246,8 @@ fn _next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usiz
                                 lvl: max(lvl, lvl1),
                                 ..st
                             };
-                            let offset = _get_offset(state1);
-                            st = _inc_pos(offset, state1);
+                            let offset = get_offset(state1);
+                            st = inc_pos(offset, state1);
                         }
                     }
                     stack.push(MFrame::RestoreLvl(lvl));
@@ -256,7 +256,7 @@ fn _next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usiz
                 DocObj::Comp(left, _right, _pad) => stack.push(MFrame::Obj(left)),
             },
             MFrame::Fix(f) => match f {
-                DocObjFix::Text(data) => st = _inc_pos(_text_width(data), st),
+                DocObjFix::Text(data) => st = inc_pos(text_width(data), st),
                 DocObjFix::Comp(left, right, pad) => {
                     stack.push(MFrame::FixCompMid(right, *pad));
                     stack.push(MFrame::Fix(left));
@@ -264,14 +264,14 @@ fn _next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usiz
             },
             MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
             MFrame::FixCompMid(right, pad) => {
-                st = _inc_pos(if pad { 1 } else { 0 }, st);
+                st = inc_pos(if pad { 1 } else { 0 }, st);
                 stack.push(MFrame::Fix(right));
             }
-            // `_next_comp` visits only the left of a `Comp` and never touches
+            // `next_comp` visits only the left of a `Comp` and never touches
             // `head`, so it never pushes these; they are reachable only from
-            // `_measure`.
+            // `measure`.
             MFrame::CompMid(..) | MFrame::RestoreHead(_) => {
-                unreachable!("_next_comp never pushes CompMid/RestoreHead")
+                unreachable!("next_comp never pushes CompMid/RestoreHead")
             }
         }
     }
@@ -281,15 +281,15 @@ fn _next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usiz
     st.pos
 }
 
-fn _will_fit(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
-    _measure(obj, state, marks) <= state.width
+fn will_fit(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
+    measure(obj, state, marks) <= state.width
 }
 
-fn _should_break(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
+fn should_break(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
     if state.broken {
         true
     } else {
-        state.width < _next_comp(obj, state, marks)
+        state.width < next_comp(obj, state, marks)
     }
 }
 
@@ -315,7 +315,7 @@ enum RFrame<'t> {
 /// Unlike the measuring passes, marks inserted here are kept: they accumulate
 /// forward across the whole document exactly as the recursive formulation
 /// threaded them.
-fn _render_obj<'t>(
+fn render_obj<'t>(
     obj: &'t DocObj,
     state: &mut State,
     marks: &mut HashMap<usize, usize>,
@@ -327,7 +327,7 @@ fn _render_obj<'t>(
         match frame {
             RFrame::Obj(o) => match o {
                 DocObj::Text(data) => {
-                    st = _inc_pos(_text_width(data), st);
+                    st = inc_pos(text_width(data), st);
                     result.push_str(data);
                 }
                 DocObj::Fix(fix) => stack.push(RFrame::Fix(fix)),
@@ -341,7 +341,7 @@ fn _render_obj<'t>(
                     stack.push(RFrame::Obj(obj1));
                 }
                 DocObj::Seq(obj1) => {
-                    if _will_fit(obj1, st, marks) {
+                    if will_fit(obj1, st, marks) {
                         stack.push(RFrame::Obj(obj1));
                     } else {
                         let broken = st.broken;
@@ -352,10 +352,10 @@ fn _render_obj<'t>(
                 }
                 DocObj::Nest(obj1) => {
                     let lvl = st.lvl;
-                    let state1 = _indent(st.tab, st);
-                    let offset = _get_offset(state1);
-                    st = _inc_pos(offset, state1);
-                    _pad(result, offset);
+                    let state1 = indent(st.tab, st);
+                    let offset = get_offset(state1);
+                    st = inc_pos(offset, state1);
+                    push_spaces(result, offset);
                     stack.push(RFrame::RestoreLvl(lvl));
                     stack.push(RFrame::Obj(obj1));
                 }
@@ -376,9 +376,9 @@ fn _render_obj<'t>(
                                 lvl: max(lvl, lvl1),
                                 ..st
                             };
-                            let offset = _get_offset(state1);
-                            st = _inc_pos(offset, state1);
-                            _pad(result, offset);
+                            let offset = get_offset(state1);
+                            st = inc_pos(offset, state1);
+                            push_spaces(result, offset);
                         }
                     }
                     stack.push(RFrame::RestoreLvl(lvl));
@@ -391,7 +391,7 @@ fn _render_obj<'t>(
             },
             RFrame::Fix(f) => match f {
                 DocObjFix::Text(data) => {
-                    st = _inc_pos(_text_width(data), st);
+                    st = inc_pos(text_width(data), st);
                     result.push_str(data);
                 }
                 DocObjFix::Comp(left, right, pad) => {
@@ -406,24 +406,24 @@ fn _render_obj<'t>(
                 let state1 = st;
                 let state3 = State {
                     head: false,
-                    .._inc_pos(if pad { 1 } else { 0 }, state1)
+                    ..inc_pos(if pad { 1 } else { 0 }, state1)
                 };
-                if _should_break(right, state3, marks) {
-                    let state2 = _newline(state1);
-                    let offset = _get_offset(state2);
-                    st = _inc_pos(offset, state2);
+                if should_break(right, state3, marks) {
+                    let state2 = newline(state1);
+                    let offset = get_offset(state2);
+                    st = inc_pos(offset, state2);
                     result.push('\n');
-                    _pad(result, offset);
+                    push_spaces(result, offset);
                 } else {
-                    _pad(result, if pad { 1 } else { 0 });
+                    push_spaces(result, if pad { 1 } else { 0 });
                     st = state3;
                 }
                 stack.push(RFrame::Obj(right));
             }
             RFrame::FixCompMid(right, pad) => {
                 let padding = if pad { 1 } else { 0 };
-                _pad(result, padding);
-                st = _inc_pos(padding, st);
+                push_spaces(result, padding);
+                st = inc_pos(padding, st);
                 stack.push(RFrame::Fix(right));
             }
         }
@@ -445,16 +445,16 @@ fn _render_obj<'t>(
 /// # Returns
 /// A formatted string representation of the document
 pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
-    let mut st = _make_state(width, tab);
+    let mut st = make_state(width, tab);
     let mut marks: HashMap<usize, usize> = HashMap::new();
     let mut result = String::new();
     // The document spine (`Empty` / `Break` / `Line` / `Eod`) is a linear list,
     // so it is walked with a plain loop rather than recursion. `marks` and `lvl`
-    // survive `_reset`, so they carry across lines exactly as the recursive
+    // survive `reset`, so they carry across lines exactly as the recursive
     // formulation threaded them.
     let mut node: &Doc = doc;
     loop {
-        st = _reset(st);
+        st = reset(st);
         match node {
             Doc::Eod => break,
             Doc::Empty(doc1) => {
@@ -462,12 +462,12 @@ pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
                 node = doc1;
             }
             Doc::Break(obj, doc1) => {
-                _render_obj(obj, &mut st, &mut marks, &mut result);
+                render_obj(obj, &mut st, &mut marks, &mut result);
                 result.push('\n');
                 node = doc1;
             }
             Doc::Line(obj) => {
-                _render_obj(obj, &mut st, &mut marks, &mut result);
+                render_obj(obj, &mut st, &mut marks, &mut result);
                 break;
             }
         }

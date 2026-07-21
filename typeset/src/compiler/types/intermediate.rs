@@ -258,6 +258,6 @@ pub enum FinalDocObjFix<'a> {
     Comp(&'a FinalDocObjFix<'a>, &'a FinalDocObjFix<'a>, bool),
 }
 
-// Result of `_topology`: per-node terms, in-degrees, and out-properties, all
+// Result of `topology`: per-node terms, in-degrees, and out-properties, all
 // aligned by node index. Plain owned Vecs (transient within the rebuild pass).
 pub type TopologyResult<'b> = (Vec<&'b GraphTerm<'b>>, Vec<u64>, Vec<Vec<Property<()>>>);

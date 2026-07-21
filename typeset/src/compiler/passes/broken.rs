@@ -15,11 +15,11 @@ use std::mem;
 
 /// Transforms Layout into Edsl by collapsing broken sequences
 pub fn broken<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Edsl<'b> {
-    let layout1 = _mark(mem, layout);
-    _remove(mem, layout1, false)
+    let layout1 = mark(mem, layout);
+    remove(mem, layout1, false)
 }
 
-/// Frames for the `_mark` fold (Layout → (bool, Broken), bottom-up).
+/// Frames for the `mark` fold (Layout → (bool, Broken), bottom-up).
 ///
 /// The result carried on ascent is `(bool, &Broken)`: the boolean records
 /// whether the subtree contains a hard line break. Unary frames rebuild the
@@ -38,7 +38,7 @@ enum MarkFrame<'b> {
 
 /// Marks broken sequences: folds Layout into Broken, propagating a "contains a
 /// line break" flag up so `Seq` nodes can record whether they must break.
-fn _mark<'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Broken<'b> {
+fn mark<'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Broken<'b> {
     // Either a finished leaf value, or the next child to descend into. Computed
     // while borrowing `*cur`; acting on it happens after the borrow ends, so the
     // emptied box can be reassigned (and dropped) without a borrow conflict.
@@ -128,7 +128,7 @@ fn _mark<'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Broken<'b> {
     }
 }
 
-/// Frames for the `_remove` pass (Broken → Edsl, CPS).
+/// Frames for the `remove` pass (Broken → Edsl, CPS).
 ///
 /// This is the defunctionalized form of the continuation chain the original
 /// built with `compose`. The value carried on ascent is `&Edsl`. `LineLeft`
@@ -162,7 +162,7 @@ enum RemoveFrame<'b> {
 /// Removes broken sequences: rewrites `Broken` into `Edsl`, turning broken
 /// compositions into hard lines and dropping the `Seq` wrapper where the
 /// sequence has already broken.
-fn _remove<'b>(mem: &'b Bump, layout: &'b Broken<'b>, broken: bool) -> &'b Edsl<'b> {
+fn remove<'b>(mem: &'b Bump, layout: &'b Broken<'b>, broken: bool) -> &'b Edsl<'b> {
     let mut stack: Vec<RemoveFrame<'b>> = Vec::new();
     let mut cur = layout;
     let mut brk = broken;

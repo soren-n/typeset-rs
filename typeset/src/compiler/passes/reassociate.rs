@@ -36,11 +36,11 @@ enum Frame<'b, 'a> {
 
 /// Reassociate after grp and seq removals
 pub fn reassociate<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    map_denull_spine(mem, doc, _reassoc_obj)
+    map_denull_spine(mem, doc, reassoc_obj)
 }
 
 /// Reassociates a single object, right-associating its compositions.
-fn _reassoc_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b DenullObj<'b> {
+fn reassoc_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b DenullObj<'b> {
     let mut stack: Vec<Frame<'b, 'a>> = Vec::new();
     let mut cur = obj;
     let mut partial = Partial::Id;
@@ -50,10 +50,10 @@ fn _reassoc_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b Denull
         let mut value: &'b DenullObj<'b> = loop {
             match cur {
                 DenullObj::Term(term) => {
-                    break _apply_partial(mem, partial, mem.alloc(DenullObj::Term(term)));
+                    break apply_partial(mem, partial, mem.alloc(DenullObj::Term(term)));
                 }
                 DenullObj::Fix(fix) => {
-                    break _apply_partial(mem, partial, mem.alloc(DenullObj::Fix(fix)));
+                    break apply_partial(mem, partial, mem.alloc(DenullObj::Fix(fix)));
                 }
                 DenullObj::Grp(obj1) => {
                     // Grp is a boundary: reassociate its contents afresh.
@@ -77,10 +77,10 @@ fn _reassoc_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b Denull
             match stack.pop() {
                 None => return value,
                 Some(Frame::Grp(p)) => {
-                    value = _apply_partial(mem, p, mem.alloc(DenullObj::Grp(value)));
+                    value = apply_partial(mem, p, mem.alloc(DenullObj::Grp(value)));
                 }
                 Some(Frame::Seq(p)) => {
-                    value = _apply_partial(mem, p, mem.alloc(DenullObj::Seq(value)));
+                    value = apply_partial(mem, p, mem.alloc(DenullObj::Seq(value)));
                 }
                 Some(Frame::Comp { left, pad }) => {
                     cur = left;
@@ -93,7 +93,7 @@ fn _reassoc_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b Denull
 }
 
 /// Applies a pending left-wrapper to a reassociated object.
-fn _apply_partial<'b>(
+fn apply_partial<'b>(
     mem: &'b Bump,
     partial: Partial<'b>,
     obj: &'b DenullObj<'b>,

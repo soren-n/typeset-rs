@@ -11,16 +11,16 @@ use crate::compiler::types::{
 use bumpalo::Bump;
 
 // Defunctionalized rebuild continuations (replacing the `partial` closure and
-// the RebuildCont closure stack used by `_visit_line`).
+// the RebuildCont closure stack used by `visit_line`).
 //
 // A partial is a left composition spine. It is stored so `push` appends the
 // innermost (most recently added) element, i.e. the tail is `[.., (xk,pk)]` with
-// `(xk,pk)` innermost; `_apply_rpartial` folds from the end, yielding
+// `(xk,pk)` innermost; `apply_rpartial` folds from the end, yielding
 // `Comp(x0, Comp(x1, .. Comp(xk, obj, pk) .., p1), p0)`.
 type RPartial<'b> = Vec<(&'b RebuildObj<'b>, bool)>;
 
 // A continuation step. A continuation is a stack of steps stored so `push`
-// appends the head (the step applied first / innermost); `_apply_rcont` folds
+// appends the head (the step applied first / innermost); `apply_rcont` folds
 // from the end. RStack is the stack of continuations, top at the end.
 #[derive(Debug)]
 enum RStep<'b> {
@@ -32,7 +32,7 @@ type RCont<'b> = Vec<RStep<'b>>;
 type RStack<'b> = Vec<RCont<'b>>;
 
 // Applies a partial spine to an object (innermost element first).
-fn _apply_rpartial<'b>(
+fn apply_rpartial<'b>(
     mem: &'b Bump,
     partial: &[(&'b RebuildObj<'b>, bool)],
     obj: &'b RebuildObj<'b>,
@@ -45,7 +45,7 @@ fn _apply_rpartial<'b>(
 }
 
 // Applies a continuation (stack of steps) to an object (head step first).
-fn _apply_rcont<'b>(
+fn apply_rcont<'b>(
     mem: &'b Bump,
     cont: &[RStep<'b>],
     obj: &'b RebuildObj<'b>,
@@ -55,7 +55,7 @@ fn _apply_rcont<'b>(
         result = match step {
             RStep::Grp => mem.alloc(RebuildObj::Grp(result)),
             RStep::Seq => mem.alloc(RebuildObj::Seq(result)),
-            RStep::Partial(partial) => _apply_rpartial(mem, partial, result),
+            RStep::Partial(partial) => apply_rpartial(mem, partial, result),
         };
     }
     result
@@ -67,8 +67,8 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
     // covariant and `'a: 'b`, so a `&'a GraphTerm<'a>` is already usable as
     // `&'b GraphTerm<'b>`. `rebuild` only reads them to emit fresh RebuildTerm
     // nodes, so no defensive copy is needed.
-    fn _topology<'b, 'a: 'b>(nodes: &'a [&'a GraphNode<'a>]) -> TopologyResult<'b> {
-        fn _num_ins(node: &GraphNode) -> u64 {
+    fn topology<'b, 'a: 'b>(nodes: &'a [&'a GraphNode<'a>]) -> TopologyResult<'b> {
+        fn num_ins(node: &GraphNode) -> u64 {
             let mut num = 0u64;
             let mut cur = node.ins_head.get();
             while let Some(edge) = cur {
@@ -77,7 +77,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             }
             num
         }
-        fn _prop_outs(node: &GraphNode) -> Vec<Property<()>> {
+        fn prop_outs(node: &GraphNode) -> Vec<Property<()>> {
             let mut props: Vec<Property<()>> = Vec::new();
             let mut cur = node.outs_head.get();
             while let Some(edge) = cur {
@@ -91,14 +91,14 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         let mut outs: Vec<Vec<Property<()>>> = Vec::new();
         for &node in nodes {
             terms.push(node.term);
-            ins.push(_num_ins(node));
-            outs.push(_prop_outs(node));
+            ins.push(num_ins(node));
+            outs.push(prop_outs(node));
         }
         (terms, ins, outs)
     }
     // Composes `partial` into the top continuation, then pushes a grp/seq
     // continuation for each property.
-    fn _open<'b>(
+    fn open<'b>(
         props: &[Property<()>],
         mut stack: RStack<'b>,
         partial: RPartial<'b>,
@@ -118,7 +118,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         stack
     }
     // Pops `count` continuations, applying each to the accumulating object.
-    fn _close<'b>(
+    fn close<'b>(
         mem: &'b Bump,
         count: u64,
         mut stack: RStack<'b>,
@@ -127,21 +127,21 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         let mut result = term;
         for _ in 0..count {
             let top = stack.pop().expect("Invariant");
-            result = _apply_rcont(mem, &top, result);
+            result = apply_rcont(mem, &top, result);
         }
         (stack, result)
     }
-    fn _final<'b>(
+    fn finalize<'b>(
         mem: &'b Bump,
         stack: RStack<'b>,
         term: &'b RebuildObj<'b>,
     ) -> &'b RebuildObj<'b> {
         match stack.as_slice() {
-            [last] => _apply_rcont(mem, last, term),
+            [last] => apply_rcont(mem, last, term),
             _ => unreachable!("Invariant"),
         }
     }
-    fn _visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b RebuildDoc<'b> {
+    fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b RebuildDoc<'b> {
         // Walk the linear spine, rebuilding each line's object.
         let mut objs: Vec<&'b RebuildObj<'b>> = Vec::new();
         let mut cur = doc;
@@ -149,12 +149,12 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             match cur {
                 GraphDoc::Eod => break,
                 GraphDoc::Break(nodes, pads, doc1) => {
-                    let (terms, ins, outs) = _topology(nodes);
+                    let (terms, ins, outs) = topology(nodes);
                     // The initial stack holds one identity continuation (an
                     // empty step list); the initial partial is empty too.
                     let stack: RStack<'b> = vec![Vec::new()];
                     let partial: RPartial<'b> = Vec::new();
-                    objs.push(_visit_line(mem, &terms, pads, &ins, &outs, stack, partial));
+                    objs.push(visit_line(mem, &terms, pads, &ins, &outs, stack, partial));
                     cur = doc1;
                 }
             }
@@ -166,7 +166,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         rdoc
     }
     #[allow(clippy::too_many_arguments)]
-    fn _visit_line<'b>(
+    fn visit_line<'b>(
         mem: &'b Bump,
         terms: &[&'b GraphTerm<'b>],
         pads: &[bool],
@@ -184,7 +184,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         loop {
             let term = terms[i];
             let obj = match term {
-                GraphTerm::Fix(fix) => mem.alloc(RebuildObj::Fix(_visit_fix(mem, fix))),
+                GraphTerm::Fix(fix) => mem.alloc(RebuildObj::Fix(visit_fix(mem, fix))),
                 _ => mem.alloc(RebuildObj::Term(map_term_chain(mem, term))),
             };
             let in_deg = ins[i];
@@ -194,12 +194,12 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
                 if !out_props.is_empty() {
                     unreachable!("Invariant")
                 }
-                let applied = _apply_rpartial(mem, &partial, obj);
+                let applied = apply_rpartial(mem, &partial, obj);
                 return if in_deg == 0 {
-                    _final(mem, stack, applied)
+                    finalize(mem, stack, applied)
                 } else {
-                    let (stack1, obj2) = _close(mem, in_deg, stack, applied);
-                    _final(mem, stack1, obj2)
+                    let (stack1, obj2) = close(mem, in_deg, stack, applied);
+                    finalize(mem, stack1, obj2)
                 };
             }
             let pad = pads[i];
@@ -209,15 +209,15 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
                 // In-degree > 0, no out-properties: close the incoming scopes,
                 // then start a fresh partial from the closed object.
                 (_, true) => {
-                    let applied = _apply_rpartial(mem, &partial, obj);
-                    let (stack1, obj2) = _close(mem, in_deg, stack, applied);
+                    let applied = apply_rpartial(mem, &partial, obj);
+                    let (stack1, obj2) = close(mem, in_deg, stack, applied);
                     stack = stack1;
                     partial = vec![(obj2, pad)];
                 }
                 // In-degree 0, has out-properties: open new scopes, then
                 // start a fresh partial from this object.
                 (0, false) => {
-                    stack = _open(out_props, stack, partial);
+                    stack = open(out_props, stack, partial);
                     partial = vec![(obj, pad)];
                 }
                 (_, false) => unreachable!("Invariant"),
@@ -225,7 +225,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             i += 1;
         }
     }
-    fn _visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a GraphFix<'a>) -> &'b RebuildFix<'b> {
+    fn visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a GraphFix<'a>) -> &'b RebuildFix<'b> {
         // Walk the fix chain, then rebuild the RebuildFix bottom-up.
         let mut recorded: Vec<(&'b RebuildTerm<'b>, bool)> = Vec::new();
         let mut cur = fix;
@@ -248,5 +248,5 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         }
         rfix
     }
-    _visit_doc(mem, doc)
+    visit_doc(mem, doc)
 }

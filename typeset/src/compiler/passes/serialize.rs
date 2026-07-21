@@ -106,13 +106,13 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
             Edsl::Null => {
                 entries.push(Entry {
                     glue,
-                    term: _apply_terms(mem, terms, mem.alloc(SerialTerm::Null)),
+                    term: apply_terms(mem, terms, mem.alloc(SerialTerm::Null)),
                 });
             }
             Edsl::Text(data) => {
                 entries.push(Entry {
                     glue,
-                    term: _apply_terms(mem, terms, mem.alloc(SerialTerm::Text(data))),
+                    term: apply_terms(mem, terms, mem.alloc(SerialTerm::Text(data))),
                 });
             }
             Edsl::Fix(layout1) => stack.push(Work {
@@ -227,7 +227,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
                 serial,
             )),
             Glue::Comp { comps, attr } => {
-                let comp = _apply_comps(mem, comps, mem.alloc(SerialComp::Comp(attr)));
+                let comp = apply_comps(mem, comps, mem.alloc(SerialComp::Comp(attr)));
                 mem.alloc(Serial::Next(entry.term, comp, serial))
             }
         };
@@ -237,7 +237,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> &'b Serial<
 
 /// Applies the accumulated term wrappers to a base term. The list head is the
 /// innermost wrapper, so folding head-to-tail wraps from the inside out.
-fn _apply_terms<'b>(
+fn apply_terms<'b>(
     mem: &'b Bump,
     list: Option<&'b TermList<'b>>,
     base: &'b SerialTerm<'b>,
@@ -255,7 +255,7 @@ fn _apply_terms<'b>(
 }
 
 /// Applies the accumulated comp wrappers to a base comp (innermost first).
-fn _apply_comps<'b>(
+fn apply_comps<'b>(
     mem: &'b Bump,
     list: Option<&'b CompList<'b>>,
     base: &'b SerialComp<'b>,
