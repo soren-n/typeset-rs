@@ -96,7 +96,7 @@ tree-walking traits on the public AST types (`Doc`/`DocObj`/`DocObjFix` and
 `Layout`) — `Drop`, `Clone`, `Display`, and `Debug` — are iterative for the same
 reason, so no operation on a deep document recurses on the native stack.
 `compile()` is therefore infallible and imposes no depth cap; the `max_depth`
-bound in `compile_safe_with_depth` is an opt-in resource limit (capping the
+bound in `compile_within_depth` is an opt-in resource limit (capping the
 O(depth) heap an untrusted layout can allocate) rather than a stack-safety
 guard.
 

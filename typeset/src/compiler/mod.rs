@@ -25,8 +25,8 @@ pub mod render;
 pub mod types;
 
 // Re-export core types
-pub use error::CompilerError;
+pub use error::DepthLimitExceeded;
 pub use types::{Doc, Layout};
 
 // Re-export the main compilation and rendering functions.
-pub use pipeline::{compile, compile_safe, compile_safe_with_depth, render, render_ref};
+pub use pipeline::{compile, compile_within_depth, render, render_ref};

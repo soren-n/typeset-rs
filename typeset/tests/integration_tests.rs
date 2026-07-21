@@ -4,90 +4,63 @@
 //! and produces the same results as the original monolithic implementation.
 
 use typeset::{
-    CompilerError, comp, compile, compile_safe, compile_safe_with_depth, grp, line, nest, pack,
-    render, seq, text,
+    DepthLimitExceeded, comp, compile, compile_within_depth, grp, line, nest, pack, render, seq,
+    text,
 };
 
 /// Test basic compilation functionality
 #[test]
 fn test_basic_compilation() {
-    let layout = comp(
-        text("Hello".to_string()),
-        text("World".to_string()),
-        false,
-        false,
+    let layout = comp(text("Hello"), text("World"), false, false);
+
+    // A bounded compile of a shallow layout succeeds...
+    let bounded_result = compile_within_depth(layout.clone(), 10000);
+    assert!(bounded_result.is_ok());
+
+    let bounded_output = render(bounded_result.unwrap(), 2, 80);
+
+    // ...and produces identical output to the infallible path.
+    let original_output = render(compile(layout), 2, 80);
+    assert_eq!(
+        bounded_output, original_output,
+        "Bounded and infallible compile should produce identical output"
     );
-
-    // Test the safe compile function
-    let safe_result = compile_safe(layout.clone());
-    assert!(safe_result.is_ok());
-
-    if let Ok(safe_doc) = safe_result {
-        let safe_output = render(safe_doc, 2, 80);
-
-        // Compare with original compile function
-        let original_doc = compile(layout);
-        let original_output = render(original_doc, 2, 80);
-
-        assert_eq!(
-            safe_output, original_output,
-            "Safe and original compile should produce identical output"
-        );
-        assert_eq!(safe_output, "HelloWorld");
-    }
+    assert_eq!(bounded_output, "HelloWorld");
 }
 
 /// Test padded composition
 #[test]
 fn test_padded_composition() {
-    let layout = comp(
-        text("Hello".to_string()),
-        text("World".to_string()),
-        true,
-        false,
-    );
+    let layout = comp(text("Hello"), text("World"), true, false);
 
     let doc = compile(layout);
     let output = render(doc, 2, 80);
     assert_eq!(output, "Hello World");
 }
 
-/// Test error handling with invalid parameters
+/// A depth bound of 0 rejects even the shallowest layout.
 #[test]
-fn test_error_handling() {
-    let result = compile_safe_with_depth(text("test".to_string()), 0);
-    assert!(result.is_err());
-
-    if let Err(e) = result {
-        match e {
-            CompilerError::InvalidInput(_) => {
-                // Expected error type
-            }
-            _ => panic!("Expected InvalidInput error, got: {:?}", e),
+fn test_depth_bound_rejection() {
+    let result = compile_within_depth(text("test"), 0);
+    assert_eq!(
+        result.unwrap_err(),
+        DepthLimitExceeded {
+            depth: 1,
+            max_depth: 0
         }
-    }
+    );
 }
 
 /// Test complex nested layout
 #[test]
 fn test_complex_layout() {
     let complex_layout = comp(
+        comp(text("fn"), text("main"), true, false),
         comp(
-            text("fn".to_string()),
-            text("main".to_string()),
-            true,
-            false,
-        ),
-        comp(
-            text("()".to_string()),
+            text("()"),
             comp(
-                text("{".to_string()),
-                comp(
-                    text("println!".to_string()),
-                    text("(\"Hello, World!\");".to_string()),
-                    false,
-                    false,
-                ),
+                text("{"),
+                comp(text("println!"), text("(\"Hello, World!\");"), false, false),
                 false,
                 false,
             ),
@@ -98,7 +71,7 @@ fn test_complex_layout() {
         false,
     );
 
-    let result = compile_safe(complex_layout);
+    let result = compile_within_depth(complex_layout, 10000);
     assert!(result.is_ok());
 
     if let Ok(doc) = result {
@@ -113,10 +86,7 @@ fn test_complex_layout() {
 /// Test line breaks and formatting
 #[test]
 fn test_line_breaks() {
-    let layout = line(
-        text("First line".to_string()),
-        text("Second line".to_string()),
-    );
+    let layout = line(text("First line"), text("Second line"));
 
     let doc = compile(layout);
     let output = render(doc, 2, 80);
@@ -127,8 +97,8 @@ fn test_line_breaks() {
 #[test]
 fn test_nesting() {
     let layout = comp(
-        text("Prefix:".to_string()),
-        nest(line(text("Indented".to_string()), text("text".to_string()))),
+        text("Prefix:"),
+        nest(line(text("Indented"), text("text"))),
         false,
         false,
     );
@@ -147,13 +117,8 @@ fn test_nesting() {
 fn test_grouping() {
     // Test that fits on one line
     let layout = comp(
-        text("Before".to_string()),
-        grp(comp(
-            text("grouped".to_string()),
-            text("content".to_string()),
-            true,
-            false,
-        )),
+        text("Before"),
+        grp(comp(text("grouped"), text("content"), true, false)),
         true,
         false,
     );
@@ -167,13 +132,8 @@ fn test_grouping() {
 #[test]
 fn test_sequence_breaking() {
     let layout = seq(comp(
-        comp(
-            text("item1".to_string()),
-            text("item2".to_string()),
-            false,
-            false,
-        ),
-        text("item3".to_string()),
+        comp(text("item1"), text("item2"), false, false),
+        text("item3"),
         false,
         false,
     ));
@@ -193,15 +153,10 @@ fn test_sequence_breaking() {
 #[test]
 fn test_pack_alignment() {
     let layout = comp(
-        text("Start".to_string()),
+        text("Start"),
         pack(comp(
-            comp(
-                text("first".to_string()),
-                text("second".to_string()),
-                false,
-                false,
-            ),
-            text("third".to_string()),
+            comp(text("first"), text("second"), false, false),
+            text("third"),
             false,
             false,
         )),
@@ -232,10 +187,10 @@ fn test_pack_alignment() {
 #[test]
 fn test_different_widths() {
     let layout = comp(
-        text("This".to_string()),
+        text("This"),
         comp(
-            text("is".to_string()),
-            comp(text("a".to_string()), text("test".to_string()), true, false),
+            text("is"),
+            comp(text("a"), text("test"), true, false),
             true,
             false,
         ),

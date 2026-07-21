@@ -1,12 +1,12 @@
-//! `compile_safe_with_depth` must actually enforce its depth limit.
+//! `compile_within_depth` must actually enforce its depth limit.
 //!
 //! The limit was previously validated as non-zero and then ignored, so
-//! `CompilerError::DepthLimitExceeded` could never be returned.
+//! `DepthLimitExceeded` could never be returned.
 
 use typeset::*;
 
 fn nested(levels: usize) -> Box<Layout> {
-    let mut layout = text("x".to_string());
+    let mut layout = text("x");
     for _ in 0..levels {
         layout = nest(layout);
     }
@@ -15,13 +15,11 @@ fn nested(levels: usize) -> Box<Layout> {
 
 #[test]
 fn exceeding_max_depth_is_reported() {
-    let result = compile_safe_with_depth(nested(100), 10);
-    match result {
-        Err(CompilerError::DepthLimitExceeded { depth, max_depth }) => {
+    match compile_within_depth(nested(100), 10) {
+        Err(DepthLimitExceeded { depth, max_depth }) => {
             assert_eq!(max_depth, 10);
             assert!(depth > 10, "reported depth {depth} should exceed the limit");
         }
-        Err(other) => panic!("expected DepthLimitExceeded, got {other:?}"),
         Ok(_) => panic!("max_depth was not enforced: 100 levels compiled with a limit of 10"),
     }
 }
@@ -29,17 +27,16 @@ fn exceeding_max_depth_is_reported() {
 #[test]
 fn layouts_within_max_depth_still_compile() {
     assert!(
-        compile_safe_with_depth(nested(10), 1000).is_ok(),
+        compile_within_depth(nested(10), 1000).is_ok(),
         "a shallow layout was rejected"
     );
 }
 
 #[test]
-fn zero_max_depth_is_still_rejected() {
-    assert!(matches!(
-        compile_safe_with_depth(nested(1), 0),
-        Err(CompilerError::InvalidInput(_))
-    ));
+fn zero_max_depth_rejects_everything() {
+    // A bound of 0 is not an error; it simply rejects every layout, since the
+    // shallowest possible layout has depth 1.
+    assert_eq!(compile_within_depth(nested(1), 0).unwrap_err().max_depth, 0);
 }
 
 #[test]
@@ -47,11 +44,11 @@ fn depth_limit_is_not_off_by_one() {
     // A layout of exactly the limit must compile; one deeper must not.
     let depth = probe_depth();
     assert!(
-        compile_safe_with_depth(nested(depth), depth + 1).is_ok(),
+        compile_within_depth(nested(depth), depth + 1).is_ok(),
         "layout at exactly the limit was rejected"
     );
     assert!(
-        compile_safe_with_depth(nested(depth + 5), depth).is_err(),
+        compile_within_depth(nested(depth + 5), depth).is_err(),
         "layout past the limit was accepted"
     );
 }

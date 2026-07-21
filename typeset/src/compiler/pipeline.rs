@@ -16,12 +16,12 @@
 //!
 //! Two entry points: [`compile`] is infallible (the fast path — the pipeline is
 //! iterative, so no layout is too deep and there is no depth cap);
-//! [`compile_safe`]/[`compile_safe_with_depth`] return a [`Result`] and reject
-//! layouts deeper than a configurable bound before compiling, to cap the
-//! O(depth) heap an untrusted layout can allocate.
+//! [`compile_within_depth`] returns a [`Result`] and rejects layouts deeper than
+//! a caller-supplied bound before compiling, to cap the O(depth) heap an
+//! untrusted layout can allocate.
 
 use crate::compiler::{
-    error::CompilerError,
+    error::DepthLimitExceeded,
     passes::{
         broken, denull, fixed, identities, linearize, move_to_heap, reassociate, rescope,
         serialize, structurize,
@@ -35,36 +35,18 @@ use crate::compiler::{
 /// The fast path, and infallible: the pipeline is iterative, so no layout is
 /// too deep to compile and there is no depth cap. If layout depth is untrusted
 /// and you want to bound the O(depth) heap it can allocate, use
-/// [`compile_safe_with_depth`] to reject over-deep layouts up front instead.
+/// [`compile_within_depth`] to reject over-deep layouts up front instead.
 ///
 /// # Examples
 ///
 /// ```rust
 /// use typeset::{compile, render, text};
 ///
-/// let doc = compile(text("Hello, world!".to_string()));
+/// let doc = compile(text("Hello, world!"));
 /// assert_eq!(render(doc, 2, 80), "Hello, world!");
 /// ```
 pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     run_passes(layout)
-}
-
-/// Compiles a layout, returning a [`Result`] and rejecting layouts deeper than
-/// the default bound of 10,000.
-///
-/// The depth bound is a resource limit, not a stack-safety guard (the pipeline
-/// is iterative). Use [`compile_safe_with_depth`] to choose a different bound.
-///
-/// # Examples
-///
-/// ```rust
-/// use typeset::{compile_safe, render, text};
-///
-/// let doc = compile_safe(text("Hello, world!".to_string())).unwrap();
-/// assert_eq!(render(doc, 2, 80), "Hello, world!");
-/// ```
-pub fn compile_safe(layout: Box<Layout>) -> Result<Box<Doc>, CompilerError> {
-    compile_safe_with_depth(layout, 10000)
 }
 
 /// Maximum nesting depth of a layout tree.
@@ -96,33 +78,27 @@ fn measure_depth(layout: &Layout) -> usize {
     deepest
 }
 
-/// Compiles a layout with a custom depth bound.
+/// Compiles a layout, rejecting it if deeper than `max_depth`.
 ///
-/// Layouts deeper than `max_depth` are rejected with
-/// [`CompilerError::DepthLimitExceeded`] before compiling. Because the pipeline
-/// is iterative, this is a policy/resource bound (capping the O(depth) heap an
-/// untrusted layout can allocate), not a stack-safety guard — pick it from your
-/// memory budget. `max_depth` must be greater than 0, else
-/// [`CompilerError::InvalidInput`] is returned.
+/// Layouts deeper than `max_depth` are rejected with [`DepthLimitExceeded`]
+/// before compiling. Because the pipeline is iterative, this is a policy/resource
+/// bound (capping the O(depth) heap an untrusted layout can allocate), not a
+/// stack-safety guard — pick it from your memory budget. A `max_depth` of 0
+/// rejects every layout (the shallowest possible layout has depth 1); it is not
+/// an error.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use typeset::{compile_safe_with_depth, render, text};
+/// use typeset::{compile_within_depth, render, text};
 ///
-/// let doc = compile_safe_with_depth(text("content".to_string()), 1000).unwrap();
+/// let doc = compile_within_depth(text("content"), 1000).unwrap();
 /// assert_eq!(render(doc, 2, 80), "content");
 /// ```
-pub fn compile_safe_with_depth(
+pub fn compile_within_depth(
     layout: Box<Layout>,
     max_depth: usize,
-) -> Result<Box<Doc>, CompilerError> {
-    if max_depth == 0 {
-        return Err(CompilerError::InvalidInput(
-            "max_depth must be greater than 0".to_string(),
-        ));
-    }
-
+) -> Result<Box<Doc>, DepthLimitExceeded> {
     // Reject over-deep layouts before compiling. The pipeline is fully iterative
     // (passes, heap conversion, renderer, and Doc drop), so this is a resource
     // bound rather than a stack-safety guard: it caps the O(depth) heap that an
@@ -130,7 +106,7 @@ pub fn compile_safe_with_depth(
     // deep layout cannot overflow.
     let depth = measure_depth(&layout);
     if depth > max_depth {
-        return Err(CompilerError::DepthLimitExceeded { depth, max_depth });
+        return Err(DepthLimitExceeded { depth, max_depth });
     }
 
     Ok(run_passes(layout))
@@ -139,7 +115,7 @@ pub fn compile_safe_with_depth(
 /// Runs the ten-pass pipeline, lowering [`Layout`] to a heap [`Doc`].
 ///
 /// Infallible and iterative: shared by [`compile`] (no depth bound) and
-/// [`compile_safe_with_depth`] (which measures and rejects over-deep layouts
+/// [`compile_within_depth`] (which measures and rejects over-deep layouts
 /// before calling here). Each pass allocates its output in a fresh bump arena,
 /// so every intermediate representation is freed once this returns.
 fn run_passes(layout: Box<Layout>) -> Box<Doc> {
@@ -234,39 +210,46 @@ mod tests {
 
     #[test]
     fn test_compile_simple_text() {
-        let layout = text("hello".to_string());
-        let result = compile_safe(layout);
+        let layout = text("hello");
+        let result = compile_within_depth(layout, 10000);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_compile_safe_with_zero_depth() {
-        let layout = text("hello".to_string());
-        let result = compile_safe_with_depth(layout, 0);
-        assert!(matches!(result, Err(CompilerError::InvalidInput(_))));
+    fn zero_depth_rejects_every_layout() {
+        // The shallowest layout has depth 1, so a bound of 0 rejects it — this
+        // is a resource decision, not an error condition.
+        let result = compile_within_depth(text("hello"), 0);
+        assert!(matches!(
+            result,
+            Err(DepthLimitExceeded {
+                depth: 1,
+                max_depth: 0
+            })
+        ));
     }
 
     #[test]
     fn test_compile_complex_layout() {
-        let left = text("hello".to_string());
-        let right = text("world".to_string());
+        let left = text("hello");
+        let right = text("world");
         let layout = comp(left, right, true, false);
-        let result = compile_safe(layout);
+        let result = compile_within_depth(layout, 10000);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_compile_nested_layout() {
-        let inner = text("content".to_string());
+        let inner = text("content");
         let nested = nest(inner);
         let grouped = grp(nested);
-        let result = compile_safe(grouped);
+        let result = compile_within_depth(grouped, 10000);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_render_compiled_doc() {
-        let layout = text("test".to_string());
+        let layout = text("test");
         let doc = compile(layout);
         let output = render(doc, 4, 80);
         // Just ensure it doesn't panic - actual rendering logic tested elsewhere
@@ -284,11 +267,11 @@ mod tests {
 
     #[test]
     fn deep_nest_compiles_renders_and_drops() {
-        let mut layout = text("x".to_string());
+        let mut layout = text("x");
         for _ in 0..DEEP {
             layout = nest(layout);
         }
-        let doc = compile_safe_with_depth(layout, DEEP * 2).expect("deep nest should compile");
+        let doc = compile_within_depth(layout, DEEP * 2).expect("deep nest should compile");
         let output = render(doc, 2, 80);
         // Pure nesting introduces no line breaks; only leading indentation.
         assert!(!output.contains('\n'));
@@ -299,11 +282,11 @@ mod tests {
     fn deep_comp_compiles_renders_and_drops() {
         // Left-nested compositions; a narrow width forces a break at each,
         // exercising the renderer's deep break path and the deep `Doc` spine.
-        let mut layout = text("a".to_string());
+        let mut layout = text("a");
         for _ in 0..DEEP {
-            layout = comp(layout, text("b".to_string()), true, false);
+            layout = comp(layout, text("b"), true, false);
         }
-        let doc = compile_safe_with_depth(layout, DEEP * 2).expect("deep comp should compile");
+        let doc = compile_within_depth(layout, DEEP * 2).expect("deep comp should compile");
         let output = render(doc, 2, 1);
         assert!(output.contains('\n'));
         assert!(output.ends_with('b'));
@@ -311,12 +294,7 @@ mod tests {
 
     #[test]
     fn render_ref_matches_render_and_is_reusable() {
-        let layout = comp(
-            text("hello".to_string()),
-            text("world".to_string()),
-            true,
-            false,
-        );
+        let layout = comp(text("hello"), text("world"), true, false);
         let doc = compile(layout);
         // Borrowing renders the same document repeatedly without moving it.
         let a = render_ref(&doc, 2, 5);
@@ -331,14 +309,11 @@ mod tests {
     fn deep_layout_beyond_limit_is_rejected() {
         // The depth check is now a policy bound rather than a stack-safety
         // guard, but it still rejects layouts deeper than the configured limit.
-        let mut layout = text("x".to_string());
+        let mut layout = text("x");
         for _ in 0..1000 {
             layout = nest(layout);
         }
-        let result = compile_safe_with_depth(layout, 100);
-        assert!(matches!(
-            result,
-            Err(CompilerError::DepthLimitExceeded { .. })
-        ));
+        let result = compile_within_depth(layout, 100);
+        assert!(matches!(result, Err(DepthLimitExceeded { .. })));
     }
 }

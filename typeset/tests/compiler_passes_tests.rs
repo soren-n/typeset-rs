@@ -4,8 +4,8 @@
 //! and that the overall pipeline produces correct results.
 
 use typeset::{
-    braces, comp, compile, compile_safe, compile_safe_with_depth, fix, grp, join_with_commas,
-    join_with_spaces, nest, pack, parens, render, seq, text,
+    braces, comp, compile, compile_within_depth, fix, grp, join_with_commas, join_with_spaces,
+    nest, pack, parens, render, seq, text,
 };
 
 /// Test the complete compiler pipeline with various layout constructs
@@ -13,20 +13,15 @@ use typeset::{
 fn test_all_layout_constructs() {
     // Create a layout that uses all major constructs
     let layout = comp(
-        text("Program:".to_string()),
+        text("Program:"),
         nest(comp(
-            fix(text("fn".to_string())),
+            fix(text("fn")),
             comp(
-                text("main()".to_string()),
+                text("main()"),
                 braces(grp(join_with_commas(vec![
-                    text("stmt1".to_string()),
-                    text("stmt2".to_string()),
-                    seq(comp(
-                        text("if".to_string()),
-                        parens(text("condition".to_string())),
-                        true,
-                        false,
-                    )),
+                    text("stmt1"),
+                    text("stmt2"),
+                    seq(comp(text("if"), parens(text("condition")), true, false)),
                 ]))),
                 true,
                 false,
@@ -53,15 +48,14 @@ fn test_all_layout_constructs() {
 /// Test memory safety with deep nesting
 #[test]
 fn test_deep_nesting() {
-    let mut layout = text("base".to_string());
+    let mut layout = text("base");
 
     // Create moderately nested structure (reduced to avoid stack overflow)
     for i in 0..20 {
         layout = nest(comp(text(format!("level_{}", i)), layout, true, false));
     }
 
-    // Should compile without stack overflow
-    let result = compile_safe(layout);
+    let result = compile_within_depth(layout, 10000);
     assert!(result.is_ok());
 
     if let Ok(doc) = result {
@@ -75,14 +69,14 @@ fn test_deep_nesting() {
 /// Test wide layouts with many compositions
 #[test]
 fn test_wide_layouts() {
-    let mut layout = text("first".to_string());
+    let mut layout = text("first");
 
     // Create wide structure with many compositions (reduced to prevent stack overflow)
     for i in 1..20 {
         layout = comp(layout, text(format!("item_{}", i)), true, false);
     }
 
-    let result = compile_safe_with_depth(layout, 200);
+    let result = compile_within_depth(layout, 200);
     assert!(result.is_ok());
 
     if let Ok(doc) = result {
@@ -96,19 +90,9 @@ fn test_wide_layouts() {
 /// Test that fix construct prevents breaking
 #[test]
 fn test_fix_prevents_breaking() {
-    let breakable = comp(
-        text("breakable".to_string()),
-        text("content".to_string()),
-        true,
-        false,
-    );
+    let breakable = comp(text("breakable"), text("content"), true, false);
 
-    let fixed = fix(comp(
-        text("fixed".to_string()),
-        text("content".to_string()),
-        true,
-        false,
-    ));
+    let fixed = fix(comp(text("fixed"), text("content"), true, false));
 
     let layout = comp(breakable, fixed, false, false);
 
@@ -123,15 +107,15 @@ fn test_fix_prevents_breaking() {
 #[test]
 fn test_group_breaking() {
     let grouped_content = grp(join_with_spaces(vec![
-        text("grouped".to_string()),
-        text("content".to_string()),
-        text("that".to_string()),
-        text("should".to_string()),
-        text("break".to_string()),
-        text("together".to_string()),
+        text("grouped"),
+        text("content"),
+        text("that"),
+        text("should"),
+        text("break"),
+        text("together"),
     ]));
 
-    let layout = comp(text("Before".to_string()), grouped_content, true, false);
+    let layout = comp(text("Before"), grouped_content, true, false);
 
     // Test with wide width (should fit on one line)
     let doc = compile(layout.clone());
@@ -156,13 +140,13 @@ fn test_group_breaking() {
 #[test]
 fn test_sequence_breaking() {
     let seq_content = seq(join_with_spaces(vec![
-        text("seq1".to_string()),
-        text("seq2".to_string()),
-        text("seq3".to_string()),
-        text("seq4".to_string()),
+        text("seq1"),
+        text("seq2"),
+        text("seq3"),
+        text("seq4"),
     ]));
 
-    let layout = comp(text("Before".to_string()), seq_content, true, false);
+    let layout = comp(text("Before"), seq_content, true, false);
 
     let doc = compile(layout);
     let output = render(doc, 2, 15); // Narrow enough to trigger breaking
@@ -184,27 +168,12 @@ fn test_sequence_breaking() {
 #[test]
 fn test_pack_alignment_complex() {
     let pack_content = pack(join_with_commas(vec![
-        comp(
-            text("key1".to_string()),
-            text("value1".to_string()),
-            true,
-            false,
-        ),
-        comp(
-            text("key2".to_string()),
-            text("value2".to_string()),
-            true,
-            false,
-        ),
-        comp(
-            text("longer_key".to_string()),
-            text("value3".to_string()),
-            true,
-            false,
-        ),
+        comp(text("key1"), text("value1"), true, false),
+        comp(text("key2"), text("value2"), true, false),
+        comp(text("longer_key"), text("value3"), true, false),
     ]));
 
-    let layout = comp(text("Config:".to_string()), pack_content, true, false);
+    let layout = comp(text("Config:"), pack_content, true, false);
 
     let doc = compile(layout);
     let output = render(doc, 2, 25); // Force some breaking
@@ -220,18 +189,17 @@ fn test_pack_alignment_complex() {
 #[test]
 fn test_mixed_constructs() {
     let layout = grp(seq(comp(
-        fix(text("FIXED".to_string())),
+        fix(text("FIXED")),
         nest(pack(join_with_commas(vec![
-            text("item_a".to_string()),
-            text("item_b".to_string()),
-            text("item_c".to_string()),
+            text("item_a"),
+            text("item_b"),
+            text("item_c"),
         ]))),
         true,
         false,
     )));
 
-    // Should compile without issues
-    let result = compile_safe(layout);
+    let result = compile_within_depth(layout, 10000);
     assert!(result.is_ok());
 
     if let Ok(doc) = result {
@@ -253,13 +221,13 @@ fn test_edge_cases() {
     assert_eq!(output, "");
 
     // Test composition with null
-    let with_null = comp(text("Before".to_string()), typeset::null(), true, false);
+    let with_null = comp(text("Before"), typeset::null(), true, false);
     let doc = compile(with_null);
     let output = render(doc, 2, 80);
     assert_eq!(output, "Before");
 
     // Test empty text
-    let empty_text = text("".to_string());
+    let empty_text = text("");
     let doc = compile(empty_text);
     let output = render(doc, 2, 80);
     assert_eq!(output, "");
@@ -277,8 +245,8 @@ fn test_edge_cases() {
 #[test]
 fn test_seq_inside_grp_breaks_all_or_nothing() {
     let layout = grp(seq(comp(
-        comp(text("a".to_string()), text("b".to_string()), true, false),
-        text("c".to_string()),
+        comp(text("a"), text("b"), true, false),
+        text("c"),
         true,
         false,
     )));
@@ -291,8 +259,8 @@ fn test_seq_inside_grp_breaks_all_or_nothing() {
 #[test]
 fn test_grp_inside_seq_keeps_its_own_fit_scope() {
     let layout = seq(grp(comp(
-        comp(text("a".to_string()), text("b".to_string()), true, false),
-        text("c".to_string()),
+        comp(text("a"), text("b"), true, false),
+        text("c"),
         true,
         false,
     )));

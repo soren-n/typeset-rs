@@ -4,11 +4,11 @@
 //! characteristics and doesn't introduce regressions.
 
 use std::time::{Duration, Instant};
-use typeset::{comp, compile, compile_safe_with_depth, grp, nest, render, seq, text};
+use typeset::{comp, compile, compile_within_depth, grp, nest, render, seq, text};
 
 /// Helper function to create a layout with specified depth
 fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
-    let mut layout = text("base".to_string());
+    let mut layout = text("base");
 
     for i in 0..depth {
         layout = nest(grp(comp(text(format!("level_{}", i)), layout, true, false)));
@@ -19,7 +19,7 @@ fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
 
 /// Helper function to create a layout with specified width
 fn create_wide_layout(width: usize) -> Box<typeset::Layout> {
-    let mut layout = text("first".to_string());
+    let mut layout = text("first");
 
     for i in 1..width {
         layout = comp(layout, text(format!("item_{}", i)), true, false);
@@ -34,7 +34,7 @@ fn test_compilation_performance() {
     let layout = create_deep_layout(15);
 
     let start = Instant::now();
-    let result = compile_safe_with_depth(layout, 100);
+    let result = compile_within_depth(layout, 100);
     assert!(result.is_ok(), "Deep layout compilation failed");
     let doc = result.unwrap();
     let compile_duration = start.elapsed();
@@ -64,7 +64,7 @@ fn test_safe_compilation_performance() {
     let layout = create_wide_layout(20);
 
     let start = Instant::now();
-    let result = compile_safe_with_depth(layout, 100);
+    let result = compile_within_depth(layout, 100);
     let duration = start.elapsed();
 
     assert!(result.is_ok(), "Safe compilation failed");
@@ -82,7 +82,7 @@ fn test_large_layout_handling() {
     let layout = create_deep_layout(10);
 
     // Should complete without crashing
-    let result = compile_safe_with_depth(layout, 50);
+    let result = compile_within_depth(layout, 50);
     assert!(result.is_ok(), "Large layout compilation failed");
 
     if let Ok(doc) = result {
@@ -98,7 +98,7 @@ fn test_wide_layout_performance() {
     let layout = create_wide_layout(20);
 
     let start = Instant::now();
-    let result = compile_safe_with_depth(layout, 100);
+    let result = compile_within_depth(layout, 100);
     assert!(result.is_ok(), "Wide layout compilation failed");
     let doc = result.unwrap();
     let compile_duration = start.elapsed();
@@ -137,7 +137,7 @@ fn test_memory_efficiency() {
             false,
         );
 
-        let result = compile_safe_with_depth(layout, 50);
+        let result = compile_within_depth(layout, 50);
         assert!(
             result.is_ok(),
             "Memory efficiency test failed at iteration {}",
@@ -160,9 +160,9 @@ fn test_memory_efficiency() {
 #[test]
 fn test_nested_scope_compilation_is_linear() {
     fn nested_seq(n: usize) -> Box<typeset::Layout> {
-        let mut layout = text("a".to_string());
+        let mut layout = text("a");
         for _ in 0..n {
-            layout = seq(comp(text("a".to_string()), layout, true, false));
+            layout = seq(comp(text("a"), layout, true, false));
         }
         layout
     }
@@ -176,40 +176,5 @@ fn test_nested_scope_compilation_is_linear() {
     assert!(
         elapsed < Duration::from_secs(3),
         "nested-scope compilation too slow ({elapsed:?}); O(n^2) regression?"
-    );
-}
-
-/// Benchmark comparison between compile and compile_safe
-#[test]
-fn test_compile_vs_compile_safe_performance() {
-    let layout = create_deep_layout(8);
-
-    // Benchmark regular compile (with safe version to avoid stack overflow)
-    let start = Instant::now();
-    let doc1_result = compile_safe_with_depth(layout.clone(), 50);
-    let compile_duration = start.elapsed();
-
-    assert!(doc1_result.is_ok(), "Regular compile failed");
-    let doc1 = doc1_result.unwrap();
-
-    // Benchmark safe compile
-    let start = Instant::now();
-    let doc2_result = compile_safe_with_depth(layout, 50);
-    let safe_compile_duration = start.elapsed();
-
-    assert!(doc2_result.is_ok());
-    let doc2 = doc2_result.unwrap();
-
-    // Both should produce identical output
-    let output1 = render(doc1, 2, 80);
-    let output2 = render(doc2, 2, 80);
-    assert_eq!(output1, output2);
-
-    // Safe compile should not be more than 2x slower than regular compile
-    assert!(
-        safe_compile_duration < compile_duration * 3,
-        "Safe compile too slow compared to regular compile: {:?} vs {:?}",
-        safe_compile_duration,
-        compile_duration
     );
 }
