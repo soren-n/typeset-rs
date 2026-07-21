@@ -13,7 +13,7 @@ This is a Rust workspace containing two main crates:
 **Primary modules**:
 - `lib.rs`: Main public API exports (Layout, Doc, constructors, compile, render)
 - `compiler/`: Core layout compiler and renderer implementation
-  - `constructors/`: Layout building primitives (text, composition, control, format, etc.)
+  - `constructors.rs`: Layout building primitives (text, composition, control, joining, wrapping, one-step formatting)
   - `passes/`: Compilation passes (denull, reassociate, linearize, serialize, etc.)
   - `render/`: Text rendering engine
   - `types/`: Core data structures (Layout, Doc, and the intermediate
