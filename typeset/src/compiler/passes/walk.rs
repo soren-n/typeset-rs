@@ -3,62 +3,33 @@
 //! `identities` and `reassociate` both walk the same linear `DenullDoc` spine
 //! (`Eod`/`Empty`/`Break`/`Line`), transform each line's object, and fold the
 //! results back onto the terminal as a fresh `DenullDoc`. They differ only in
-//! the per-object transform. [`map_denull_spine`] captures that one shape;
-//! [`SpineSink`] abstracts the output constructors. (The final `rescope` pass
-//! walks the same spine but folds directly into the heap [`Doc`], so it does its
-//! own spine walk rather than going through this arena-allocating sink.)
+//! the per-object transform, which [`map_denull_spine`] takes as a closure. (The
+//! final `rescope` pass walks the same spine but folds directly into the heap
+//! [`Doc`], so it does its own spine walk rather than allocating a `DenullDoc`.)
 
 use crate::compiler::types::{DenullDoc, DenullObj};
 use bumpalo::Bump;
 
-/// An output spine a `DenullDoc` walk can fold into. Implemented for the pass
-/// output types that share the `Eod`/`Empty`/`Break`/`Line` shape.
-pub trait SpineSink<'b>: Sized {
-    /// The per-line object this spine carries.
-    type Obj;
-    fn eod(mem: &'b Bump) -> &'b Self;
-    fn empty(mem: &'b Bump, tail: &'b Self) -> &'b Self;
-    fn brk(mem: &'b Bump, obj: Self::Obj, tail: &'b Self) -> &'b Self;
-    fn line(mem: &'b Bump, obj: Self::Obj) -> &'b Self;
-}
-
-impl<'b> SpineSink<'b> for DenullDoc<'b> {
-    type Obj = &'b DenullObj<'b>;
-    fn eod(mem: &'b Bump) -> &'b Self {
-        mem.alloc(DenullDoc::Eod)
-    }
-    fn empty(mem: &'b Bump, tail: &'b Self) -> &'b Self {
-        mem.alloc(DenullDoc::Empty(tail))
-    }
-    fn brk(mem: &'b Bump, obj: Self::Obj, tail: &'b Self) -> &'b Self {
-        mem.alloc(DenullDoc::Break(obj, tail))
-    }
-    fn line(mem: &'b Bump, obj: Self::Obj) -> &'b Self {
-        mem.alloc(DenullDoc::Line(obj))
-    }
-}
-
 /// Walk a linear `DenullDoc` spine, mapping each line's object with `map_obj`,
-/// and fold the results back onto the terminal as an output spine `S`.
+/// and fold the results back onto the terminal as a fresh `DenullDoc`.
 ///
 /// Iterative: a plain loop down the spine collecting into a `Vec`, then a
-/// reverse fold, so arbitrarily deep documents use no native stack. The output
-/// spine type is inferred from the caller's return type.
-pub fn map_denull_spine<'b, 'a: 'b, S: SpineSink<'b>>(
+/// reverse fold, so arbitrarily deep documents use no native stack.
+pub fn map_denull_spine<'b, 'a: 'b>(
     mem: &'b Bump,
     doc: &'a DenullDoc<'a>,
-    map_obj: impl Fn(&'b Bump, &'a DenullObj<'a>) -> S::Obj,
-) -> &'b S {
-    enum Item<O> {
+    map_obj: impl Fn(&'b Bump, &'a DenullObj<'a>) -> &'b DenullObj<'b>,
+) -> &'b DenullDoc<'b> {
+    enum Item<'b> {
         Empty,
-        Break(O),
+        Break(&'b DenullObj<'b>),
     }
-    let mut items: Vec<Item<S::Obj>> = Vec::new();
+    let mut items: Vec<Item<'b>> = Vec::new();
     let mut cur = doc;
-    let terminal: &'b S = loop {
+    let terminal: &'b DenullDoc<'b> = loop {
         match cur {
-            DenullDoc::Eod => break S::eod(mem),
-            DenullDoc::Line(obj) => break S::line(mem, map_obj(mem, obj)),
+            DenullDoc::Eod => break mem.alloc(DenullDoc::Eod),
+            DenullDoc::Line(obj) => break mem.alloc(DenullDoc::Line(map_obj(mem, obj))),
             DenullDoc::Empty(doc1) => {
                 items.push(Item::Empty);
                 cur = doc1;
@@ -72,8 +43,8 @@ pub fn map_denull_spine<'b, 'a: 'b, S: SpineSink<'b>>(
     let mut result = terminal;
     for item in items.into_iter().rev() {
         result = match item {
-            Item::Empty => S::empty(mem, result),
-            Item::Break(obj) => S::brk(mem, obj, result),
+            Item::Empty => mem.alloc(DenullDoc::Empty(result)),
+            Item::Break(obj) => mem.alloc(DenullDoc::Break(obj, result)),
         };
     }
     result
