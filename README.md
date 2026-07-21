@@ -16,7 +16,7 @@ cargo add typeset typeset-parser
 ## Quick Start
 
 ```rust
-use typeset::{compile, render, text, comp, nest, grp};
+use typeset::{compile, render, text, comp, nest, grp, Pad, Break};
 
 // Create a simple layout (text accepts &str or String)
 let layout = comp(

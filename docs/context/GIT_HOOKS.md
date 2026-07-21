@@ -25,12 +25,17 @@ The hook is not active in a fresh clone — run `./scripts/install-hooks.sh` onc
    - **Purpose**: Ensures type safety across all build targets
    - **Fix**: Address compilation errors manually
 
+4. **Doc Build**: `cargo doc --no-deps --all-features`
+   - **Requirement**: Must pass (blocking)
+   - **Purpose**: Catches broken intra-doc links (denied at the crate root),
+     so stale doc references cannot merge
+
 ### Testing Requirements
-4. **Rust Testing**: `cargo test --all --all-features`
+5. **Rust Testing**: `cargo test --all --all-features`
    - **Requirement**: All tests must pass (blocking)
    - **Coverage**: Unit tests, integration tests, doc tests
 
-5. **OCaml Property-Based Testing**
+6. **OCaml Property-Based Testing**
    - **Requirement**: All OCaml tests must pass (blocking)
    - **Setup**: dependencies must be installed manually (see Prerequisites)
    - **Dependencies**: `qcheck`, `typeset` OCaml packages
@@ -90,9 +95,10 @@ Some issues require manual intervention:
 2. **Formatting**: Code must be properly formatted
 3. **Linting**: No clippy warnings allowed (`-D warnings`)
 4. **Type Check**: All code must compile cleanly
-5. **Rust Tests**: All Rust unit and integration tests must pass
-6. **OCaml Tests**: Property-based tests must pass
-7. **Commit**: Only proceeds if all checks pass
+5. **Doc Build**: `cargo doc` must succeed (no broken intra-doc links)
+6. **Rust Tests**: All Rust unit and integration tests must pass
+7. **OCaml Tests**: Property-based tests must pass
+8. **Commit**: Only proceeds if all checks pass
 
 Because the checks read the working tree rather than the index, a commit that
 stages only part of your changes is validated against everything present on

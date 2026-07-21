@@ -123,7 +123,7 @@ mod tests {
     fn test_layout_behavior() {
         let layout = text("hello");
         let compiled = compile(layout);
-        assert_eq!(render(compiled, 80), "hello");
+        assert_eq!(render(compiled, 2, 80), "hello");
     }
 }
 ```
@@ -139,18 +139,23 @@ The OCaml tests validate properties like:
 - Use `criterion` benchmarking framework
 - Focus on compilation and rendering performance
 - Test with various layout complexities
-- Compare different data structure implementations
+- Guard asymptotic behavior (e.g. the linear-scaling nested-scope test), not
+  wall-clock thresholds
 
 ## Continuous Integration
 
 Tests run automatically on:
 - Every commit (via git hooks, once installed with `./scripts/install-hooks.sh`)
-- Pull requests (via GitHub Actions) — Rust tests only
+- Pull requests and pushes to `main` (via GitHub Actions)
 - Multiple Rust versions (stable, MSRV 1.89.0)
-- Security auditing with additional tools
+- Security auditing (`cargo deny`)
 
-Note: the OCaml property tests are not part of CI. They run only through the
-pre-commit hook, so a contributor without OCaml installed will never exercise
-them.
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs two jobs that gate
+merges: a `check` job (fmt, clippy, `cargo doc`, `cargo check`, and
+`cargo test --all`) and a dedicated `differential` job that installs OCaml +
+opam, builds the oracle, and runs the QCheck property suite plus the
+differential fuzzer. So the OCaml oracle is a first-class CI gate, not only a
+local pre-commit step — a contributor without OCaml locally still has their
+changes exercised against the oracle in CI.
 
 All tests must pass before code can be merged to main branch.

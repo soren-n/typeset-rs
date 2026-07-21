@@ -2,116 +2,104 @@
 
 ## Overview
 
-The typeset-parser crate provides a procedural macro that parses layout DSL syntax at compile time, converting it into layout constructor calls.
+The `typeset-parser` crate provides the `layout! { ... }` procedural macro. It
+parses a compact layout DSL at compile time and expands it into calls to the
+`typeset` constructor functions, so the two are always semantically equivalent —
+the macro is pure sugar.
 
-## Operators
-
-### Line Break Operators
-- `@`: Soft line break - break here if the line becomes too long
-- `@@`: Hard line break - always break here
-
-### Composition Operators
-
-#### Unpadded Compositions
-- `&`: Basic unpadded composition (no spaces between elements)
-- `!&`: Unpadded composition with infix fix (prevents breaks within)
-
-#### Padded Compositions  
-- `+`: Basic padded composition (spaces between elements)
-- `!+`: Padded composition with infix fix (prevents breaks within)
-
-## Constructors
-
-### Basic Constructors
-- `text("string")`: Literal text node
-- `null`: Empty layout (identity element)
-
-### Control Constructors
-- `fix(layout)`: Treat layout as literal text (no line breaks allowed)
-- `grp(layout)`: Group breaking - all elements break together or not at all
-- `seq(layout)`: Sequential breaking - if any element breaks, all break
-
-### Indentation Constructors
-- `nest(n, layout)`: Increase indentation by `n` spaces for nested content
-- `pack(layout)`: Align content to the column position of the first literal
-
-## Syntax Examples
-
-### Basic Text and Composition
 ```rust
-// Simple text
-text("hello")
+use typeset_parser::layout;
 
-// Padded composition with space
-text("hello") + text("world")  // "hello world"
-
-// Unpadded composition  
-text("(") & text("content") & text(")")  // "(content)"
+let name = typeset::text("name");
+let doc = layout! {
+    "fn" + name @
+    grp ("(" & "arg" & ")")
+};
 ```
 
-### Line Breaking
-```rust
-// Soft break - only breaks if needed
-text("item1") @ text("item2")
+## Operands (primaries)
 
-// Hard break - always breaks
-text("line1") @@ text("line2")
+A primary is the smallest unit an operator applies to:
+
+- `"literal"` — a string literal, expands to `text("literal")`. Write the string
+  directly; do **not** write `text("literal")` inside the macro.
+- `null` — the empty layout, expands to `null()`.
+- `identifier` — any bare identifier that is not `null` or a unary operator is
+  treated as a variable holding a `Box<Layout>` in the surrounding scope; it
+  expands to `identifier.clone()`.
+- `( expr )` — a parenthesized sub-expression, used for grouping.
+
+## Unary operators (prefix)
+
+Each is written as the operator name followed by a single primary (usually a
+parenthesized expression):
+
+- `fix (layout)` — never break anything inside `layout`.
+- `grp (layout)` — group breaking: every breakable composition inside breaks
+  together, all-or-nothing.
+- `seq (layout)` — sequential breaking: once one composition breaks, every later
+  one in the sequence breaks too.
+- `nest (layout)` — indent the lines `layout` breaks onto by the render `tab`
+  width. `nest` takes only the layout; the indent amount is the `tab` argument
+  passed to `render`, not a macro argument.
+- `pack (layout)` — align the lines `layout` breaks onto to the column where its
+  first element started (hanging indentation).
+
+## Binary operators (infix)
+
+The composition operators produce breakable or fixed compositions; the line
+operators force breaks:
+
+| Operator | Expands to        | Space? | Breaks?                        |
+|----------|-------------------|--------|--------------------------------|
+| `&`      | `unpad(l, r)`     | no     | may break if the line is long  |
+| `+`      | `pad(l, r)`       | yes    | may break if the line is long  |
+| `!&`     | `fix_unpad(l, r)` | no     | never breaks                   |
+| `!+`     | `fix_pad(l, r)`   | yes    | never breaks                   |
+| `@`      | `line(l, r)`      | —      | always breaks (hard newline)   |
+| `@@`     | `line(l, line(null, r))` | — | always breaks, leaving a blank line between (paragraph break) |
+
+So the soft, fit-dependent breaks are the compositions (`&`, `+`); `@` and `@@`
+are unconditional line breaks.
+
+## Precedence and associativity
+
+All binary operators share a **single precedence level** and are **right
+associative**. `a + b + c` parses as `a + (b + c)`, and `a + b & c` parses as
+`a + (b & c)`. Use parentheses to impose any other grouping — there is no
+operator-precedence hierarchy, so parenthesize whenever the intended structure
+is not a simple right-leaning chain.
+
+## Examples
+
+```rust
+use typeset_parser::layout;
+
+// A variable holding a Box<Layout> is referenced by bare name.
+let body = typeset::text("body");
+
+// Padded composition, a hard break, then an indented group.
+let block = layout! {
+    "fn" + "name()" @
+    "{" @@
+    nest (body) @@
+    "}"
+};
+
+// Unpadded call syntax, breakable argument group.
+let call = layout! {
+    "f" & grp ("(" & "a" & "," + "b" & ")")
+};
+
+// Right associativity means the chain leans right; parenthesize to regroup.
+let regrouped = layout! { ("a" + "b") + "c" };
 ```
 
-### Grouping and Control
-```rust
-// Group breaking - all break together
-grp(text("a") + text("b") + text("c"))
+## Parser implementation notes
 
-// Fixed content - no breaks allowed
-fix(text("no") + text("breaks"))
-
-// Sequential breaking
-seq(text("first") @ text("second") @ text("third"))
-```
-
-### Indentation
-```rust
-// Fixed indentation increase
-text("parent") @@ nest(2, text("child"))
-
-// Pack to first literal position
-text("fn") + pack(text("name") @ text("body"))
-```
-
-### Complex Examples
-```rust
-// Function definition style
-text("fn") + text("name") & text("(") &
-  nest(2, text("param1") & text(",") @ text("param2")) &
-  text(")") @
-  text("{") @@ 
-  nest(2, text("body")) @@
-  text("}")
-
-// JSON-like structure
-text("{") @@
-  nest(2, 
-    text("\"key\":") + text("\"value\"") & text(",") @
-    text("\"key2\":") + text("\"value2\"")
-  ) @@
-  text("}")
-```
-
-## Precedence and Associativity
-
-Operators follow standard precedence rules:
-1. Constructors (highest)
-2. `&`, `!&` (unpadded compositions)
-3. `+`, `!+` (padded compositions)  
-4. `@` (soft breaks)
-5. `@@` (hard breaks, lowest)
-
-Left associative: `a + b + c` parses as `(a + b) + c`
-
-## Parser Implementation Notes
-
-- Built using `syn` crate for robust Rust syntax parsing
-- Generates constructor function calls at compile time
-- Supports nested parentheses and complex expressions
-- Error reporting includes span information for IDE integration
+- Built on the `syn` crate; primaries, unary operators, and infix operators are
+  parsed by ordered speculative alternatives (`parse_any`).
+- Each node expands directly to the matching named constructor
+  (`unpad`/`pad`/`fix_unpad`/`fix_pad`/`line`/`null`/`text`/`fix`/`grp`/`seq`/`nest`/`pack`),
+  so the macro never re-derives raw composition booleans.
+- Errors carry span information for editor integration.

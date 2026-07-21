@@ -92,6 +92,9 @@ cargo check --all-targets --all-features  # Type checking
 
 - Use existing code style and conventions
 - Follow Rust naming conventions (snake_case for functions, PascalCase for types)
-- Prefer immutable data structures where possible
-- Use bump allocation patterns for temporary data during compilation
+- Traverse recursive trees iteratively with explicit heap worklists rather than
+  native recursion, so arbitrarily deep inputs cannot overflow the stack (this
+  is why the passes, renderer, and the `Layout`/`Doc` `Clone`/`Drop`/`Debug`
+  impls are all hand-written as loops)
+- Use bump allocation for the intermediate representations during compilation
 - Maintain separation between layout construction and compilation phases
