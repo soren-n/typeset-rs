@@ -257,11 +257,9 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         Property::Seq((from_index, to_index))
     }
     fn _graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
-        fn _lift_stack<'b, 'a: 'b>(
-            mem: &'b Bump,
-            comp: &'a FixedComp<'a>,
-        ) -> (&'b List<'b, Property<u64>>, bool) {
-            // Linear chain of grp/seq wrappers around a leaf Comp(pad).
+        fn _lift_stack(comp: &FixedComp) -> (Vec<Property<u64>>, bool) {
+            // Linear chain of grp/seq wrappers around a leaf Comp(pad). Index 0
+            // is the outermost wrapper (what used to be the list head).
             let mut props: Vec<Property<u64>> = Vec::new();
             let mut cur = comp;
             let pad = loop {
@@ -277,7 +275,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                     }
                 }
             };
-            (_list_of(mem, &props), pad)
+            (props, pad)
         }
         // The open-scope property map is keyed by scope index. It is threaded
         // linearly (each update replaces the binding; no earlier version is ever
@@ -285,117 +283,90 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         // replacement for the former persistent map. `BTreeMap` also gives the
         // key-ordered `values()` iteration `_transpose` depends on.
         type Graph = BTreeMap<u64, Property<(u64, Option<u64>)>>;
-        fn _close(to_node: u64, mut props: Graph, stack: &List<Property<u64>>) -> Graph {
+        fn _close(to_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
             // Close each open grp/seq scope on the stack by recording to_node.
-            let mut cur = stack;
-            loop {
-                match cur {
-                    List::Nil => break,
-                    List::Cons(_, Property::Grp(index), stack1) => {
-                        match props[index] {
-                            Property::Seq(_) => unreachable!("Invariant"),
-                            Property::Grp((from_node, _to_node)) => {
-                                let prop1 = _binary_grp(from_node, Some(to_node));
-                                props.insert(*index, prop1);
-                            }
+            for prop in stack {
+                match prop {
+                    Property::Grp(index) => match props[index] {
+                        Property::Seq(_) => unreachable!("Invariant"),
+                        Property::Grp((from_node, _to_node)) => {
+                            props.insert(*index, _binary_grp(from_node, Some(to_node)));
                         }
-                        cur = stack1;
-                    }
-                    List::Cons(_, Property::Seq(index), stack1) => {
-                        match props[index] {
-                            Property::Grp(_) => unreachable!("Invariant"),
-                            Property::Seq((from_node, _to_node)) => {
-                                let prop1 = _binary_seq(from_node, Some(to_node));
-                                props.insert(*index, prop1);
-                            }
+                    },
+                    Property::Seq(index) => match props[index] {
+                        Property::Grp(_) => unreachable!("Invariant"),
+                        Property::Seq((from_node, _to_node)) => {
+                            props.insert(*index, _binary_seq(from_node, Some(to_node)));
                         }
-                        cur = stack1;
-                    }
+                    },
                 }
             }
             props
         }
-        fn _open(from_node: u64, mut props: Graph, stack: &List<Property<u64>>) -> Graph {
+        fn _open(from_node: u64, mut props: Graph, stack: &[Property<u64>]) -> Graph {
             // Open a fresh grp/seq scope on the stack, anchored at from_node.
-            let mut cur = stack;
-            loop {
-                match cur {
-                    List::Nil => break,
-                    List::Cons(_, Property::Grp(index), stack1) => {
-                        let prop1 = _binary_grp(from_node, None);
-                        props.insert(*index, prop1);
-                        cur = stack1;
+            for prop in stack {
+                match prop {
+                    Property::Grp(index) => {
+                        props.insert(*index, _binary_grp(from_node, None));
                     }
-                    List::Cons(_, Property::Seq(index), stack1) => {
-                        let prop1 = _binary_seq(from_node, None);
-                        props.insert(*index, prop1);
-                        cur = stack1;
+                    Property::Seq(index) => {
+                        props.insert(*index, _binary_seq(from_node, None));
                     }
                 }
             }
             props
         }
-        fn _update<'b>(
-            mem: &'b Bump,
+        fn _update(
             node: u64,
-            props: Graph,
-            scope: &'b List<'b, Property<u64>>,
-            stack: &'b List<'b, Property<u64>>,
-        ) -> (&'b List<'b, Property<u64>>, Graph) {
+            mut props: Graph,
+            scope: &[Property<u64>],
+            stack: &[Property<u64>],
+        ) -> (Vec<Property<u64>>, Graph) {
             // Walk scope and stack in lockstep: matching grp/seq scopes are kept
-            // (collected as the common prefix); the first divergence closes the
+            // (the common prefix `scope[..k]`); the first divergence closes the
             // remaining scope and opens the remaining stack.
-            let mut matched: Vec<Property<u64>> = Vec::new();
-            let mut sc = scope;
-            let mut st = stack;
-            let (rest_stack, props_out): (&'b List<'b, Property<u64>>, Graph) = loop {
-                match (sc, st) {
-                    (_, List::Nil) => break (_list::nil(mem), _close(node, props, sc)),
-                    (List::Nil, _) => break (st, _open(node, props, st)),
-                    (
-                        List::Cons(_, Property::Grp(left), scope1),
-                        List::Cons(_, Property::Grp(right), stack1),
-                    ) => {
-                        if left > right {
-                            unreachable!("Invariant")
-                        }
-                        if left == right {
-                            matched.push(_unary_grp(*left));
-                            sc = scope1;
-                            st = stack1;
-                        } else {
-                            let props1 = _close(node, props, sc);
-                            break (st, _open(node, props1, st));
-                        }
+            let mut k = 0;
+            let rest_stack: &[Property<u64>] = loop {
+                match (scope.get(k), stack.get(k)) {
+                    (_, None) => {
+                        props = _close(node, props, &scope[k..]);
+                        break &[];
                     }
-                    (
-                        List::Cons(_, Property::Seq(left), scope1),
-                        List::Cons(_, Property::Seq(right), stack1),
-                    ) => {
-                        if left > right {
-                            unreachable!("Invariant")
-                        }
-                        if left == right {
-                            matched.push(_unary_seq(*left));
-                            sc = scope1;
-                            st = stack1;
-                        } else {
-                            let props1 = _close(node, props, sc);
-                            break (st, _open(node, props1, st));
-                        }
+                    (None, _) => {
+                        props = _open(node, props, &stack[k..]);
+                        break &stack[k..];
                     }
-                    _ => {
-                        let props1 = _close(node, props, sc);
-                        break (st, _open(node, props1, st));
+                    (Some(sp), Some(stp)) => {
+                        let matched = match (sp, stp) {
+                            (Property::Grp(left), Property::Grp(right)) => {
+                                if left > right {
+                                    unreachable!("Invariant")
+                                }
+                                left == right
+                            }
+                            (Property::Seq(left), Property::Seq(right)) => {
+                                if left > right {
+                                    unreachable!("Invariant")
+                                }
+                                left == right
+                            }
+                            _ => false,
+                        };
+                        if matched {
+                            k += 1;
+                        } else {
+                            props = _close(node, props, &scope[k..]);
+                            props = _open(node, props, &stack[k..]);
+                            break &stack[k..];
+                        }
                     }
                 }
             };
-            // Prepend the matched prefix (outermost first) onto the rest.
-            let mut result = rest_stack;
-            for prop in matched.iter().rev() {
-                result = _list::cons(mem, *prop, result);
-            }
-            (result, props_out)
+            // The new scope is the matched common prefix followed by the rest.
+            let mut result = scope[..k].to_vec();
+            result.extend_from_slice(rest_stack);
+            (result, props)
         }
         fn _transpose<'a>(
             mem: &'a Bump,
@@ -489,7 +460,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             let mut nodes_vec: Vec<&'b GraphNode<'b>> = Vec::new();
             let mut pads_vec: Vec<bool> = Vec::new();
             let mut index: u64 = 0;
-            let mut scope: &'b List<'b, Property<u64>> = _list::nil(mem);
+            let mut scope: Vec<Property<u64>> = Vec::new();
             let mut props: Graph = BTreeMap::new();
             let mut cur = obj;
             let final_props: Graph = loop {
@@ -506,9 +477,9 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                             }
                         };
                         nodes_vec.push(make_node(mem, index, term1));
-                        let (stack, pad) = _lift_stack(mem, comp);
+                        let (stack, pad) = _lift_stack(comp);
                         pads_vec.push(pad);
-                        let (scope2, props2) = _update(mem, index, props, scope, stack);
+                        let (scope2, props2) = _update(index, props, &scope, &stack);
                         scope = scope2;
                         props = props2;
                         index += 1;
@@ -526,7 +497,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                             }
                         };
                         nodes_vec.push(make_node(mem, index, term1));
-                        break _close(index, props, scope);
+                        break _close(index, props, &scope);
                     }
                 }
             };
@@ -569,20 +540,19 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             mem: &'b Bump,
             fix: &'a FixedFix<'a>,
             index: u64,
-            scope: &'b List<'b, Property<u64>>,
+            mut scope: Vec<Property<u64>>,
             mut props: Graph,
-        ) -> (&'b GraphFix<'b>, &'b List<'b, Property<u64>>, Graph) {
+        ) -> (&'b GraphFix<'b>, Vec<Property<u64>>, Graph) {
             // Walk the fix chain forward, threading scope/props; rebuild the
             // GraphFix bottom-up from the recorded (term, pad) pairs.
             let mut recorded: Vec<(&'b GraphTerm<'b>, bool)> = Vec::new();
             let mut cur = fix;
-            let mut scope: &'b List<'b, Property<u64>> = scope;
             let last_term: &'b GraphTerm<'b> = loop {
                 match cur {
                     FixedFix::Next(term, comp, fix1) => {
                         let term1 = _visit_term(mem, term);
-                        let (stack, pad) = _lift_stack(mem, comp);
-                        let (scope1, props1) = _update(mem, index, props, scope, stack);
+                        let (stack, pad) = _lift_stack(comp);
+                        let (scope1, props1) = _update(index, props, &scope, &stack);
                         recorded.push((term1, pad));
                         scope = scope1;
                         props = props1;
