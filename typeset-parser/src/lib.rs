@@ -1,7 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Quoted;
 use quote::quote;
-use std::fmt::Debug;
 use std::ops::ControlFlow;
 use syn::{
     Error, Ident, LitStr, parenthesized,
@@ -124,7 +123,7 @@ fn _parse_null(input: ParseStream) -> Result<Box<Ast>> {
     let item: Ident = input.parse()?;
     match item.to_string().as_str() {
         "null" => Ok(Box::new(Ast::Null)),
-        _ => Err(Error::new(item.span(), "Expected a unary operator")),
+        _ => Err(Error::new(item.span(), "Expected null")),
     }
 }
 
