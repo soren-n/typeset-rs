@@ -1,71 +1,61 @@
 //! Pass 5: FixedDoc → RebuildDoc (rebuild with graph structure)
 
-use crate::{
-    compiler::types::{
-        FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, FixedTerm, GraphDoc, GraphEdge,
-        GraphFix, GraphNode, GraphTerm, Property, RebuildDoc, RebuildFix, RebuildObj, RebuildTerm,
-        TopologyResult,
-    },
-    list::{self as _list, List},
+use crate::compiler::types::{
+    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, FixedTerm, GraphDoc, GraphEdge, GraphFix,
+    GraphNode, GraphTerm, Property, RebuildDoc, RebuildFix, RebuildObj, RebuildTerm,
+    TopologyResult,
 };
 use bumpalo::Bump;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-// Builds a persistent List from a slice, with `items[0]` at the head.
-fn _list_of<'a, T: Copy + Clone + std::fmt::Debug>(mem: &'a Bump, items: &[T]) -> &'a List<'a, T> {
-    let mut list = _list::nil(mem);
-    for item in items.iter().rev() {
-        list = _list::cons(mem, *item, list);
-    }
-    list
-}
-
 // Defunctionalized rebuild continuations (replacing the `partial` closure and
 // the RebuildCont closure stack used by `_rebuild::_visit_line`).
 //
-// A partial is a left composition spine: `RPartial = [(x0,p0), .. (xk,pk)]` with
-// the head being the innermost (most recently added) element. Applied to an
-// object it yields `Comp(x0, Comp(x1, .. Comp(xk, obj, pk) .., p1), p0)`.
-type RPartial<'b> = &'b List<'b, (&'b RebuildObj<'b>, bool)>;
+// A partial is a left composition spine. It is stored so `push` appends the
+// innermost (most recently added) element, i.e. the tail is `[.., (xk,pk)]` with
+// `(xk,pk)` innermost; `_apply_rpartial` folds from the end, yielding
+// `Comp(x0, Comp(x1, .. Comp(xk, obj, pk) .., p1), p0)`.
+type RPartial<'b> = Vec<(&'b RebuildObj<'b>, bool)>;
 
-// A continuation step; a continuation is a list of steps applied head-first.
-#[derive(Debug, Copy, Clone)]
+// A continuation step. A continuation is a stack of steps stored so `push`
+// appends the head (the step applied first / innermost); `_apply_rcont` folds
+// from the end. RStack is the stack of continuations, top at the end.
+#[derive(Debug)]
 enum RStep<'b> {
     Grp,
     Seq,
     Partial(RPartial<'b>),
 }
-type RCont<'b> = &'b List<'b, RStep<'b>>;
-type RStack<'b> = &'b List<'b, RCont<'b>>;
+type RCont<'b> = Vec<RStep<'b>>;
+type RStack<'b> = Vec<RCont<'b>>;
 
-// Applies a partial spine to an object (innermost first).
+// Applies a partial spine to an object (innermost element first).
 fn _apply_rpartial<'b>(
     mem: &'b Bump,
-    partial: RPartial<'b>,
+    partial: &[(&'b RebuildObj<'b>, bool)],
     obj: &'b RebuildObj<'b>,
 ) -> &'b RebuildObj<'b> {
     let mut result = obj;
-    let mut cur = partial;
-    while let List::Cons(_, pair, rest) = cur {
-        let (left, pad) = *pair;
+    for &(left, pad) in partial.iter().rev() {
         result = mem.alloc(RebuildObj::Comp(left, result, pad));
-        cur = rest;
     }
     result
 }
 
-// Applies a continuation (list of steps) to an object (head step first).
-fn _apply_rcont<'b>(mem: &'b Bump, cont: RCont<'b>, obj: &'b RebuildObj<'b>) -> &'b RebuildObj<'b> {
+// Applies a continuation (stack of steps) to an object (head step first).
+fn _apply_rcont<'b>(
+    mem: &'b Bump,
+    cont: &[RStep<'b>],
+    obj: &'b RebuildObj<'b>,
+) -> &'b RebuildObj<'b> {
     let mut result = obj;
-    let mut cur = cont;
-    while let List::Cons(_, step, rest) = cur {
+    for step in cont.iter().rev() {
         result = match step {
             RStep::Grp => mem.alloc(RebuildObj::Grp(result)),
             RStep::Seq => mem.alloc(RebuildObj::Seq(result)),
             RStep::Partial(partial) => _apply_rpartial(mem, partial, result),
         };
-        cur = rest;
     }
     result
 }
@@ -207,7 +197,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
     fn _break<'a>(
         mem: &'a Bump,
         nodes: &'a [&'a GraphNode<'a>],
-        pads: &'a List<'a, bool>,
+        pads: &'a [bool],
         doc: &'a GraphDoc<'a>,
     ) -> &'a GraphDoc<'a> {
         mem.alloc(GraphDoc::Break(nodes, pads, doc))
@@ -426,7 +416,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         }
         fn _visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b GraphDoc<'b> {
             // Walk the linear FixedDoc spine, graphifying each line's object.
-            type Line<'b> = (&'b [&'b GraphNode<'b>], &'b List<'b, bool>);
+            type Line<'b> = (&'b [&'b GraphNode<'b>], &'b [bool]);
             let mut breaks: Vec<Line<'b>> = Vec::new();
             let mut cur = doc;
             loop {
@@ -454,7 +444,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         fn _visit_obj<'b, 'a: 'b>(
             mem: &'b Bump,
             obj: &'a FixedObj<'a>,
-        ) -> (&'b [&'b GraphNode<'b>], &'b List<'b, bool>, Graph) {
+        ) -> (&'b [&'b GraphNode<'b>], &'b [bool], Graph) {
             // Walk the object's item chain, assigning indices and threading the
             // scope stack and the open-scope property map.
             let mut nodes_vec: Vec<&'b GraphNode<'b>> = Vec::new();
@@ -503,7 +493,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             };
             (
                 mem.alloc_slice_copy(&nodes_vec),
-                _list_of(mem, &pads_vec),
+                mem.alloc_slice_copy(&pads_vec),
                 final_props,
             )
         }
@@ -696,7 +686,7 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
         }
         fn _visit_doc<'a>(mem: &'a Bump, doc: &'a GraphDoc<'a>) -> &'a GraphDoc<'a> {
             // Walk the linear spine, solving each line's graph in place.
-            type Line<'a> = (&'a [&'a GraphNode<'a>], &'a List<'a, bool>);
+            type Line<'a> = (&'a [&'a GraphNode<'a>], &'a [bool]);
             let mut breaks: Vec<Line<'a>> = Vec::new();
             let mut cur = doc;
             loop {
@@ -790,77 +780,57 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                 }
                 num
             }
-            fn _prop_outs<'b, 'a: 'b>(
-                mem: &'b Bump,
-                node: &'a GraphNode<'a>,
-            ) -> &'b List<'b, Property<()>> {
+            fn _prop_outs(node: &GraphNode) -> Vec<Property<()>> {
                 let mut props: Vec<Property<()>> = Vec::new();
                 let mut cur = node.outs_head.get();
                 while let Some(edge) = cur {
                     props.push(edge.prop);
                     cur = edge.outs_next.get();
                 }
-                _list_of(mem, &props)
+                props
             }
             let mut terms: Vec<&'b GraphTerm<'b>> = Vec::new();
             let mut ins: Vec<u64> = Vec::new();
-            let mut outs: Vec<&'b List<'b, Property<()>>> = Vec::new();
+            let mut outs: Vec<Vec<Property<()>>> = Vec::new();
             for &node in nodes {
                 terms.push(copy_graph_term(mem, node.term));
                 ins.push(_num_ins(node));
-                outs.push(_prop_outs(mem, node));
+                outs.push(_prop_outs(node));
             }
-            (
-                _list_of(mem, &terms),
-                _list_of(mem, &ins),
-                _list_of(mem, &outs),
-            )
+            (terms, ins, outs)
         }
         // Composes `partial` into the top continuation, then pushes a grp/seq
         // continuation for each property.
         fn _open<'b>(
-            mem: &'b Bump,
-            props: &'b List<'b, Property<()>>,
-            stack: RStack<'b>,
+            props: &[Property<()>],
+            mut stack: RStack<'b>,
             partial: RPartial<'b>,
         ) -> RStack<'b> {
-            match stack {
-                List::Cons(_, top, stack1) => {
-                    let top1: RCont<'b> = _list::cons(mem, RStep::Partial(partial), top);
-                    let mut result: RStack<'b> = _list::cons(mem, top1, stack1);
-                    let mut cur = props;
-                    while let List::Cons(_, prop, props1) = cur {
-                        let cont: RCont<'b> = match prop {
-                            Property::Grp(()) => _list::cons(mem, RStep::Grp, _list::nil(mem)),
-                            Property::Seq(()) => _list::cons(mem, RStep::Seq, _list::nil(mem)),
-                        };
-                        result = _list::cons(mem, cont, result);
-                        cur = props1;
-                    }
-                    result
-                }
-                _ => unreachable!("Invariant"),
+            // Prepend a Partial step onto the current top continuation (a `push`
+            // in the reversed-storage convention), then push a fresh single-step
+            // continuation per property.
+            let mut top = stack.pop().expect("Invariant");
+            top.push(RStep::Partial(partial));
+            stack.push(top);
+            for prop in props {
+                stack.push(match prop {
+                    Property::Grp(()) => vec![RStep::Grp],
+                    Property::Seq(()) => vec![RStep::Seq],
+                });
             }
+            stack
         }
         // Pops `count` continuations, applying each to the accumulating object.
         fn _close<'b>(
             mem: &'b Bump,
             count: u64,
-            stack: RStack<'b>,
+            mut stack: RStack<'b>,
             term: &'b RebuildObj<'b>,
         ) -> (RStack<'b>, &'b RebuildObj<'b>) {
-            let mut count = count;
-            let mut stack = stack;
             let mut result = term;
-            while count > 0 {
-                match stack {
-                    List::Cons(_, top, stack1) => {
-                        result = _apply_rcont(mem, top, result);
-                        stack = stack1;
-                        count -= 1;
-                    }
-                    _ => unreachable!("Invariant"),
-                }
+            for _ in 0..count {
+                let top = stack.pop().expect("Invariant");
+                result = _apply_rcont(mem, &top, result);
             }
             (stack, result)
         }
@@ -869,8 +839,8 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             stack: RStack<'b>,
             term: &'b RebuildObj<'b>,
         ) -> &'b RebuildObj<'b> {
-            match stack {
-                List::Cons(_, last, List::Nil) => _apply_rcont(mem, last, term),
+            match stack.as_slice() {
+                [last] => _apply_rcont(mem, last, term),
                 _ => unreachable!("Invariant"),
             }
         }
@@ -883,12 +853,11 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
                     GraphDoc::Eod => break,
                     GraphDoc::Break(nodes, pads, doc1) => {
                         let (terms, ins, outs) = _topology(mem, nodes);
-                        // The initial continuation is the identity (an empty
-                        // step list); the initial partial is the identity too.
-                        let id_cont: RCont<'b> = _list::nil(mem);
-                        let stack: RStack<'b> = _list::cons(mem, id_cont, _list::nil(mem));
-                        let partial: RPartial<'b> = _list::nil(mem);
-                        objs.push(_visit_line(mem, terms, pads, ins, outs, stack, partial));
+                        // The initial stack holds one identity continuation (an
+                        // empty step list); the initial partial is empty too.
+                        let stack: RStack<'b> = vec![Vec::new()];
+                        let partial: RPartial<'b> = Vec::new();
+                        objs.push(_visit_line(mem, &terms, pads, &ins, &outs, stack, partial));
                         cur = doc1;
                     }
                 }
@@ -900,141 +869,63 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a FixedDoc<'a>) -> &'b Rebu
             rdoc
         }
         #[allow(clippy::too_many_arguments)]
-        fn _visit_line<'b, 'a: 'b>(
+        fn _visit_line<'b>(
             mem: &'b Bump,
-            terms: &'a List<'a, &'a GraphTerm<'a>>,
-            pads: &'a List<'a, bool>,
-            ins: &'a List<'a, u64>,
-            outs: &'a List<'a, &'a List<'a, Property<()>>>,
-            stack: RStack<'b>,
-            partial: RPartial<'b>,
+            terms: &[&'b GraphTerm<'b>],
+            pads: &[bool],
+            ins: &[u64],
+            outs: &[Vec<Property<()>>],
+            mut stack: RStack<'b>,
+            mut partial: RPartial<'b>,
         ) -> &'b RebuildObj<'b> {
-            // Walk the aligned (term, pad, in-degree, out-props) lists, threading
-            // the continuation stack and the left composition spine (partial).
-            let mut terms = terms;
-            let mut pads = pads;
-            let mut ins = ins;
-            let mut outs = outs;
-            let mut stack = stack;
-            let mut partial = partial;
+            // Walk the aligned per-node (term, in-degree, out-props) slices,
+            // threading the continuation stack and the left composition spine
+            // (partial). `pads` has one fewer element: `pads[i]` is the pad
+            // between `terms[i]` and `terms[i + 1]`.
+            let n = terms.len();
+            let mut i = 0;
             loop {
-                match (terms, pads) {
-                    // Final term of the line (fixed or plain).
-                    (List::Cons(_, GraphTerm::Fix(fix), List::Nil), List::Nil) => {
-                        let fobj = _fix(mem, _visit_fix(mem, fix));
-                        return match (ins, outs) {
-                            (List::Cons(_, 0, List::Nil), List::Cons(_, List::Nil, List::Nil)) => {
-                                _final(mem, stack, _apply_rpartial(mem, partial, fobj))
-                            }
-                            (
-                                List::Cons(_, in_props, List::Nil),
-                                List::Cons(_, List::Nil, List::Nil),
-                            ) => {
-                                let (stack1, fix2) = _close(
-                                    mem,
-                                    *in_props,
-                                    stack,
-                                    _apply_rpartial(mem, partial, fobj),
-                                );
-                                _final(mem, stack1, fix2)
-                            }
-                            (_, _) => unreachable!("Invariant"),
-                        };
+                let term = terms[i];
+                let obj = match term {
+                    GraphTerm::Fix(fix) => _fix(mem, _visit_fix(mem, fix)),
+                    _ => _term(mem, _visit_term(mem, term)),
+                };
+                let in_deg = ins[i];
+                let out_props = outs[i].as_slice();
+                if i + 1 == n {
+                    // Final term of the line: it never has out-properties.
+                    if !out_props.is_empty() {
+                        unreachable!("Invariant")
                     }
-                    (List::Cons(_, term, List::Nil), List::Nil) => {
-                        let tobj = _term(mem, _visit_term(mem, term));
-                        return match (ins, outs) {
-                            (List::Cons(_, 0, List::Nil), List::Cons(_, List::Nil, List::Nil)) => {
-                                _final(mem, stack, _apply_rpartial(mem, partial, tobj))
-                            }
-                            (
-                                List::Cons(_, in_props, List::Nil),
-                                List::Cons(_, List::Nil, List::Nil),
-                            ) => {
-                                let (stack1, term2) = _close(
-                                    mem,
-                                    *in_props,
-                                    stack,
-                                    _apply_rpartial(mem, partial, tobj),
-                                );
-                                _final(mem, stack1, term2)
-                            }
-                            (_, _) => unreachable!("Invariant"),
-                        };
-                    }
-                    // A term with a following composition (fixed or plain).
-                    (List::Cons(_, GraphTerm::Fix(fix), terms1), List::Cons(_, pad, pads1)) => {
-                        let fobj = _fix(mem, _visit_fix(mem, fix));
-                        match (ins, outs) {
-                            (List::Cons(_, 0, ins1), List::Cons(_, List::Nil, outs1)) => {
-                                partial = _list::cons(mem, (fobj, *pad), partial);
-                                terms = terms1;
-                                pads = pads1;
-                                ins = ins1;
-                                outs = outs1;
-                            }
-                            (List::Cons(_, in_props, ins1), List::Cons(_, List::Nil, outs1)) => {
-                                let (stack1, fix2) = _close(
-                                    mem,
-                                    *in_props,
-                                    stack,
-                                    _apply_rpartial(mem, partial, fobj),
-                                );
-                                partial = _list::cons(mem, (fix2, *pad), _list::nil(mem));
-                                stack = stack1;
-                                terms = terms1;
-                                pads = pads1;
-                                ins = ins1;
-                                outs = outs1;
-                            }
-                            (List::Cons(_, 0, ins1), List::Cons(_, out_props, outs1)) => {
-                                stack = _open(mem, out_props, stack, partial);
-                                partial = _list::cons(mem, (fobj, *pad), _list::nil(mem));
-                                terms = terms1;
-                                pads = pads1;
-                                ins = ins1;
-                                outs = outs1;
-                            }
-                            (_, _) => unreachable!("Invariant"),
-                        }
-                    }
-                    (List::Cons(_, term, terms1), List::Cons(_, pad, pads1)) => {
-                        let tobj = _term(mem, _visit_term(mem, term));
-                        match (ins, outs) {
-                            (List::Cons(_, 0, ins1), List::Cons(_, List::Nil, outs1)) => {
-                                partial = _list::cons(mem, (tobj, *pad), partial);
-                                terms = terms1;
-                                pads = pads1;
-                                ins = ins1;
-                                outs = outs1;
-                            }
-                            (List::Cons(_, in_props, ins1), List::Cons(_, List::Nil, outs1)) => {
-                                let (stack1, term2) = _close(
-                                    mem,
-                                    *in_props,
-                                    stack,
-                                    _apply_rpartial(mem, partial, tobj),
-                                );
-                                partial = _list::cons(mem, (term2, *pad), _list::nil(mem));
-                                stack = stack1;
-                                terms = terms1;
-                                pads = pads1;
-                                ins = ins1;
-                                outs = outs1;
-                            }
-                            (List::Cons(_, 0, ins1), List::Cons(_, out_props, outs1)) => {
-                                stack = _open(mem, out_props, stack, partial);
-                                partial = _list::cons(mem, (tobj, *pad), _list::nil(mem));
-                                terms = terms1;
-                                pads = pads1;
-                                ins = ins1;
-                                outs = outs1;
-                            }
-                            (_, _) => unreachable!("Invariant"),
-                        }
-                    }
-                    (_, _) => unreachable!("Invariant"),
+                    let applied = _apply_rpartial(mem, &partial, obj);
+                    return if in_deg == 0 {
+                        _final(mem, stack, applied)
+                    } else {
+                        let (stack1, obj2) = _close(mem, in_deg, stack, applied);
+                        _final(mem, stack1, obj2)
+                    };
                 }
+                let pad = pads[i];
+                match (in_deg, out_props.is_empty()) {
+                    // In-degree 0, no out-properties: extend the partial spine.
+                    (0, true) => partial.push((obj, pad)),
+                    // In-degree > 0, no out-properties: close the incoming scopes,
+                    // then start a fresh partial from the closed object.
+                    (_, true) => {
+                        let applied = _apply_rpartial(mem, &partial, obj);
+                        let (stack1, obj2) = _close(mem, in_deg, stack, applied);
+                        stack = stack1;
+                        partial = vec![(obj2, pad)];
+                    }
+                    // In-degree 0, has out-properties: open new scopes, then
+                    // start a fresh partial from this object.
+                    (0, false) => {
+                        stack = _open(out_props, stack, partial);
+                        partial = vec![(obj, pad)];
+                    }
+                    (_, false) => unreachable!("Invariant"),
+                }
+                i += 1;
             }
         }
         fn _visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a GraphTerm<'a>) -> &'b RebuildTerm<'b> {

@@ -1,5 +1,4 @@
 use super::layout::Attr;
-use crate::list::List;
 use std::cell::Cell;
 
 // First intermediate representation: Broken
@@ -133,11 +132,7 @@ pub enum Property<T> {
 #[derive(Debug)]
 pub enum GraphDoc<'a> {
     Eod,
-    Break(
-        &'a [&'a GraphNode<'a>],
-        &'a List<'a, bool>,
-        &'a GraphDoc<'a>,
-    ),
+    Break(&'a [&'a GraphNode<'a>], &'a [bool], &'a GraphDoc<'a>),
 }
 
 #[derive(Debug)]
@@ -263,9 +258,6 @@ pub enum FinalDocObjFix<'a> {
     Comp(&'a FinalDocObjFix<'a>, &'a FinalDocObjFix<'a>, bool),
 }
 
-// Type aliases for complex function signatures
-pub type GraphTermList<'b> = &'b List<'b, &'b GraphTerm<'b>>;
-pub type U64List<'b> = &'b List<'b, u64>;
-pub type PropertyListList<'b> = &'b List<'b, &'b List<'b, Property<()>>>;
-
-pub type TopologyResult<'b> = (GraphTermList<'b>, U64List<'b>, PropertyListList<'b>);
+// Result of `_topology`: per-node terms, in-degrees, and out-properties, all
+// aligned by node index. Plain owned Vecs (transient within the rebuild pass).
+pub type TopologyResult<'b> = (Vec<&'b GraphTerm<'b>>, Vec<u64>, Vec<Vec<Property<()>>>);
