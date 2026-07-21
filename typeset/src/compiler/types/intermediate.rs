@@ -258,6 +258,12 @@ pub enum FinalDocObjFix<'a> {
     Comp(&'a FinalDocObjFix<'a>, &'a FinalDocObjFix<'a>, bool),
 }
 
-// Result of `topology`: per-node terms, in-degrees, and out-properties, all
-// aligned by node index. Plain owned Vecs (transient within the rebuild pass).
-pub type TopologyResult<'b> = (Vec<&'b GraphTerm<'b>>, Vec<u64>, Vec<Vec<Property<()>>>);
+/// Per-node data the rebuild pass reads from the solved scope graph: the node's
+/// term, its in-degree, and its out-properties. Owned and transient within that
+/// pass. One `NodeInfo` per graph node, in node-index order.
+#[derive(Debug)]
+pub struct NodeInfo<'a> {
+    pub term: &'a GraphTerm<'a>,
+    pub in_degree: u64,
+    pub outs: Vec<Property<()>>,
+}

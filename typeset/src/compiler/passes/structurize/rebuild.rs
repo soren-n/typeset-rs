@@ -5,8 +5,8 @@
 
 use crate::compiler::passes::term_chain::map_term_chain;
 use crate::compiler::types::{
-    GraphDoc, GraphFix, GraphNode, GraphTerm, Property, RebuildDoc, RebuildFix, RebuildObj,
-    RebuildTerm, TopologyResult,
+    GraphDoc, GraphFix, GraphNode, GraphTerm, NodeInfo, Property, RebuildDoc, RebuildFix,
+    RebuildObj, RebuildTerm,
 };
 use bumpalo::Bump;
 
@@ -62,12 +62,12 @@ fn apply_rcont<'b>(
 }
 
 pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b RebuildDoc<'b> {
-    // Per-node terms, in-degrees, and out-properties, aligned by node index.
-    // The node terms are read directly (not copied): `GraphTerm`/`GraphFix` are
-    // covariant and `'a: 'b`, so a `&'a GraphTerm<'a>` is already usable as
-    // `&'b GraphTerm<'b>`. `rebuild` only reads them to emit fresh RebuildTerm
-    // nodes, so no defensive copy is needed.
-    fn topology<'b, 'a: 'b>(nodes: &'a [&'a GraphNode<'a>]) -> TopologyResult<'b> {
+    // Per-node info in node-index order. The node terms are read directly (not
+    // copied): `GraphTerm`/`GraphFix` are covariant and `'a: 'b`, so a
+    // `&'a GraphTerm<'a>` is already usable as `&'b GraphTerm<'b>`. `rebuild`
+    // only reads them to emit fresh RebuildTerm nodes, so no defensive copy is
+    // needed.
+    fn topology<'b, 'a: 'b>(nodes: &'a [&'a GraphNode<'a>]) -> Vec<NodeInfo<'b>> {
         fn num_ins(node: &GraphNode) -> u64 {
             let mut num = 0u64;
             let mut cur = node.ins_head.get();
@@ -86,15 +86,14 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             }
             props
         }
-        let mut terms: Vec<&'b GraphTerm<'b>> = Vec::new();
-        let mut ins: Vec<u64> = Vec::new();
-        let mut outs: Vec<Vec<Property<()>>> = Vec::new();
-        for &node in nodes {
-            terms.push(node.term);
-            ins.push(num_ins(node));
-            outs.push(prop_outs(node));
-        }
-        (terms, ins, outs)
+        nodes
+            .iter()
+            .map(|&node| NodeInfo {
+                term: node.term,
+                in_degree: num_ins(node),
+                outs: prop_outs(node),
+            })
+            .collect()
     }
     // Composes `partial` into the top continuation, then pushes a grp/seq
     // continuation for each property.
@@ -149,12 +148,12 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
             match cur {
                 GraphDoc::Eod => break,
                 GraphDoc::Break(nodes, pads, doc1) => {
-                    let (terms, ins, outs) = topology(nodes);
+                    let info = topology(nodes);
                     // The initial stack holds one identity continuation (an
                     // empty step list); the initial partial is empty too.
                     let stack: RStack<'b> = vec![Vec::new()];
                     let partial: RPartial<'b> = Vec::new();
-                    objs.push(visit_line(mem, &terms, pads, &ins, &outs, stack, partial));
+                    objs.push(visit_line(mem, &info, pads, stack, partial));
                     cur = doc1;
                 }
             }
@@ -165,30 +164,26 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         }
         rdoc
     }
-    #[allow(clippy::too_many_arguments)]
     fn visit_line<'b>(
         mem: &'b Bump,
-        terms: &[&'b GraphTerm<'b>],
+        info: &[NodeInfo<'b>],
         pads: &[bool],
-        ins: &[u64],
-        outs: &[Vec<Property<()>>],
         mut stack: RStack<'b>,
         mut partial: RPartial<'b>,
     ) -> &'b RebuildObj<'b> {
-        // Walk the aligned per-node (term, in-degree, out-props) slices,
-        // threading the continuation stack and the left composition spine
-        // (partial). `pads` has one fewer element: `pads[i]` is the pad
-        // between `terms[i]` and `terms[i + 1]`.
-        let n = terms.len();
+        // Walk the per-node info, threading the continuation stack and the left
+        // composition spine (partial). `pads` has one fewer element: `pads[i]`
+        // is the pad between `info[i]` and `info[i + 1]`.
+        let n = info.len();
         let mut i = 0;
         loop {
-            let term = terms[i];
+            let term = info[i].term;
             let obj = match term {
                 GraphTerm::Fix(fix) => mem.alloc(RebuildObj::Fix(visit_fix(mem, fix))),
                 _ => mem.alloc(RebuildObj::Term(map_term_chain(mem, term))),
             };
-            let in_deg = ins[i];
-            let out_props = outs[i].as_slice();
+            let in_deg = info[i].in_degree;
+            let out_props = info[i].outs.as_slice();
             if i + 1 == n {
                 // Final term of the line: it never has out-properties.
                 if !out_props.is_empty() {
