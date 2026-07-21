@@ -1,4 +1,5 @@
 use std::fmt;
+use std::mem;
 
 /// Attribute structure for Layout compositions
 #[derive(Debug, Copy, Clone)]
@@ -8,7 +9,12 @@ pub struct Attr {
 }
 
 /// Layout AST - the input language for the compiler
-#[derive(Debug, Clone, Default)]
+///
+/// `Clone` and `Drop` are implemented iteratively below rather than derived: a
+/// derived (recursive) clone or drop would overflow the native stack on a deeply
+/// nested layout, the same hazard the compiler passes and renderer avoid.
+/// `Debug` stays derived (a debug-only path).
+#[derive(Debug, Default)]
 pub enum Layout {
     #[default]
     Null,
@@ -22,45 +28,271 @@ pub enum Layout {
     Comp(Box<Layout>, Box<Layout>, Attr),
 }
 
-impl fmt::Display for Layout {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        #[allow(clippy::boxed_local)]
-        fn _visit(layout: Box<Layout>) -> String {
-            match *layout {
-                Layout::Null => "Null".to_string(),
-                Layout::Text(data) => format!("(Text \"{}\")", data),
-                Layout::Fix(layout1) => {
-                    let layout_s = _visit(layout1);
-                    format!("(Fix {})", layout_s)
+/// Move a node's children onto the worklist (taking them out of their `Box` and
+/// leaving a `Null` placeholder), so the recursive drop of each box terminates
+/// in O(1) and the tree is freed with a heap-allocated stack instead of the
+/// native one.
+fn _dismantle_layout(node: &mut Layout, stack: &mut Vec<Layout>) {
+    match node {
+        Layout::Null | Layout::Text(_) => {}
+        Layout::Fix(l) | Layout::Grp(l) | Layout::Seq(l) | Layout::Nest(l) | Layout::Pack(l) => {
+            stack.push(*mem::take(l));
+        }
+        Layout::Line(left, right) | Layout::Comp(left, right, _) => {
+            stack.push(*mem::take(left));
+            stack.push(*mem::take(right));
+        }
+    }
+}
+
+impl Drop for Layout {
+    fn drop(&mut self) {
+        let mut stack: Vec<Layout> = Vec::new();
+        _dismantle_layout(self, &mut stack);
+        while let Some(mut node) = stack.pop() {
+            _dismantle_layout(&mut node, &mut stack);
+        }
+    }
+}
+
+/// Deep-copy a layout iteratively (bottom-up build with task/result stacks).
+fn _clone_layout(layout: &Layout) -> Box<Layout> {
+    enum Task<'a> {
+        Visit(&'a Layout),
+        Fix,
+        Grp,
+        Seq,
+        Nest,
+        Pack,
+        Line,
+        Comp(Attr),
+    }
+    let mut tasks: Vec<Task> = vec![Task::Visit(layout)];
+    let mut out: Vec<Box<Layout>> = Vec::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Visit(l) => match l {
+                Layout::Null => out.push(Box::new(Layout::Null)),
+                Layout::Text(data) => out.push(Box::new(Layout::Text(data.clone()))),
+                Layout::Fix(l1) => {
+                    tasks.push(Task::Fix);
+                    tasks.push(Task::Visit(l1));
                 }
-                Layout::Grp(layout1) => {
-                    let layout_s = _visit(layout1);
-                    format!("(Grp {})", layout_s)
+                Layout::Grp(l1) => {
+                    tasks.push(Task::Grp);
+                    tasks.push(Task::Visit(l1));
                 }
-                Layout::Seq(layout1) => {
-                    let layout_s = _visit(layout1);
-                    format!("(Seq {})", layout_s)
+                Layout::Seq(l1) => {
+                    tasks.push(Task::Seq);
+                    tasks.push(Task::Visit(l1));
                 }
-                Layout::Nest(layout1) => {
-                    let layout_s = _visit(layout1);
-                    format!("(Nest {})", layout_s)
+                Layout::Nest(l1) => {
+                    tasks.push(Task::Nest);
+                    tasks.push(Task::Visit(l1));
                 }
-                Layout::Pack(layout1) => {
-                    let layout_s = _visit(layout1);
-                    format!("(Pack {})", layout_s)
+                Layout::Pack(l1) => {
+                    tasks.push(Task::Pack);
+                    tasks.push(Task::Visit(l1));
                 }
                 Layout::Line(left, right) => {
-                    let left_s = _visit(left);
-                    let right_s = _visit(right);
-                    format!("(Line {} {})", left_s, right_s)
+                    tasks.push(Task::Line);
+                    tasks.push(Task::Visit(right));
+                    tasks.push(Task::Visit(left));
                 }
                 Layout::Comp(left, right, attr) => {
-                    let left_s = _visit(left);
-                    let right_s = _visit(right);
-                    format!("(Comp {} {} {} {})", left_s, right_s, attr.pad, attr.fix)
+                    tasks.push(Task::Comp(*attr));
+                    tasks.push(Task::Visit(right));
+                    tasks.push(Task::Visit(left));
                 }
+            },
+            Task::Fix => {
+                let inner = out.pop().expect("fix operand");
+                out.push(Box::new(Layout::Fix(inner)));
+            }
+            Task::Grp => {
+                let inner = out.pop().expect("grp operand");
+                out.push(Box::new(Layout::Grp(inner)));
+            }
+            Task::Seq => {
+                let inner = out.pop().expect("seq operand");
+                out.push(Box::new(Layout::Seq(inner)));
+            }
+            Task::Nest => {
+                let inner = out.pop().expect("nest operand");
+                out.push(Box::new(Layout::Nest(inner)));
+            }
+            Task::Pack => {
+                let inner = out.pop().expect("pack operand");
+                out.push(Box::new(Layout::Pack(inner)));
+            }
+            Task::Line => {
+                let right = out.pop().expect("line: right operand");
+                let left = out.pop().expect("line: left operand");
+                out.push(Box::new(Layout::Line(left, right)));
+            }
+            Task::Comp(attr) => {
+                let right = out.pop().expect("comp: right operand");
+                let left = out.pop().expect("comp: left operand");
+                out.push(Box::new(Layout::Comp(left, right, attr)));
             }
         }
-        write!(f, "{}", _visit(Box::new(self.clone())))
+    }
+    out.pop().expect("clone produced no result")
+}
+
+impl Clone for Layout {
+    fn clone(&self) -> Self {
+        *_clone_layout(self)
+    }
+}
+
+impl fmt::Display for Layout {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Iterative walk with an explicit task stack so deep layouts print
+        // without recursing on the native stack.
+        enum Task<'a> {
+            Visit(&'a Layout),
+            Lit(&'static str),
+            Owned(String),
+        }
+        let mut out = String::new();
+        let mut stack: Vec<Task> = vec![Task::Visit(self)];
+        while let Some(task) = stack.pop() {
+            match task {
+                Task::Lit(s) => out.push_str(s),
+                Task::Owned(s) => out.push_str(&s),
+                Task::Visit(l) => match l {
+                    Layout::Null => out.push_str("Null"),
+                    Layout::Text(data) => out.push_str(&format!("(Text \"{}\")", data)),
+                    Layout::Fix(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("(Fix "));
+                    }
+                    Layout::Grp(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("(Grp "));
+                    }
+                    Layout::Seq(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("(Seq "));
+                    }
+                    Layout::Nest(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("(Nest "));
+                    }
+                    Layout::Pack(l1) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(l1));
+                        stack.push(Task::Lit("(Pack "));
+                    }
+                    Layout::Line(left, right) => {
+                        stack.push(Task::Lit(")"));
+                        stack.push(Task::Visit(right));
+                        stack.push(Task::Lit(" "));
+                        stack.push(Task::Visit(left));
+                        stack.push(Task::Lit("(Line "));
+                    }
+                    Layout::Comp(left, right, attr) => {
+                        stack.push(Task::Owned(format!(" {} {})", attr.pad, attr.fix)));
+                        stack.push(Task::Visit(right));
+                        stack.push(Task::Lit(" "));
+                        stack.push(Task::Visit(left));
+                        stack.push(Task::Lit("(Comp "));
+                    }
+                },
+            }
+        }
+        write!(f, "{}", out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Past where a recursive clone/drop/print aborted.
+    const DEEP: usize = 50_000;
+
+    fn deep_nest(depth: usize) -> Box<Layout> {
+        let mut layout = Box::new(Layout::Text("x".to_string()));
+        for _ in 0..depth {
+            layout = Box::new(Layout::Nest(layout));
+        }
+        layout
+    }
+
+    #[test]
+    fn deep_drop_is_iterative() {
+        let layout = deep_nest(DEEP);
+        drop(layout);
+    }
+
+    #[test]
+    fn deep_comp_drop_is_iterative() {
+        let mut layout = Box::new(Layout::Text("x".to_string()));
+        for _ in 0..DEEP {
+            layout = Box::new(Layout::Comp(
+                layout,
+                Box::new(Layout::Text("y".to_string())),
+                Attr {
+                    pad: false,
+                    fix: false,
+                },
+            ));
+        }
+        drop(layout);
+    }
+
+    #[test]
+    fn deep_clone_is_iterative() {
+        let layout = deep_nest(DEEP);
+        let cloned = layout.clone();
+        let mut depth = 0usize;
+        let mut cur: &Layout = &cloned;
+        loop {
+            match cur {
+                Layout::Nest(inner) => {
+                    depth += 1;
+                    cur = inner;
+                }
+                Layout::Text(data) => {
+                    assert_eq!(data, "x");
+                    break;
+                }
+                _ => panic!("unexpected node"),
+            }
+        }
+        assert_eq!(depth, DEEP);
+        // Both `layout` and `cloned` drop here via the iterative Drop.
+    }
+
+    #[test]
+    fn deep_display_is_iterative() {
+        let layout = deep_nest(DEEP);
+        let s = format!("{}", *layout);
+        assert!(s.starts_with("(Nest "));
+        assert_eq!(s.matches("(Nest ").count(), DEEP);
+    }
+
+    #[test]
+    fn clone_and_display_match_expected() {
+        let layout = Layout::Comp(
+            Box::new(Layout::Text("a".to_string())),
+            Box::new(Layout::Grp(Box::new(Layout::Line(
+                Box::new(Layout::Text("b".to_string())),
+                Box::new(Layout::Null),
+            )))),
+            Attr {
+                pad: true,
+                fix: false,
+            },
+        );
+        let expected = "(Comp (Text \"a\") (Grp (Line (Text \"b\") Null)) true false)";
+        assert_eq!(format!("{}", layout), expected);
+        assert_eq!(format!("{}", layout.clone()), expected);
     }
 }

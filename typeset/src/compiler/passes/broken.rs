@@ -11,6 +11,7 @@
 
 use crate::compiler::types::{Attr, Broken, Edsl, Layout};
 use bumpalo::Bump;
+use std::mem;
 
 /// Transforms Layout into Edsl by collapsing broken sequences
 pub fn broken<'b, 'a: 'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Edsl<'b> {
@@ -38,51 +39,61 @@ enum MarkFrame<'b> {
 /// Marks broken sequences: folds Layout into Broken, propagating a "contains a
 /// line break" flag up so `Seq` nodes can record whether they must break.
 fn _mark<'b>(mem: &'b Bump, layout: Box<Layout>) -> &'b Broken<'b> {
+    // Either a finished leaf value, or the next child to descend into. Computed
+    // while borrowing `*cur`; acting on it happens after the borrow ends, so the
+    // emptied box can be reassigned (and dropped) without a borrow conflict.
+    // `Layout` carries an iterative `Drop`, so it cannot be destructured by
+    // value — children are taken out with `mem::take` (leaving a `Null`).
+    enum Step<'b> {
+        Leaf(bool, &'b Broken<'b>),
+        Descend(Box<Layout>),
+    }
     let mut stack: Vec<MarkFrame<'b>> = Vec::new();
     let mut cur = layout;
     'descend: loop {
         // Descend `cur` until we reach a leaf, producing an ascending value.
-        let mut val: (bool, &'b Broken<'b>) = match *cur {
-            Layout::Null => (false, mem.alloc(Broken::Null)),
+        let step = match &mut *cur {
+            Layout::Null => Step::Leaf(false, mem.alloc(Broken::Null)),
             Layout::Text(data) => {
                 let data1 = mem.alloc_str(data.as_str());
-                (false, mem.alloc(Broken::Text(data1)))
+                Step::Leaf(false, mem.alloc(Broken::Text(data1)))
             }
             Layout::Fix(layout1) => {
                 stack.push(MarkFrame::Fix);
-                cur = layout1;
-                continue 'descend;
+                Step::Descend(mem::take(layout1))
             }
             Layout::Grp(layout1) => {
                 stack.push(MarkFrame::Grp);
-                cur = layout1;
-                continue 'descend;
+                Step::Descend(mem::take(layout1))
             }
             Layout::Seq(layout1) => {
                 stack.push(MarkFrame::Seq);
-                cur = layout1;
-                continue 'descend;
+                Step::Descend(mem::take(layout1))
             }
             Layout::Nest(layout1) => {
                 stack.push(MarkFrame::Nest);
-                cur = layout1;
-                continue 'descend;
+                Step::Descend(mem::take(layout1))
             }
             Layout::Pack(layout1) => {
                 stack.push(MarkFrame::Pack);
-                cur = layout1;
-                continue 'descend;
+                Step::Descend(mem::take(layout1))
             }
             Layout::Line(left, right) => {
-                stack.push(MarkFrame::LineLeft(right));
-                cur = left;
-                continue 'descend;
+                stack.push(MarkFrame::LineLeft(mem::take(right)));
+                Step::Descend(mem::take(left))
             }
             Layout::Comp(left, right, attr) => {
-                stack.push(MarkFrame::CompLeft(right, attr));
-                cur = left;
+                let attr = *attr;
+                stack.push(MarkFrame::CompLeft(mem::take(right), attr));
+                Step::Descend(mem::take(left))
+            }
+        };
+        let mut val: (bool, &'b Broken<'b>) = match step {
+            Step::Descend(next) => {
+                cur = next;
                 continue 'descend;
             }
+            Step::Leaf(broken, node) => (broken, node),
         };
         // Ascend: apply pending frames to `val` until we must descend again.
         loop {
