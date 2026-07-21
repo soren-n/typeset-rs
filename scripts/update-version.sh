@@ -1,8 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-# Update version script for semantic-release
+# Bump the workspace version ahead of cutting a release tag.
 # Usage: ./scripts/update-version.sh <new-version>
+# Then update CHANGELOG.md, commit, and push tag v<new-version> (see
+# .github/workflows/release.yml).
 
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <new-version>"

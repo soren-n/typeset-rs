@@ -2,7 +2,7 @@
 
 ## Overview
 
-The project uses automated GitHub Actions workflows for continuous integration, releases, and dependency management, with semantic versioning based on conventional commits.
+The project uses GitHub Actions workflows for continuous integration, releases, and dependency management. Releases are cut explicitly by pushing a version tag; there is no automated version bumping.
 
 ## Workflows
 
@@ -30,18 +30,18 @@ The project uses automated GitHub Actions workflows for continuous integration, 
 - Build verification and artifact generation
 
 ### 2. Release Pipeline (`.github/workflows/release.yml`)
-**Triggers**: Merges to main branch (when version bumps are needed)
-
-**Automated Semantic Versioning**:
-- Analyzes conventional commit messages
-- Determines appropriate version bump (major/minor/patch)
-- Updates `Cargo.toml` versions automatically
-- Generates `CHANGELOG.md` from commit messages
+**Triggers**: Pushing a `v*` tag (e.g. `v3.3.0`)
 
 **Release Process**:
-- Creates git tags with new versions
-- Generates GitHub releases with release notes  
-- Publishes crates to crates.io in dependency order (typeset first, then typeset-parser)
+- Verifies the tag matches the `[workspace.package]` version in `Cargo.toml` and
+  fails on mismatch
+- Builds and runs the full test suite
+- Publishes crates to crates.io in dependency order (`typeset-parser` first,
+  then `typeset`, which depends on it)
+- Creates a GitHub release whose body links to `CHANGELOG.md`
+
+Version bumping and `CHANGELOG.md` are manual (see [Releasing](#releasing)
+below); the workflow only publishes what the tag points at.
 
 ### 3. Dependencies Workflow (`.github/workflows/dependencies.yml`)
 **Triggers**: Weekly schedule
@@ -52,34 +52,34 @@ The project uses automated GitHub Actions workflows for continuous integration, 
 - License compliance checking
 - Dependency freshness monitoring
 
-## Semantic Versioning
+## Releasing
 
-### Conventional Commit Format
-The project uses [Conventional Commits](https://conventionalcommits.org/) specification:
+Releases are cut explicitly. Both crates share one version from
+`[workspace.package]` in the root `Cargo.toml`.
 
-**Commit Types**:
-- `feat:` → **minor** version bump (new functionality)
-- `fix:` → **patch** version bump (bug fixes)
-- `docs:` → patch version bump (documentation changes)
-- `style:` → patch version bump (formatting, no logic changes)  
-- `refactor:` → patch version bump (code restructuring)
-- `test:` → patch version bump (test additions/changes)
-- `chore:` → patch version bump (build changes, etc.)
+```bash
+# 1. Bump the workspace version (updates Cargo.toml + inter-crate deps)
+./scripts/update-version.sh 3.3.0
 
-**Breaking Changes**:
-- `BREAKING CHANGE:` in commit body → **major** version bump
-- `!` after type (e.g., `feat!:`) → **major** version bump
+# 2. Update CHANGELOG.md by hand for the new version
 
-### Example Commit Messages
+# 3. Commit the bump
+git add Cargo.toml CHANGELOG.md
+git commit -m "chore(release): 3.3.0"
+
+# 4. Tag and push (tag must be v<version> and match Cargo.toml)
+git tag v3.3.0
+git push origin main --tags
 ```
-feat: add support for custom indentation strategies
 
-fix: resolve memory leak in layout compilation
+Pushing the tag triggers `release.yml`, which verifies `v3.3.0` matches the
+`Cargo.toml` version, builds, tests, publishes both crates to crates.io, and
+creates the GitHub release. Follow [semver](https://semver.org/) when choosing
+the number.
 
-feat!: change compile() function signature
-
-BREAKING CHANGE: The compile function now requires a BumpAllocator parameter
-```
+Conventional-commit-style messages (`feat:`, `fix:`, `docs:`, …) are still
+encouraged for a readable history, but they no longer drive versioning — nothing
+is bumped automatically.
 
 ## Development Workflow
 
@@ -104,10 +104,9 @@ BREAKING CHANGE: The compile function now requires a BumpAllocator parameter
    - All quality gates enforced
    - Manual review process
 
-5. **Merge**: Merge to main triggers release pipeline (if applicable)
-   - Automatic version analysis
-   - Changelog generation  
-   - Crate publishing (if version changed)
+5. **Merge**: Squash and merge to main after review. Merging does **not**
+   publish anything — releases are cut separately by tagging (see
+   [Releasing](#releasing)).
 
 ### Git Hooks (Local Development)
 A pre-commit hook enforces quality before CI:
@@ -126,18 +125,16 @@ are not installed automatically — see [GIT_HOOKS.md](GIT_HOOKS.md).
 
 ## Release Management
 
-### Automatic Publishing
-- **Workspace Dependency Order**: typeset published first, then typeset-parser
-- **Version Synchronization**: Both crates updated simultaneously
-- **Failure Handling**: Publication failures are logged and can be retried manually
-
-### Manual Override
-If needed, releases can be triggered manually:
-```bash
-# Tag manually (triggers release workflow)
-git tag v0.2.0
-git push origin v0.2.0
-```
+- **Trigger**: pushing a `v*` tag (see [Releasing](#releasing)).
+- **Version guard**: the workflow aborts if the tag does not match the
+  `Cargo.toml` version, so a forgotten bump fails loudly instead of shipping.
+- **Dependency order**: `typeset-parser` is published first, then `typeset`
+  (which depends on it); the workflow waits for the parser to appear on
+  crates.io before publishing `typeset`.
+- **Version synchronization**: both crates share the single `[workspace.package]`
+  version.
+- **Failure handling**: a crates.io publish is immutable — a bad release must be
+  yanked and a new version tagged; the workflow can otherwise be re-run.
 
 ## Monitoring & Maintenance
 

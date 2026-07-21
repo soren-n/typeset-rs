@@ -31,7 +31,11 @@ Thank you for your interest in contributing! This guide will help you understand
 
 ## Commit Message Format
 
-We use [Conventional Commits](https://conventionalcommits.org/) for automatic semantic versioning and changelog generation.
+We follow [Conventional Commits](https://conventionalcommits.org/) style for a
+readable, greppable history. Versioning is **not** automated — commit types no
+longer trigger version bumps (releases are cut by explicit tags, see
+[Release Process](#release-process)) — but consistent messages are still
+expected.
 
 ### Format
 ```
@@ -43,17 +47,14 @@ We use [Conventional Commits](https://conventionalcommits.org/) for automatic se
 ```
 
 ### Types
-- `feat`: A new feature (triggers minor version bump)
-- `fix`: A bug fix (triggers patch version bump)
+- `feat`: A new feature
+- `fix`: A bug fix
 - `docs`: Documentation only changes
 - `style`: Changes that do not affect the meaning of the code
 - `refactor`: A code change that neither fixes a bug nor adds a feature
 - `perf`: A code change that improves performance
 - `test`: Adding missing tests or correcting existing tests
 - `chore`: Changes to the build process or auxiliary tools
-
-### Breaking Changes
-Add `!` after the type/scope or include `BREAKING CHANGE:` in the footer to trigger a major version bump.
 
 ### Examples
 ```bash
@@ -75,12 +76,13 @@ feat!: change API for layout composition
 - Build verification
 
 ### 2. Release Workflow (`.github/workflows/release.yml`)
-**Triggers:** Push to main with releasable commits
-- **Semantic versioning**: Automatically determines version based on commit messages
-- **Changelog generation**: Creates/updates CHANGELOG.md
-- **Version bumping**: Updates Cargo.toml files automatically
-- **Crate publishing**: Publishes to crates.io in correct order
-- **GitHub releases**: Creates release with generated notes
+**Triggers:** Pushing a `v*` tag
+- **Version guard**: verifies the tag matches the `Cargo.toml` version, fails on mismatch
+- **Build & test**: builds release and runs the full test suite
+- **Crate publishing**: publishes `typeset-parser`, then `typeset`, to crates.io
+- **GitHub release**: creates a release linking to `CHANGELOG.md`
+
+Version bumping and `CHANGELOG.md` are manual (see [Release Process](#release-process)).
 
 ### 3. Dependencies Workflow (`.github/workflows/dependencies.yml`)
 **Triggers:** Weekly schedule + manual dispatch
@@ -118,34 +120,29 @@ cd tests && ./build.sh && ./run.sh
 ## Pull Request Process
 
 1. **Create feature branch**: `git checkout -b feat/your-feature`
-2. **Make changes** with conventional commit messages
+2. **Make changes** with conventional-commit-style messages
 3. **Ensure tests pass**: Pre-commit hooks will verify
 4. **Create PR**: CI will run full test suite
 5. **Review process**: Maintainer review required
-6. **Merge**: Squash and merge with conventional commit message
+6. **Merge**: Squash and merge
 
-## Release Process (Automated)
+## Release Process
 
-Releases are **fully automated** based on commit messages:
+Releases are cut explicitly by a maintainer; merging to main does not publish
+anything. Both crates share one version from `[workspace.package]`.
 
-1. **Push to main**: Any commit with `feat:`, `fix:`, or `BREAKING CHANGE:`
-2. **Version calculation**: Semantic-release analyzes commits
-3. **Version update**: Cargo.toml files updated automatically
-4. **Changelog**: Generated from commit messages
-5. **Git tag**: Created with new version
-6. **Crate publishing**: Both crates published to crates.io
-7. **GitHub release**: Created with changelog
+1. **Bump the version**: `./scripts/update-version.sh 3.3.0`
+2. **Update the changelog**: edit `CHANGELOG.md` for the new version
+3. **Commit**: `git commit -am "chore(release): 3.3.0"`
+4. **Tag & push**: `git tag v3.3.0 && git push origin main --tags`
 
-### Manual Release Override
-To trigger a release manually:
-```bash
-git commit --allow-empty -m "feat: trigger release"
-git push origin main
-```
+Pushing the tag runs `release.yml`, which verifies the tag matches `Cargo.toml`,
+builds, tests, publishes both crates to crates.io, and creates the GitHub
+release. Pick the version number per [semver](https://semver.org/).
 
 ## Tips
 
-- Use conventional commits for automatic versioning
+- Follow conventional-commit style for a readable history
 - Pre-commit hooks catch issues early
 - CI runs the same Rust checks as the git hooks (formatting, clippy, type
   checking, `cargo test`), but does **not** run the OCaml property tests — those
