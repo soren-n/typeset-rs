@@ -1,3 +1,4 @@
+#!/bin/sh
 # Clean up
 rm -fr _build
 (cd tester && dune clean)
