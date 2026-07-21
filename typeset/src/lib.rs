@@ -67,10 +67,11 @@
 //!
 //! The library provides both safe and unsafe compilation modes:
 //!
-//! - **[`compile()`]** - Fast compilation (aborts the process on stack overflow
-//!   for very deep layouts; see its docs)
+//! - **[`compile()`]** - Fast compilation (panics on internal errors; the
+//!   pipeline is iterative, so deep layouts do not overflow the stack)
 //! - **[`compile_safe()`]** - Safe compilation with error handling
-//! - **[`compile_safe_with_depth()`]** - Safe compilation with custom depth limits
+//! - **[`compile_safe_with_depth()`]** - Safe compilation with a configurable
+//!   depth bound (a resource limit, not a stack-safety guard)
 //!
 //! ## Performance
 //!
@@ -78,8 +79,8 @@
 //!
 //! - Zero-copy transformations using bump allocation
 //! - Optimal line breaking algorithms
-//! - Iterative compiler passes (transform passes run in constant native stack,
-//!   so deep layouts do not overflow during compilation itself)
+//! - Fully iterative pipeline (passes, heap conversion, renderer, and [`Doc`]
+//!   drop all run in constant native stack, so deep layouts never overflow it)
 //!
 //! ## Examples
 //!

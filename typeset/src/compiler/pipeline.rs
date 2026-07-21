@@ -38,9 +38,10 @@
 //!
 //! - **Time Complexity**: O(n) where n is the number of layout nodes
 //! - **Space Complexity**: O(n) peak memory during compilation, O(m) after where m ≤ n
-//! - **Stack Usage**: Passes 1-9 run iteratively (constant native stack). Pass
-//!   10 (heap conversion), the renderer, and dropping the resulting [`Doc`]
-//!   still recurse, so stack use is proportional to layout depth there
+//! - **Stack Usage**: The whole pipeline is iterative — the compiler passes, the
+//!   heap conversion, the renderer, and dropping the resulting [`Doc`] all run
+//!   with a constant native stack. Layout depth shows up as heap usage (the
+//!   explicit frame stacks and the [`Doc`] itself), not native-stack depth
 //! - **Memory Allocation**: 10 bump allocators during compilation, final heap allocation
 //!
 //! # Error Handling
@@ -134,29 +135,22 @@ use crate::compiler::{
 /// This function panics on internal compiler errors (unexpected states during
 /// pass execution).
 ///
-/// # Aborts
+/// # Stack Safety
 ///
-/// Deeply nested layouts exhaust the native stack, which **aborts the process**
-/// (SIGABRT) rather than panicking. This cannot be caught: `catch_unwind` does
-/// not help, because no unwinding occurs.
-///
-/// Compiler passes 1-9 run iteratively and no longer contribute to this. The
-/// remaining native-stack recursion is in pass 10 (moving the document to the
-/// heap), the renderer, and the recursive drop of the resulting [`Doc`]. On a
-/// debug build with a 2 MB stack, compilation alone survives to roughly 15,000
-/// levels, but rendering aborts around 1,000-2,000 — so end to end the renderer
-/// is the binding limit. Release builds and the main thread tolerate more, but
-/// the limit is a property of the stack, not of the library.
-///
-/// If layout depth is not under your control, use [`compile_safe_with_depth()`]
-/// with a limit you have verified on your own target, rather than this function.
+/// The whole pipeline is iterative — the compiler passes, the heap conversion,
+/// the renderer, and dropping the resulting [`Doc`] all run with a constant
+/// native stack, so deep layouts do not overflow the stack. Depth translates
+/// into heap usage (explicit frame stacks plus the [`Doc`]), which is O(depth):
+/// a pathologically deep layout can exhaust memory, but it will not SIGABRT on
+/// stack overflow. If layout depth is untrusted, prefer
+/// [`compile_safe_with_depth()`] to bound it up front.
 ///
 /// # Performance Notes
 ///
 /// - **Time**: O(n) where n is the number of layout nodes
 /// - **Memory**: Uses 10 temporary bump allocators during compilation
-/// - **Stack**: Passes 1-9 are iterative; pass 10, rendering, and dropping the
-///   [`Doc`] use stack proportional to nesting depth
+/// - **Stack**: Constant native stack throughout (iterative passes, heap
+///   conversion, renderer, and [`Doc`] drop)
 /// - **Optimal for**: Production code with validated layouts where panics are acceptable
 ///
 /// # Examples
@@ -240,12 +234,12 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
 /// handle errors gracefully. The function applies a default maximum nesting depth
 /// of 10,000.
 ///
-/// That default is generous but not a hard guarantee: compilation itself now
-/// runs its main passes iteratively, yet pass 10, the renderer, and dropping the
-/// [`Doc`] still recurse. On a debug build with a 2 MB stack, rendering aborts
-/// around 1,000-2,000 levels — below the 10,000 default. For untrusted input,
-/// call [`compile_safe_with_depth()`] with a limit you have measured on your own
-/// target and rendering configuration.
+/// The whole pipeline is iterative — the passes, the heap conversion, the
+/// renderer, and dropping the [`Doc`] all use a constant native stack — so this
+/// limit is a policy/resource bound (guarding against pathological memory and
+/// time on adversarial input) rather than a stack-overflow guard. The 10,000
+/// default is a reasonable ceiling for typical use; raise or lower it with
+/// [`compile_safe_with_depth()`] to suit your own memory budget.
 ///
 /// # Arguments
 ///
@@ -402,27 +396,25 @@ fn _measure_depth(layout: &Layout) -> usize {
 /// Compiles a layout with custom recursion depth limit and error handling (configurable safe path)
 ///
 /// This function provides the most flexible compilation approach, allowing fine-grained control
-/// over stack overflow protection by configuring the maximum recursion depth. It's useful when
-/// you know the characteristics of your layouts and want to optimize for either safety (lower limits)
-/// or performance with deeply nested structures (higher limits).
+/// over the maximum accepted layout depth. It's useful when you want to bound the
+/// memory and time an adversarially deep layout can consume.
 ///
 /// The function uses the same 10-pass compilation pipeline as [`compile()`] and [`compile_safe()`]
-/// but allows customization of the recursion depth threshold that triggers stack overflow protection.
+/// but allows customization of the depth threshold at which a layout is rejected.
 ///
 /// # Arguments
 ///
 /// * `layout` - The input layout tree to compile. Can handle arbitrarily complex structures
-///   within the recursion depth limit.
+///   within the depth limit.
 /// * `max_depth` - Maximum layout nesting depth accepted. Must be greater than 0.
 ///   Layouts deeper than this are rejected with [`CompilerError::StackOverflow`]
 ///   before compilation begins.
 ///
-///   Choose this below the depth at which your target actually exhausts its
-///   stack. The compiler passes are iterative, so the binding limit is the
-///   renderer (and pass 10 and dropping the [`Doc`]): roughly 1,000-2,000 levels
-///   on a debug build with a 2 MB stack when you render the result. A higher
-///   limit is accepted but protects nothing past that point. Measure on your own
-///   target rather than trusting a nominal figure.
+///   The whole pipeline is iterative, so this is a policy/resource bound, not a
+///   stack-safety guard: depth translates into O(depth) heap usage (the explicit
+///   frame stacks and the [`Doc`]), and the limit caps how much an untrusted
+///   layout can allocate. Choose it from your memory budget; a deep layout does
+///   not overflow the native stack regardless of the value.
 ///
 /// # Returns
 ///
@@ -443,22 +435,18 @@ fn _measure_depth(layout: &Layout) -> usize {
 ///
 /// - **Time**: O(n) where n is the number of layout nodes
 /// - **Memory**: Uses 10 temporary bump allocators during compilation
-/// - **Stack Usage**: Passes 1-9 iterative; pass 10, rendering, and dropping the
-///   [`Doc`] proportional to layout nesting depth
+/// - **Stack Usage**: Constant native stack throughout (iterative passes, heap
+///   conversion, renderer, and [`Doc`] drop)
 /// - **Depth Check**: One iterative O(n) walk before compiling
 /// - **Optimal Use**: When layout depth is not under your control
 ///
 /// # Choosing a Depth Limit
 ///
-/// The limit protects only if it is below where your target exhausts its stack.
-/// Measure that first: build layouts of increasing depth until compilation (and
-/// rendering, if you render) aborts, then set the limit comfortably under it. On
-/// a debug build with a 2 MB stack, rendering aborts around 1,000-2,000 levels
-/// and compilation alone around 15,000.
-///
-/// The default used by [`compile_safe()`] is 10,000, which sits above the
-/// rendering boundary, so pass an explicit limit when you render untrusted
-/// input.
+/// The limit is a resource bound, not a stack-safety guard — nothing in the
+/// pipeline overflows the native stack. Pick it from how much memory and time
+/// you are willing to spend on a single layout: peak usage grows roughly O(depth)
+/// (frame stacks plus the [`Doc`]). The default used by [`compile_safe()`] is
+/// 10,000, a reasonable ceiling for typical use.
 ///
 /// # Examples
 ///
@@ -576,11 +564,11 @@ pub fn compile_safe_with_depth(
         ));
     }
 
-    // Reject over-deep layouts before compiling. Passes 1-9 are iterative, but
-    // pass 10 (heap conversion), the renderer, and dropping the Doc still recurse
-    // over the document, so a deep enough layout exhausts the native stack and
-    // aborts the process rather than unwinding — catch_unwind cannot recover from
-    // it. Measuring first is the only way to turn that into a returnable error.
+    // Reject over-deep layouts before compiling. The pipeline is fully iterative
+    // (passes, heap conversion, renderer, and Doc drop), so this is a resource
+    // bound rather than a stack-safety guard: it caps the O(depth) heap that an
+    // untrusted layout can allocate. The walk itself is iterative so measuring a
+    // deep layout cannot overflow.
     let depth = _measure_depth(&layout);
     if depth > max_depth {
         return Err(CompilerError::StackOverflow { depth, max_depth });
@@ -861,5 +849,53 @@ mod tests {
         let output = render(doc, 4, 80);
         // Just ensure it doesn't panic - actual rendering logic tested elsewhere
         assert!(!output.is_empty());
+    }
+
+    // End-to-end deep-safety.
+    //
+    // The whole pipeline is iterative now — the compiler passes, the heap
+    // conversion, the renderer, and dropping the resulting `Doc` all run with a
+    // constant native stack. These build layouts far past the depth at which the
+    // recursive tail used to abort (~1,000-2,000 on rendering), compile with a
+    // limit above that depth, render, and let every intermediate drop.
+    const DEEP: usize = 50_000;
+
+    #[test]
+    fn deep_nest_compiles_renders_and_drops() {
+        let mut layout = text("x".to_string());
+        for _ in 0..DEEP {
+            layout = nest(layout);
+        }
+        let doc = compile_safe_with_depth(layout, DEEP * 2).expect("deep nest should compile");
+        let output = render(doc, 2, 80);
+        // Pure nesting introduces no line breaks; only leading indentation.
+        assert!(!output.contains('\n'));
+        assert!(output.ends_with('x'));
+    }
+
+    #[test]
+    fn deep_comp_compiles_renders_and_drops() {
+        // Left-nested compositions; a narrow width forces a break at each,
+        // exercising the renderer's deep break path and the deep `Doc` spine.
+        let mut layout = text("a".to_string());
+        for _ in 0..DEEP {
+            layout = comp(layout, text("b".to_string()), true, false);
+        }
+        let doc = compile_safe_with_depth(layout, DEEP * 2).expect("deep comp should compile");
+        let output = render(doc, 2, 1);
+        assert!(output.contains('\n'));
+        assert!(output.ends_with('b'));
+    }
+
+    #[test]
+    fn deep_layout_beyond_limit_is_rejected() {
+        // The depth check is now a policy bound rather than a stack-safety
+        // guard, but it still rejects layouts deeper than the configured limit.
+        let mut layout = text("x".to_string());
+        for _ in 0..1000 {
+            layout = nest(layout);
+        }
+        let result = compile_safe_with_depth(layout, 100);
+        assert!(matches!(result, Err(CompilerError::StackOverflow { .. })));
     }
 }

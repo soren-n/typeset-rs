@@ -80,18 +80,18 @@ pub fn compile_safe_with_depth(layout: Box<Layout>, max_depth: usize) -> Result<
 - Future-ready for true two-buffer optimization
 
 **Status note:** the depth limit is enforced by measuring the layout before
-compiling, not by tracking recursion during it. The ten transform passes
-(`broken` … `structurize`, plus `denull`/`identities`/`reassociate`/`rescope`)
-now run iteratively — as descend/ascend trampolines with heap-allocated frame
-stacks — so they no longer recurse on the native stack. The remaining
-native-stack recursion is in pass 10 (`move_to_heap`, `FinalDoc` → `Doc`), the
-renderer, and the recursive drop of the resulting `Doc`. Exhausting the native
-stack there still aborts the process and cannot be caught, so the limit must be
-set below the depth at which that happens: on a debug build with a 2 MB stack,
-rendering aborts around 1,000-2,000 levels and compilation alone around 15,000.
-The 10,000 default used by `compile_safe()` sits above the rendering boundary,
-so pass an explicit limit when you render untrusted input. `AllocationFailed` is
-never constructed.
+compiling, not by tracking recursion during it. The entire pipeline now runs
+iteratively — the ten transform passes (`broken` … `structurize`, plus
+`denull`/`identities`/`reassociate`/`rescope`), pass 10 (`move_to_heap`,
+`FinalDoc` → `Doc`), the renderer, and the `Drop` of the resulting `Doc` are each
+a descend/ascend trampoline over a heap-allocated frame stack (linear structures,
+such as the document spine, are plain loops). None of them recurse on the native
+stack, so no depth of layout overflows it; depth instead costs O(depth) heap (the
+frame stacks and the `Doc` itself). The `max_depth` pre-check is therefore a
+resource/policy bound — capping the memory and time an adversarial layout can
+consume — not a stack-safety guard. The 10,000 default used by `compile_safe()`
+is a reasonable ceiling for typical use; raise or lower it to suit your memory
+budget. `AllocationFailed` is never constructed.
 
 Making the whole path deep-safe additionally requires converting
 `move_to_heap` and the renderer to iterate and giving `Doc`/`DocObj`/`DocObjFix`

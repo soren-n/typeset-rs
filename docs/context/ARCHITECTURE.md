@@ -60,14 +60,15 @@ Build layout trees using constructors:
 1. **Compilation**: `compile()` applies optimization passes to layout trees
 2. **Rendering**: `render()` outputs formatted text with proper line breaks and indentation
 
-**Stack usage:** the ten transform passes in `passes/` run iteratively — each is
-a descend/ascend trampoline over a heap-allocated frame stack, and the passes
-that were written in continuation-passing style have had their continuation
-chains defunctionalized into explicit data. They therefore use constant native
-stack regardless of layout depth. Native-stack recursion remains only in pass 10
-(`move_to_heap`, moving the document from the bump allocator to the heap `Doc`),
-in the renderer, and in the recursive `Drop` of `Doc`; those still bound how deep
-a layout can be compiled and rendered (see `TWO_BUFFER_DESIGN.md`).
+**Stack usage:** the entire pipeline runs iteratively — the ten transform passes
+in `passes/`, pass 10 (`move_to_heap`, moving the document from the bump
+allocator to the heap `Doc`), the renderer, and the `Drop` of `Doc` are each a
+descend/ascend trampoline over a heap-allocated frame stack (continuation-passing
+passes had their continuation chains defunctionalized into explicit data). Every
+stage therefore uses constant native stack regardless of layout depth, so deep
+layouts never overflow the stack; depth shows up as O(depth) heap instead. The
+`max_depth` bound in `compile_safe_with_depth` is now a resource limit rather
+than a stack-safety guard (see `TWO_BUFFER_DESIGN.md`).
 
 ## Key Layout Concepts
 
