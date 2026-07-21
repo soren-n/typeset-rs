@@ -41,13 +41,13 @@ println!("{}", render(doc, 2, 40));
 ### Text Literals
 ```rust
 layout! { "Hello, World!" }
-// Equivalent to: text("Hello, World!".to_string())
+// Equivalent to: text("Hello, World!")
 ```
 
 ### Variables
 You can reference Rust variables containing `Box<Layout>` values:
 ```rust
-let name = text("Alice".to_string());
+let name = text("Alice");
 let greeting = layout! { "Hello" + name };
 ```
 
@@ -98,11 +98,7 @@ let multiline = layout! {
 ### Complex Layouts
 ```rust
 // Function signature formatting
-let params = vec![
-    text("param1".to_string()),
-    text("param2".to_string()),
-    text("param3".to_string()),
-];
+let params = vec![text("param1"), text("param2"), text("param3")];
 
 let function = layout! {
     "fn" + "my_function" & "(" &
@@ -188,7 +184,7 @@ layout! { unknown_operator x y }
 You can freely mix DSL syntax with manual constructor calls:
 
 ```rust
-let manual_part = comp(text("manual".to_string()), text("construction".to_string()), true, false);
+let manual_part = comp(text("manual"), text("construction"), true, false);
 
 let mixed = layout! {
     "DSL" + "part" @
@@ -244,7 +240,7 @@ null ::= "null"
 
 | Manual | DSL | Notes |
 |--------|-----|-------|
-| `text("hello".to_string())` | `"hello"` | Much more concise |
+| `text("hello")` | `"hello"` | Much more concise |
 | `comp(a, b, true, false)` | `a + b` | Clearer intent |
 | `line(a, b)` | `a @ b` | More readable |
 | `nest(comp(a, b, true, false))` | `nest(a + b)` | Easy nesting |

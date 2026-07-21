@@ -85,11 +85,12 @@ Build layout trees using constructors:
 1. **Compilation**: `compile()` applies optimization passes to layout trees
 2. **Rendering**: `render()` outputs formatted text with proper line breaks and indentation
 
-**Stack usage:** the entire pipeline runs iteratively — the ten transform passes
-in `passes/`, pass 10 (`move_to_heap`, moving the document from the bump
-allocator to the heap `Doc`), the renderer, and the `Drop` of `Doc` are each a
-descend/ascend trampoline over a heap-allocated frame stack (continuation-passing
-passes had their continuation chains defunctionalized into explicit data). Every
+**Stack usage:** the entire pipeline runs iteratively — the nine transform
+passes in `passes/` (the last, `rescope`, builds the owned heap `Doc` directly
+from the bump-allocated `DenullDoc`), the renderer, and the `Drop` of `Doc` are
+each a descend/ascend trampoline over a heap-allocated frame stack
+(continuation-passing passes had their continuation chains defunctionalized into
+explicit data). Every
 stage therefore uses constant native stack regardless of layout depth, so deep
 layouts never overflow the stack; depth shows up as O(depth) heap instead. The
 tree-walking traits on the public AST types (`Doc`/`DocObj`/`DocObjFix` and

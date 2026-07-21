@@ -18,12 +18,12 @@ cargo add typeset typeset-parser
 ```rust
 use typeset::{compile, render, text, comp, nest, grp};
 
-// Create a simple layout
+// Create a simple layout (text accepts &str or String)
 let layout = comp(
-    text("function".to_string()),
+    text("function"),
     nest(comp(
-        text("name()".to_string()),
-        text("{ body }".to_string()),
+        text("name()"),
+        text("{ body }"),
         true, false
     )),
     true, false
