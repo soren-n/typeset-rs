@@ -117,11 +117,24 @@ enum MFrame<'t> {
     FixCompMid(&'t DocObjFix, bool),
 }
 
-/// Position at which `obj` finishes if laid out from `state` (iterative fold).
+/// Which look-ahead the state-only fold performs. The two modes share an
+/// identical traversal and diverge at exactly two nodes — `Grp` and `Comp`.
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum Fold {
+    /// Full extent: fold the entire object, visiting both sides of every `Comp`.
+    Measure,
+    /// Stop at the first composition boundary: visit only the left of a `Comp`,
+    /// and treat a non-`head` `Grp` as an opaque already-measured block.
+    NextComp,
+}
+
+/// Folds `obj` into a single ending position without emitting output (iterative).
 ///
-/// Marks inserted while measuring are undone before returning, so `marks` is
-/// left exactly as the caller passed it.
-fn measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+/// [`Fold::Measure`] returns where `obj` finishes if laid out from `state`;
+/// [`Fold::NextComp`] returns the position of the next composition boundary
+/// reachable from `obj`. Either way, any marks inserted while folding are undone
+/// before returning, so `marks` is left exactly as the caller passed it.
+fn fold<'t>(mode: Fold, obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
     let mut st = state;
     let mut inserted: Vec<usize> = Vec::new();
     let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
@@ -130,7 +143,16 @@ fn measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>)
             MFrame::Obj(o) => match o {
                 DocObj::Text(data) => st = inc_pos(text_width(data), st),
                 DocObj::Fix(fix) => stack.push(MFrame::Fix(fix)),
-                DocObj::Grp(obj1) => stack.push(MFrame::Obj(obj1)),
+                // The first point of divergence: `Measure` always descends;
+                // `NextComp` folds an already-laid-out group as one opaque block.
+                DocObj::Grp(obj1) => {
+                    if mode == Fold::NextComp && !st.head {
+                        let end = fold(Fold::Measure, obj1, st, marks);
+                        st = State { pos: end, ..st };
+                    } else {
+                        stack.push(MFrame::Obj(obj1));
+                    }
+                }
                 DocObj::Seq(obj1) => stack.push(MFrame::Obj(obj1)),
                 DocObj::Nest(obj1) => {
                     let lvl = st.lvl;
@@ -165,8 +187,13 @@ fn measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>)
                     stack.push(MFrame::RestoreLvl(lvl));
                     stack.push(MFrame::Obj(obj1));
                 }
+                // The second point of divergence: `Measure` folds both operands
+                // (padding and dropping `head` between them); `NextComp` stops at
+                // the boundary, folding only the left operand.
                 DocObj::Comp(left, right, pad) => {
-                    stack.push(MFrame::CompMid(right, *pad));
+                    if mode == Fold::Measure {
+                        stack.push(MFrame::CompMid(right, *pad));
+                    }
                     stack.push(MFrame::Obj(left));
                 }
             },
@@ -198,87 +225,14 @@ fn measure<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>)
     st.pos
 }
 
-/// Position of the next composition boundary reachable from `obj` (iterative).
-///
-/// Like [`measure`], any marks inserted while looking ahead are undone before
-/// returning.
-fn next_comp<'t>(obj: &'t DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
-    let mut st = state;
-    let mut inserted: Vec<usize> = Vec::new();
-    let mut stack: Vec<MFrame<'t>> = vec![MFrame::Obj(obj)];
-    while let Some(frame) = stack.pop() {
-        match frame {
-            MFrame::Obj(o) => match o {
-                DocObj::Text(data) => st = inc_pos(text_width(data), st),
-                DocObj::Fix(fix) => stack.push(MFrame::Fix(fix)),
-                DocObj::Grp(obj1) => {
-                    if st.head {
-                        stack.push(MFrame::Obj(obj1));
-                    } else {
-                        let end = measure(obj1, st, marks);
-                        st = State { pos: end, ..st };
-                    }
-                }
-                DocObj::Seq(obj1) => stack.push(MFrame::Obj(obj1)),
-                DocObj::Nest(obj1) => {
-                    let lvl = st.lvl;
-                    let state1 = indent(st.tab, st);
-                    let offset = get_offset(state1);
-                    st = inc_pos(offset, state1);
-                    stack.push(MFrame::RestoreLvl(lvl));
-                    stack.push(MFrame::Obj(obj1));
-                }
-                DocObj::Pack(index, obj1) => {
-                    let index = *index as usize;
-                    let lvl = st.lvl;
-                    match marks.get(&index) {
-                        None => {
-                            let pos = st.pos;
-                            marks.insert(index, pos);
-                            inserted.push(index);
-                            st = State {
-                                lvl: max(lvl, pos),
-                                ..st
-                            };
-                        }
-                        Some(&lvl1) => {
-                            let state1 = State {
-                                lvl: max(lvl, lvl1),
-                                ..st
-                            };
-                            let offset = get_offset(state1);
-                            st = inc_pos(offset, state1);
-                        }
-                    }
-                    stack.push(MFrame::RestoreLvl(lvl));
-                    stack.push(MFrame::Obj(obj1));
-                }
-                DocObj::Comp(left, _right, _pad) => stack.push(MFrame::Obj(left)),
-            },
-            MFrame::Fix(f) => match f {
-                DocObjFix::Text(data) => st = inc_pos(text_width(data), st),
-                DocObjFix::Comp(left, right, pad) => {
-                    stack.push(MFrame::FixCompMid(right, *pad));
-                    stack.push(MFrame::Fix(left));
-                }
-            },
-            MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
-            MFrame::FixCompMid(right, pad) => {
-                st = inc_pos(if pad { 1 } else { 0 }, st);
-                stack.push(MFrame::Fix(right));
-            }
-            // `next_comp` visits only the left of a `Comp` and never touches
-            // `head`, so it never pushes these; they are reachable only from
-            // `measure`.
-            MFrame::CompMid(..) | MFrame::RestoreHead(_) => {
-                unreachable!("next_comp never pushes CompMid/RestoreHead")
-            }
-        }
-    }
-    for index in inserted {
-        marks.remove(&index);
-    }
-    st.pos
+/// Position at which `obj` finishes if laid out from `state`.
+fn measure(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+    fold(Fold::Measure, obj, state, marks)
+}
+
+/// Position of the next composition boundary reachable from `obj`.
+fn next_comp(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> usize {
+    fold(Fold::NextComp, obj, state, marks)
 }
 
 fn will_fit(obj: &DocObj, state: State, marks: &mut HashMap<usize, usize>) -> bool {
