@@ -107,14 +107,14 @@ fn main() {
         SExpr::Atom("3".to_string()),
     ]);
 
-    println!("Atom: {}", render(compile(format_sexpr(&atom)), 2, 40));
+    println!("Atom: {}", render(&compile(format_sexpr(&atom)), 2, 40));
     println!(
         "Simple list (wide): {}",
-        render(compile(format_sexpr(&simple_list)), 2, 40)
+        render(&compile(format_sexpr(&simple_list)), 2, 40)
     );
     println!(
         "Simple list (narrow): {}",
-        render(compile(format_sexpr(&simple_list)), 2, 10)
+        render(&compile(format_sexpr(&simple_list)), 2, 10)
     );
 
     // Nested expressions
@@ -148,21 +148,27 @@ fn main() {
     println!("\n=== Nested Function Definition ===");
 
     println!("\nPack-aligned style (wide):");
-    println!("{}", render(compile(format_sexpr(&nested)), 2, 80));
+    println!("{}", render(&compile(format_sexpr(&nested)), 2, 80));
 
     println!("\nPack-aligned style (medium):");
-    println!("{}", render(compile(format_sexpr(&nested)), 2, 40));
+    println!("{}", render(&compile(format_sexpr(&nested)), 2, 40));
 
     println!("\nPack-aligned style (narrow):");
-    println!("{}", render(compile(format_sexpr(&nested)), 2, 20));
+    println!("{}", render(&compile(format_sexpr(&nested)), 2, 20));
 
     println!("\n=== Sequence-aligned style (alternative) ===");
 
     println!("\nSequence style (wide):");
-    println!("{}", render(compile(format_sexpr_sequence(&nested)), 2, 80));
+    println!(
+        "{}",
+        render(&compile(format_sexpr_sequence(&nested)), 2, 80)
+    );
 
     println!("\nSequence style (narrow):");
-    println!("{}", render(compile(format_sexpr_sequence(&nested)), 2, 30));
+    println!(
+        "{}",
+        render(&compile(format_sexpr_sequence(&nested)), 2, 30)
+    );
 
     // Complex data structure
     let complex = SExpr::List(vec![
@@ -199,11 +205,11 @@ fn main() {
 
     println!("\n=== Complex Let Expression ===");
     println!("\nComplex (pack style, 50 chars):");
-    println!("{}", render(compile(format_sexpr(&complex)), 2, 50));
+    println!("{}", render(&compile(format_sexpr(&complex)), 2, 50));
 
     println!("\nComplex (sequence style, 50 chars):");
     println!(
         "{}",
-        render(compile(format_sexpr_sequence(&complex)), 2, 50)
+        render(&compile(format_sexpr_sequence(&complex)), 2, 50)
     );
 }

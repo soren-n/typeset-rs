@@ -35,10 +35,10 @@ fn main() {
     };
 
     println!("Manual constructor result:");
-    println!("{}", render(compile(manual_layout), 2, 40));
+    println!("{}", render(&compile(manual_layout), 2, 40));
 
     println!("\nDSL syntax result (should be identical):");
-    println!("{}", render(compile(dsl_layout), 2, 40));
+    println!("{}", render(&compile(dsl_layout), 2, 40));
 
     println!("\n=== Advanced DSL Features ===");
 
@@ -51,10 +51,10 @@ fn main() {
     };
 
     println!("\nComplex DSL (wide):");
-    println!("{}", render(compile(complex_dsl.clone()), 2, 80));
+    println!("{}", render(&compile(complex_dsl.clone()), 2, 80));
 
     println!("\nComplex DSL (narrow):");
-    println!("{}", render(compile(complex_dsl), 2, 20));
+    println!("{}", render(&compile(complex_dsl), 2, 20));
 
     // Demonstrate infix fixed operators
     let infix_demo = layout! {
@@ -63,10 +63,10 @@ fn main() {
 
     println!("\n=== Infix Fixed Operators ===");
     println!("Infix fixed (wide):");
-    println!("{}", render(compile(infix_demo.clone()), 2, 80));
+    println!("{}", render(&compile(infix_demo.clone()), 2, 80));
 
     println!("\nInfix fixed (narrow):");
-    println!("{}", render(compile(infix_demo), 2, 15));
+    println!("{}", render(&compile(infix_demo), 2, 15));
 
     // Practical example: function signature formatting
     let function_params = [
@@ -123,16 +123,16 @@ fn main() {
     println!("\n=== Function Signature Example ===");
 
     println!("Manual approach (wide):");
-    println!("{}", render(compile(manual_function.clone()), 2, 80));
+    println!("{}", render(&compile(manual_function.clone()), 2, 80));
 
     println!("\nDSL approach (wide):");
-    println!("{}", render(compile(dsl_function.clone()), 2, 80));
+    println!("{}", render(&compile(dsl_function.clone()), 2, 80));
 
     println!("\nManual approach (narrow):");
-    println!("{}", render(compile(manual_function), 2, 30));
+    println!("{}", render(&compile(manual_function), 2, 30));
 
     println!("\nDSL approach (narrow):");
-    println!("{}", render(compile(dsl_function), 2, 30));
+    println!("{}", render(&compile(dsl_function), 2, 30));
 
     // Document structure example
     let doc_dsl = layout! {
@@ -159,11 +159,11 @@ fn main() {
     println!("\n=== Document Formatting Example ===");
 
     println!("Document (wide - 80 chars):");
-    println!("{}", render(compile(doc_dsl.clone()), 2, 80));
+    println!("{}", render(&compile(doc_dsl.clone()), 2, 80));
 
     println!("\nDocument (medium - 50 chars):");
-    println!("{}", render(compile(doc_dsl.clone()), 2, 50));
+    println!("{}", render(&compile(doc_dsl.clone()), 2, 50));
 
     println!("\nDocument (narrow - 30 chars):");
-    println!("{}", render(compile(doc_dsl), 2, 30));
+    println!("{}", render(&compile(doc_dsl), 2, 30));
 }

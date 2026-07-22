@@ -26,4 +26,5 @@ pub mod types;
 pub use types::{Break, Doc, Layout, Pad};
 
 // Re-export the main compilation and rendering functions.
-pub use pipeline::{compile, render, render_ref};
+pub use pipeline::compile;
+pub use render::render;

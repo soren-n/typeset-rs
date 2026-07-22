@@ -17,18 +17,21 @@ fn main() {
     );
     println!(
         "Unpadded: \"{}\"",
-        render(compile(hello_world_unpadded), 2, 80)
+        render(&compile(hello_world_unpadded), 2, 80)
     );
 
     // Padded composition (with spaces)
     let hello_world_padded = comp(hello.clone(), world.clone(), Pad::Padded, Break::Breakable);
-    println!("Padded: \"{}\"", render(compile(hello_world_padded), 2, 80));
+    println!(
+        "Padded: \"{}\"",
+        render(&compile(hello_world_padded), 2, 80)
+    );
 
     // Line breaks
     let hello_newline_world = line(hello.clone(), world.clone());
     println!(
         "Line break:\n\"{}\"",
-        render(compile(hello_newline_world), 2, 80)
+        render(&compile(hello_newline_world), 2, 80)
     );
 
     // Nested layouts
@@ -41,7 +44,7 @@ fn main() {
     let with_prefix = comp(text("Prefix:"), nested, Pad::Unpadded, Break::Breakable);
     println!(
         "Nested (broken):\n\"{}\"",
-        render(compile(with_prefix), 2, 10)
+        render(&compile(with_prefix), 2, 10)
     ); // Force break with small width
 
     // Fixed layouts (won't break)
@@ -51,7 +54,7 @@ fn main() {
         Pad::Unpadded,
         Break::Breakable,
     ));
-    println!("Fixed: \"{}\"", render(compile(fixed_comp), 2, 5)); // Will overflow
+    println!("Fixed: \"{}\"", render(&compile(fixed_comp), 2, 5)); // Will overflow
 
     // Groups (break as unit)
     let group_inner = comp(
@@ -64,11 +67,11 @@ fn main() {
     let with_group = comp(text("Before"), grouped, Pad::Padded, Break::Breakable);
     println!(
         "Grouped (fits): \"{}\"",
-        render(compile(with_group.clone()), 2, 80)
+        render(&compile(with_group.clone()), 2, 80)
     );
     println!(
         "Grouped (breaks): \"{}\"",
-        render(compile(with_group), 2, 10)
+        render(&compile(with_group), 2, 10)
     );
 
     // Sequence (all break if one breaks)
@@ -81,7 +84,7 @@ fn main() {
     let sequenced = seq(seq_inner);
     println!(
         "Sequence (breaks all):\n\"{}\"",
-        render(compile(sequenced), 2, 10)
+        render(&compile(sequenced), 2, 10)
     );
 
     // Pack (align to first item position)
@@ -93,5 +96,8 @@ fn main() {
     );
     let packed = pack(pack_inner);
     let with_pack = comp(text("Start"), packed, Pad::Padded, Break::Breakable);
-    println!("Pack alignment:\n\"{}\"", render(compile(with_pack), 2, 15));
+    println!(
+        "Pack alignment:\n\"{}\"",
+        render(&compile(with_pack), 2, 15)
+    );
 }

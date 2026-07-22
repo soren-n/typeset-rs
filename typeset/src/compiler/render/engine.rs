@@ -451,20 +451,31 @@ fn render_obj(
     *state = st;
 }
 
-/// Renders a compiled document into a formatted string, borrowing it.
+/// Renders a compiled document to a formatted string.
 ///
-/// The renderer only reads the document, so this is the primary entry point: it
-/// takes `&Doc` and can be called repeatedly on the same document (e.g. to
-/// render at several widths) without cloning it.
+/// Rendering only reads the document, so the same [`Doc`] can be rendered
+/// repeatedly (e.g. at several widths) without cloning or recompiling it.
 ///
-/// # Arguments
-/// * `doc` - The compiled document to render
-/// * `tab` - Tab size for indentation
-/// * `width` - Target line width for formatting
+/// `tab` is the number of spaces per indentation level. `width` is the target
+/// line width, counted in `char`s (not display columns — East Asian wide
+/// characters and emoji count as one, so text using them renders wider than the
+/// requested width). Use a very large width (e.g. 10000) to disable wrapping.
 ///
-/// # Returns
-/// A formatted string representation of the document
-pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
+/// # Examples
+///
+/// ```rust
+/// use typeset::{compile, render, text, comp, Pad, Break};
+///
+/// let doc = compile(comp(
+///     text("hello"),
+///     text("world"),
+///     Pad::Padded, Break::Breakable,
+/// ));
+/// // Render at several widths without moving the document.
+/// assert!(render(&doc, 2, 5).contains('\n'));
+/// assert_eq!(render(&doc, 2, 80), "hello world");
+/// ```
+pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
     let arena = Arena {
         objs: doc.objs(),
         fixes: doc.fixes(),

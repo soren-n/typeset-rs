@@ -370,7 +370,7 @@ pub fn braces(layout: Box<Layout>) -> Box<Layout> {
 
 // --- High-level one-step formatting ----------------------------------------
 
-/// Compiles and renders a layout in one step: `render(compile(layout), tab,
+/// Compiles and renders a layout in one step: `render(&compile(layout), tab,
 /// width)`.
 ///
 /// `tab` is the number of spaces per indentation level; `width` is the target
@@ -384,7 +384,6 @@ pub fn braces(layout: Box<Layout>) -> Box<Layout> {
 /// assert_eq!(format_layout(text("Hello, world!"), 2, 80), "Hello, world!");
 /// ```
 pub fn format_layout(layout: Box<Layout>, tab: usize, width: usize) -> String {
-    use crate::compiler::pipeline;
-    let doc = pipeline::compile(layout);
-    pipeline::render(doc, tab, width)
+    let doc = crate::compiler::pipeline::compile(layout);
+    crate::compiler::render::render(&doc, tab, width)
 }

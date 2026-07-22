@@ -9,10 +9,8 @@ fn main() {
     };
     let document = typeset::compile(layout_result.clone());
     println!("---------------------");
-    println!("{}", layout_result);
+    println!("{:?}", layout_result);
     println!("---------------------");
-    println!("{}", document);
-    println!("---------------------");
-    println!("\"{}\"", typeset::render(document, 2, 80));
+    println!("\"{}\"", typeset::render(&document, 2, 80));
     println!("---------------------");
 }

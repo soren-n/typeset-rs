@@ -293,7 +293,7 @@ fn main() {
     };
 
     println!("Simple assignment:");
-    println!("{}", render(compile(format_statement(&assignment)), 2, 40));
+    println!("{}", render(&compile(format_statement(&assignment)), 2, 40));
 
     // Function call with multiple arguments
     let func_call = Statement::FunctionCall {
@@ -306,10 +306,10 @@ fn main() {
     };
 
     println!("\nFunction call (wide):");
-    println!("{}", render(compile(format_statement(&func_call)), 2, 80));
+    println!("{}", render(&compile(format_statement(&func_call)), 2, 80));
 
     println!("\nFunction call (narrow):");
-    println!("{}", render(compile(format_statement(&func_call)), 2, 30));
+    println!("{}", render(&compile(format_statement(&func_call)), 2, 30));
 
     // Complex if statement
     let if_stmt = Statement::If {
@@ -343,10 +343,10 @@ fn main() {
     println!("\n=== Complex If Statement ===");
 
     println!("\nWide format (80 chars):");
-    println!("{}", render(compile(format_statement(&if_stmt)), 2, 80));
+    println!("{}", render(&compile(format_statement(&if_stmt)), 2, 80));
 
     println!("\nNarrow format (40 chars):");
-    println!("{}", render(compile(format_statement(&if_stmt)), 2, 40));
+    println!("{}", render(&compile(format_statement(&if_stmt)), 2, 40));
 
     // Nested control flow
     let nested_stmt = Statement::While {
@@ -390,12 +390,18 @@ fn main() {
     println!("\nWide format (100 chars):");
     println!(
         "{}",
-        render(compile(format_statement(&nested_stmt)), 2, 100)
+        render(&compile(format_statement(&nested_stmt)), 2, 100)
     );
 
     println!("\nMedium format (60 chars):");
-    println!("{}", render(compile(format_statement(&nested_stmt)), 2, 60));
+    println!(
+        "{}",
+        render(&compile(format_statement(&nested_stmt)), 2, 60)
+    );
 
     println!("\nNarrow format (30 chars):");
-    println!("{}", render(compile(format_statement(&nested_stmt)), 2, 30));
+    println!(
+        "{}",
+        render(&compile(format_statement(&nested_stmt)), 2, 30)
+    );
 }

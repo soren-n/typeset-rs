@@ -15,7 +15,7 @@ fn main() {
         Err(error) => panic!("{}", error),
         Ok(layout) => {
             let document = compile(layout);
-            let result = render(document, tab, width);
+            let result = render(&document, tab, width);
             println!("!!!!output!!!!");
             println!("{}", result)
         }

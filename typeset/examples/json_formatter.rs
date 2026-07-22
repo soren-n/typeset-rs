@@ -127,10 +127,10 @@ fn main() {
     println!("Simple object (wide):");
     let layout = format_json(&simple_json);
     let doc = compile(layout);
-    println!("{}", render(doc.clone(), 2, 80));
+    println!("{}", render(&doc, 2, 80));
 
     println!("\nSimple object (narrow):");
-    println!("{}", render(doc, 2, 20));
+    println!("{}", render(&doc, 2, 20));
 
     // Complex nested structure
     let complex_json = JsonValue::Object({
@@ -180,11 +180,11 @@ fn main() {
     println!("\nWide format (120 chars):");
     let complex_layout = format_json(&complex_json);
     let complex_doc = compile(complex_layout);
-    println!("{}", render(complex_doc.clone(), 2, 120));
+    println!("{}", render(&complex_doc, 2, 120));
 
     println!("\nNarrow format (40 chars):");
-    println!("{}", render(complex_doc.clone(), 2, 40));
+    println!("{}", render(&complex_doc, 2, 40));
 
     println!("\nVery narrow format (20 chars):");
-    println!("{}", render(complex_doc, 2, 20));
+    println!("{}", render(&complex_doc, 2, 20));
 }

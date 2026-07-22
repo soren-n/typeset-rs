@@ -20,7 +20,6 @@
 
 use crate::compiler::{
     passes::{broken, denull, fixed, flatten, normalize, rescope, serialize, structurize},
-    render::render_ref as render_ref_impl,
     types::{Doc, Layout},
 };
 
@@ -36,7 +35,7 @@ use crate::compiler::{
 /// use typeset::{compile, render, text};
 ///
 /// let doc = compile(text("Hello, world!"));
-/// assert_eq!(render(doc, 2, 80), "Hello, world!");
+/// assert_eq!(render(&doc, 2, 80), "Hello, world!");
 /// ```
 pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     run_passes(layout)
@@ -69,67 +68,17 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     rescope(normalized_doc)
 }
 
-/// Renders a compiled document to a formatted string, consuming it.
-///
-/// To render the same document more than once (e.g. at several widths) without
-/// cloning it, use [`render_ref`] instead.
-///
-/// `tab` is the number of spaces per indentation level. `width` is the target
-/// line width, counted in `char`s (not display columns — East Asian wide
-/// characters and emoji count as one, so text using them renders wider than the
-/// requested width). Use a very large width (e.g. 10000) to disable wrapping.
-///
-/// # Examples
-///
-/// ```rust
-/// use typeset::{compile, render, text, comp, Pad, Break};
-///
-/// let doc = compile(comp(
-///     text("hello"),
-///     text("world"),
-///     Pad::Padded, Break::Breakable,
-/// ));
-/// assert_eq!(render(doc, 2, 80), "hello world");
-/// ```
-pub fn render(doc: Box<Doc>, tab: usize, width: usize) -> String {
-    render_ref_impl(&doc, tab, width)
-}
-
-/// Renders a compiled document by reference, without consuming it.
-///
-/// The borrowing counterpart to [`render()`]: because rendering only reads the
-/// document, this renders the same [`Doc`] repeatedly (e.g. at several widths)
-/// without cloning or recompiling it. See [`render()`] for the meaning of `tab`
-/// and `width`.
-///
-/// # Examples
-///
-/// ```rust
-/// use typeset::{compile, render_ref, text, comp, Pad, Break};
-///
-/// let doc = compile(comp(
-///     text("hello"),
-///     text("world"),
-///     Pad::Padded, Break::Breakable,
-/// ));
-/// // Render at several widths without moving the document.
-/// assert!(render_ref(&doc, 2, 5).contains('\n'));
-/// assert_eq!(render_ref(&doc, 2, 80), "hello world");
-/// ```
-pub fn render_ref(doc: &Doc, tab: usize, width: usize) -> String {
-    render_ref_impl(doc, tab, width)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::compiler::constructors::*;
+    use crate::compiler::render::render;
     use crate::compiler::types::{Break, Pad};
 
     #[test]
     fn test_compile_simple_text() {
         let doc = compile(text("hello"));
-        assert_eq!(render(doc, 2, 80), "hello");
+        assert_eq!(render(&doc, 2, 80), "hello");
     }
 
     #[test]
@@ -138,7 +87,7 @@ mod tests {
         let right = text("world");
         let layout = comp(left, right, Pad::Padded, Break::Breakable);
         let doc = compile(layout);
-        assert_eq!(render(doc, 2, 80), "hello world");
+        assert_eq!(render(&doc, 2, 80), "hello world");
     }
 
     #[test]
@@ -148,14 +97,14 @@ mod tests {
         let grouped = grp(nested);
         let doc = compile(grouped);
         // `nest` indents its content by one tab (2 spaces here).
-        assert_eq!(render(doc, 2, 80), "  content");
+        assert_eq!(render(&doc, 2, 80), "  content");
     }
 
     #[test]
     fn test_render_compiled_doc() {
         let layout = text("test");
         let doc = compile(layout);
-        let output = render(doc, 4, 80);
+        let output = render(&doc, 4, 80);
         // Just ensure it doesn't panic - actual rendering logic tested elsewhere
         assert!(!output.is_empty());
     }
@@ -176,7 +125,7 @@ mod tests {
             layout = nest(layout);
         }
         let doc = compile(layout);
-        let output = render(doc, 2, 80);
+        let output = render(&doc, 2, 80);
         // Pure nesting introduces no line breaks; only leading indentation.
         assert!(!output.contains('\n'));
         assert!(output.ends_with('x'));
@@ -191,21 +140,19 @@ mod tests {
             layout = comp(layout, text("b"), Pad::Padded, Break::Breakable);
         }
         let doc = compile(layout);
-        let output = render(doc, 2, 1);
+        let output = render(&doc, 2, 1);
         assert!(output.contains('\n'));
         assert!(output.ends_with('b'));
     }
 
     #[test]
-    fn render_ref_matches_render_and_is_reusable() {
+    fn render_is_reusable() {
         let layout = comp(text("hello"), text("world"), Pad::Padded, Break::Breakable);
         let doc = compile(layout);
         // Borrowing renders the same document repeatedly without moving it.
-        let a = render_ref(&doc, 2, 5);
-        let b = render_ref(&doc, 2, 80);
+        let a = render(&doc, 2, 5);
+        let b = render(&doc, 2, 80);
         assert_eq!(b, "hello world");
         assert!(a.contains('\n'));
-        // Consuming render produces identical output to the borrowing variant.
-        assert_eq!(render(doc, 2, 80), b);
     }
 }

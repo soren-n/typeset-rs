@@ -22,7 +22,7 @@
 //!
 //! // Compile and render
 //! let doc = compile(layout);
-//! let output = render(doc, 2, 40);
+//! let output = render(&doc, 2, 40);
 //! println!("{}", output);
 //! ```
 //!
@@ -63,9 +63,9 @@
 //! - **Constructors** - Functions for building layout trees ([`text()`], [`comp()`], [`nest()`], etc.)
 //! - **Compiler** - Multi-pass compilation pipeline that optimizes layouts
 //! - **Types** - Core data structures for layouts and intermediate representations  
-//! - **Render** - Final rendering engine that produces formatted strings. Use
-//!   [`render()`] to render a document once, or [`render_ref()`] to render the
-//!   same [`Doc`] repeatedly (e.g. at several widths) without cloning it
+//! - **Render** - Final rendering engine that produces formatted strings.
+//!   [`render()`] borrows the [`Doc`], so the same document renders repeatedly
+//!   (e.g. at several widths) without cloning or recompiling
 //!
 //! ## Compilation
 //!
@@ -150,7 +150,6 @@ pub use self::compiler::{
 
     // Rendering
     render,
-    render_ref,
 };
 
 // Re-export constructor functions

@@ -56,7 +56,7 @@ fn test_compilation_performance() {
 
     // Rendering should also be fast
     let start = Instant::now();
-    let _output = render(doc, 4, 80);
+    let _output = render(&doc, 4, 80);
     let render_duration = start.elapsed();
 
     assert!(
@@ -90,7 +90,7 @@ fn test_large_layout_handling() {
 
     // Should complete without crashing
     let doc = compile(layout);
-    let output = render(doc, 2, 100);
+    let output = render(&doc, 2, 100);
     assert!(!output.is_empty());
     assert!(output.contains("base"));
 }
@@ -112,7 +112,7 @@ fn test_wide_layout_performance() {
     );
 
     let start = Instant::now();
-    let output = render(doc, 2, 50);
+    let output = render(&doc, 2, 50);
     let render_duration = start.elapsed();
 
     assert!(
@@ -139,7 +139,7 @@ fn test_memory_efficiency() {
         );
 
         let doc = compile(layout);
-        let output = render(doc, 2, 80);
+        let output = render(&doc, 2, 80);
 
         assert!(output.contains(&format!("iteration_{}", i)));
         assert!(output.contains("base"));
@@ -164,7 +164,7 @@ fn test_nested_scope_compilation_is_linear() {
 
     let start = Instant::now();
     let doc = compile(nested_seq(50_000));
-    let output = render(doc, 2, 10);
+    let output = render(&doc, 2, 10);
     let elapsed = start.elapsed();
 
     assert!(output.contains('a'));

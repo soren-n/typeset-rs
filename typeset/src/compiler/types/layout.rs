@@ -186,75 +186,11 @@ impl Clone for Layout {
     }
 }
 
-impl fmt::Display for Layout {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Iterative walk with an explicit task stack so deep layouts print
-        // without recursing on the native stack.
-        enum Task<'a> {
-            Visit(&'a Layout),
-            Lit(&'static str),
-            Owned(String),
-        }
-        let mut out = String::new();
-        let mut stack: Vec<Task> = vec![Task::Visit(self)];
-        while let Some(task) = stack.pop() {
-            match task {
-                Task::Lit(s) => out.push_str(s),
-                Task::Owned(s) => out.push_str(&s),
-                Task::Visit(l) => match l {
-                    Layout::Null => out.push_str("Null"),
-                    Layout::Text(data) => out.push_str(&format!("(Text \"{}\")", data)),
-                    Layout::Fix(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("(Fix "));
-                    }
-                    Layout::Grp(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("(Grp "));
-                    }
-                    Layout::Seq(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("(Seq "));
-                    }
-                    Layout::Nest(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("(Nest "));
-                    }
-                    Layout::Pack(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("(Pack "));
-                    }
-                    Layout::Line(left, right) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(right));
-                        stack.push(Task::Lit(" "));
-                        stack.push(Task::Visit(left));
-                        stack.push(Task::Lit("(Line "));
-                    }
-                    Layout::Comp(left, right, attr) => {
-                        stack.push(Task::Owned(format!(" {} {})", attr.pad, attr.fix)));
-                        stack.push(Task::Visit(right));
-                        stack.push(Task::Lit(" "));
-                        stack.push(Task::Visit(left));
-                        stack.push(Task::Lit("(Comp "));
-                    }
-                },
-            }
-        }
-        write!(f, "{}", out)
-    }
-}
-
 impl fmt::Debug for Layout {
-    // Iterative to match every other trait here: a derived (recursive) `Debug`
-    // would overflow the native stack on a deep layout. Reproduces the derived
-    // (non-alternate) output byte-for-byte; the alternate (`{:#?}`) indented form
-    // is not reproduced and falls back to this compact form.
+    // Iterative like `Clone` and `Drop`: a derived (recursive) `Debug` would
+    // overflow the native stack on a deep layout. Prints the derived-style
+    // compact form; the alternate (`{:#?}`) indented form is not reproduced
+    // and falls back to this compact form.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         enum Task<'a> {
             Visit(&'a Layout),
@@ -376,34 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn deep_display_is_iterative() {
-        let layout = deep_nest(DEEP);
-        let s = format!("{}", *layout);
-        assert!(s.starts_with("(Nest "));
-        assert_eq!(s.matches("(Nest ").count(), DEEP);
-    }
-
-    #[test]
-    fn clone_and_display_match_expected() {
-        let layout = Layout::Comp(
-            Box::new(Layout::Text("a".to_string())),
-            Box::new(Layout::Grp(Box::new(Layout::Line(
-                Box::new(Layout::Text("b".to_string())),
-                Box::new(Layout::Null),
-            )))),
-            Attr {
-                pad: true,
-                fix: false,
-            },
-        );
-        let expected = "(Comp (Text \"a\") (Grp (Line (Text \"b\") Null)) true false)";
-        assert_eq!(format!("{}", layout), expected);
-        assert_eq!(format!("{}", layout.clone()), expected);
-    }
-
-    #[test]
-    fn debug_format_matches_derived() {
-        // Byte-for-byte the output the old `#[derive(Debug)]` produced.
+    fn clone_and_debug_match_expected() {
         let layout = Layout::Comp(
             Box::new(Layout::Text("a".to_string())),
             Box::new(Layout::Grp(Box::new(Layout::Line(
@@ -418,6 +327,7 @@ mod tests {
         let expected =
             "Comp(Text(\"a\"), Grp(Line(Text(\"b\"), Null)), Attr { pad: true, fix: false })";
         assert_eq!(format!("{:?}", layout), expected);
+        assert_eq!(format!("{:?}", layout.clone()), expected);
     }
 
     #[test]

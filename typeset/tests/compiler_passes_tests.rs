@@ -39,7 +39,7 @@ fn test_all_layout_constructs() {
     );
 
     let doc = compile(layout);
-    let output = render(doc, 4, 60);
+    let output = render(&doc, 4, 60);
 
     // Verify the output contains expected elements
     assert!(output.contains("Program:"));
@@ -65,7 +65,7 @@ fn test_deep_nesting() {
         ));
     }
 
-    let output = render(compile(layout), 2, 100);
+    let output = render(&compile(layout), 2, 100);
     assert!(output.contains("base"));
     assert!(output.contains("level_0"));
     assert!(output.contains("level_19"));
@@ -86,7 +86,7 @@ fn test_wide_layouts() {
         );
     }
 
-    let output = render(compile(layout), 2, 500); // Wide render
+    let output = render(&compile(layout), 2, 500); // Wide render
     assert!(output.contains("first"));
     assert!(output.contains("item_1"));
     assert!(output.contains("item_19"));
@@ -112,7 +112,7 @@ fn test_fix_prevents_breaking() {
     let layout = comp(breakable, fixed, Pad::Unpadded, Break::Breakable);
 
     let doc = compile(layout);
-    let output = render(doc, 2, 10); // Very narrow to force breaking
+    let output = render(&doc, 2, 10); // Very narrow to force breaking
 
     // The fixed part should stay together even when narrow
     assert!(output.contains("fixed content"));
@@ -139,7 +139,7 @@ fn test_group_breaking() {
 
     // Test with wide width (should fit on one line)
     let doc = compile(layout.clone());
-    let wide_output = render(doc, 2, 100);
+    let wide_output = render(&doc, 2, 100);
 
     let lines: Vec<&str> = wide_output.split('\n').collect();
     // Should be on fewer lines when there's space
@@ -147,7 +147,7 @@ fn test_group_breaking() {
 
     // Test with narrow width (should break)
     let doc = compile(layout);
-    let narrow_output = render(doc, 2, 10);
+    let narrow_output = render(&doc, 2, 10);
 
     let narrow_lines: Vec<&str> = narrow_output.split('\n').collect();
     let narrow_line_count = narrow_lines.len();
@@ -169,7 +169,7 @@ fn test_sequence_breaking() {
     let layout = comp(text("Before"), seq_content, Pad::Padded, Break::Breakable);
 
     let doc = compile(layout);
-    let output = render(doc, 2, 15); // Narrow enough to trigger breaking
+    let output = render(&doc, 2, 15); // Narrow enough to trigger breaking
 
     // If sequence breaks, all items should be on separate lines
     if output.contains('\n') {
@@ -201,7 +201,7 @@ fn test_pack_alignment_complex() {
     let layout = comp(text("Config:"), pack_content, Pad::Padded, Break::Breakable);
 
     let doc = compile(layout);
-    let output = render(doc, 2, 25); // Force some breaking
+    let output = render(&doc, 2, 25); // Force some breaking
 
     // Should have proper alignment
     assert!(output.contains("Config:"));
@@ -224,7 +224,7 @@ fn test_mixed_constructs() {
         Break::Breakable,
     )));
 
-    let output = render(compile(layout), 3, 30);
+    let output = render(&compile(layout), 3, 30);
     assert!(output.contains("FIXED"));
     assert!(output.contains("item_a"));
     assert!(output.contains("item_b"));
@@ -237,7 +237,7 @@ fn test_edge_cases() {
     // Test with null layout
     let null_layout = typeset::null();
     let doc = compile(null_layout);
-    let output = render(doc, 2, 80);
+    let output = render(&doc, 2, 80);
     assert_eq!(output, "");
 
     // Test composition with null
@@ -248,13 +248,13 @@ fn test_edge_cases() {
         Break::Breakable,
     );
     let doc = compile(with_null);
-    let output = render(doc, 2, 80);
+    let output = render(&doc, 2, 80);
     assert_eq!(output, "Before");
 
     // Test empty text
     let empty_text = text("");
     let doc = compile(empty_text);
-    let output = render(doc, 2, 80);
+    let output = render(&doc, 2, 80);
     assert_eq!(output, "");
 }
 
@@ -275,7 +275,7 @@ fn test_seq_inside_grp_breaks_all_or_nothing() {
         Pad::Padded,
         Break::Breakable,
     )));
-    let output = render(compile(layout), 2, 3);
+    let output = render(&compile(layout), 2, 3);
     assert_eq!(output, "a\nb\nc", "seq inside grp broke only partially");
 }
 
@@ -289,6 +289,6 @@ fn test_grp_inside_seq_keeps_its_own_fit_scope() {
         Pad::Padded,
         Break::Breakable,
     )));
-    let output = render(compile(layout), 2, 3);
+    let output = render(&compile(layout), 2, 3);
     assert_eq!(output, "a b\nc", "grp inside seq lost its fit scope");
 }

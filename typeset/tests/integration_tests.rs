@@ -15,7 +15,7 @@ fn test_basic_compilation() {
         Break::Breakable,
     );
 
-    let output = render(compile(layout), 2, 80);
+    let output = render(&compile(layout), 2, 80);
     assert_eq!(output, "HelloWorld");
 }
 
@@ -25,7 +25,7 @@ fn test_padded_composition() {
     let layout = comp(text("Hello"), text("World"), Pad::Padded, Break::Breakable);
 
     let doc = compile(layout);
-    let output = render(doc, 2, 80);
+    let output = render(&doc, 2, 80);
     assert_eq!(output, "Hello World");
 }
 
@@ -54,7 +54,7 @@ fn test_complex_layout() {
         Break::Breakable,
     );
 
-    let output = render(compile(complex_layout), 4, 40);
+    let output = render(&compile(complex_layout), 4, 40);
     assert!(!output.is_empty());
     assert!(output.contains("fn"));
     assert!(output.contains("main"));
@@ -67,7 +67,7 @@ fn test_line_breaks() {
     let layout = line(text("First line"), text("Second line"));
 
     let doc = compile(layout);
-    let output = render(doc, 2, 80);
+    let output = render(&doc, 2, 80);
     assert_eq!(output, "First line\nSecond line");
 }
 
@@ -82,7 +82,7 @@ fn test_nesting() {
     );
 
     let doc = compile(layout);
-    let output = render(doc, 2, 80);
+    let output = render(&doc, 2, 80);
 
     assert!(output.contains("Prefix:"));
     assert!(output.contains("Indented"));
@@ -107,7 +107,7 @@ fn test_grouping() {
     );
 
     let doc = compile(layout);
-    let output = render(doc, 2, 80);
+    let output = render(&doc, 2, 80);
     assert_eq!(output, "Before grouped content");
 }
 
@@ -127,7 +127,7 @@ fn test_sequence_breaking() {
     ));
 
     let doc = compile(layout);
-    let output = render(doc, 2, 10); // Narrow width to force breaking
+    let output = render(&doc, 2, 10); // Narrow width to force breaking
 
     // All items should be on separate lines due to seq behavior
     let lines: Vec<&str> = output.split('\n').collect();
@@ -158,7 +158,7 @@ fn test_pack_alignment() {
     );
 
     let doc = compile(layout);
-    let output = render(doc, 2, 20); // Narrow width to force alignment
+    let output = render(&doc, 2, 20); // Narrow width to force alignment
 
     // Check that alignment works correctly
     assert!(output.contains("Start"));
@@ -193,12 +193,12 @@ fn test_different_widths() {
 
     // Test wide rendering
     let doc = compile(layout.clone());
-    let wide_output = render(doc, 2, 100);
+    let wide_output = render(&doc, 2, 100);
     assert_eq!(wide_output, "This is a test");
 
     // Test narrow rendering
     let doc = compile(layout);
-    let narrow_output = render(doc, 2, 5);
+    let narrow_output = render(&doc, 2, 5);
 
     // Should break into multiple lines when narrow
     assert!(narrow_output.contains('\n') || narrow_output.len() <= 5);

@@ -117,7 +117,7 @@ fn bench_rendering(c: &mut Criterion) {
     let mut group = c.benchmark_group("rendering");
 
     let simple_doc = compile(create_simple_layout());
-    group.bench_function("simple", |b| b.iter(|| render(simple_doc.clone(), 2, 80)));
+    group.bench_function("simple", |b| b.iter(|| render(&simple_doc, 2, 80)));
 
     // Test rendering at different widths to show width independence
     let complex_doc = compile(create_json_like_layout(20));
@@ -125,7 +125,7 @@ fn bench_rendering(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("different_widths", width),
             width,
-            |b, &width| b.iter(|| render(complex_doc.clone(), 2, width)),
+            |b, &width| b.iter(|| render(&complex_doc, 2, width)),
         );
     }
 
@@ -140,7 +140,7 @@ fn bench_end_to_end(c: &mut Criterion) {
         b.iter(|| {
             let layout = create_simple_layout();
             let doc = compile(layout);
-            render(doc, 2, 80)
+            render(&doc, 2, 80)
         })
     });
 
@@ -149,7 +149,7 @@ fn bench_end_to_end(c: &mut Criterion) {
             b.iter(|| {
                 let layout = create_json_like_layout(size);
                 let doc = compile(layout);
-                render(doc, 2, 80)
+                render(&doc, 2, 80)
             })
         });
     }
@@ -175,7 +175,7 @@ fn bench_reuse_efficiency(c: &mut Criterion) {
         b.iter(|| {
             // This demonstrates the efficiency of the two-phase approach
             for width in [20, 40, 60, 80, 100] {
-                let _ = render(doc.clone(), 2, width);
+                let _ = render(&doc, 2, width);
             }
         })
     });
@@ -186,7 +186,7 @@ fn bench_reuse_efficiency(c: &mut Criterion) {
             let layout = create_json_like_layout(15);
             for width in [20, 40, 60, 80, 100] {
                 let doc = compile(layout.clone());
-                let _ = render(doc, 2, width);
+                let _ = render(&doc, 2, width);
             }
         })
     });

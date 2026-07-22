@@ -13,7 +13,7 @@ fn render_pair(a: &str, b: &str, width: usize) -> String {
         Pad::Padded,
         Break::Breakable,
     ));
-    render(compile(layout), 2, width)
+    render(&compile(layout), 2, width)
 }
 
 #[test]
