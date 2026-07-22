@@ -80,12 +80,11 @@ fn inc_pos(n: usize, state: State) -> State {
 
 fn indent(tab: usize, state: State) -> State {
     if tab == 0 {
-        state
-    } else {
-        let lvl = state.lvl;
-        let lvl1 = lvl + (tab - (lvl % tab));
-        State { lvl: lvl1, ..state }
+        return state;
     }
+    let lvl = state.lvl;
+    let lvl1 = lvl + (tab - (lvl % tab));
+    State { lvl: lvl1, ..state }
 }
 
 fn newline(state: State) -> State {
@@ -107,15 +106,63 @@ fn reset(state: State) -> State {
 
 fn get_offset(state: State) -> usize {
     if !state.head {
-        0
-    } else {
-        max(0, state.lvl - state.pos)
+        return 0;
     }
+    max(0, state.lvl - state.pos)
 }
 
 /// Append `n` spaces to `result` (iterative `push_spaces`).
 fn push_spaces(result: &mut String, n: usize) {
     result.extend(std::iter::repeat_n(' ', n));
+}
+
+/// Outcome of resolving a `Pack` mark at `index`, shared by every traversal.
+struct PackStep {
+    /// State to continue folding/rendering the pack's child from.
+    state: State,
+    /// Columns the pack advanced by (spaces to emit when producing output); `0`
+    /// the first time a mark is seen.
+    offset: usize,
+    /// Whether this call recorded a new mark (the measuring passes must undo it).
+    fresh: bool,
+}
+
+/// Resolves a `Pack` mark, threading `marks` uniformly across all traversals.
+///
+/// The first time `index` is seen the current column is recorded and the level
+/// is lifted to it (no advance). On any later sighting the level is lifted to
+/// the recorded column and the state advances by the resulting offset. Callers
+/// diverge only in what they do with the result: output renders `offset` spaces
+/// and keeps the mark; the measuring folds ignore `offset` and drop a `fresh`
+/// mark before returning.
+fn resolve_pack(marks: &mut HashMap<usize, usize>, index: usize, state: State) -> PackStep {
+    let lvl = state.lvl;
+    match marks.get(&index) {
+        None => {
+            let pos = state.pos;
+            marks.insert(index, pos);
+            PackStep {
+                state: State {
+                    lvl: max(lvl, pos),
+                    ..state
+                },
+                offset: 0,
+                fresh: true,
+            }
+        }
+        Some(&lvl1) => {
+            let state1 = State {
+                lvl: max(lvl, lvl1),
+                ..state
+            };
+            let offset = get_offset(state1);
+            PackStep {
+                state: inc_pos(offset, state1),
+                offset,
+                fresh: false,
+            }
+        }
+    }
 }
 
 /// Frame for the state-only measuring traversals (`measure`, `next_comp`).
@@ -170,11 +217,14 @@ fn fold(
                 // The first point of divergence: `Measure` always descends;
                 // `NextComp` folds an already-laid-out group as one opaque block.
                 ObjNode::Grp(obj1) => {
-                    if mode == Fold::NextComp && !st.head {
+                    // Golden path: descend into the group. Only a non-head group
+                    // under `NextComp` is folded inline as an opaque, already
+                    // laid-out block.
+                    if mode != Fold::NextComp || st.head {
+                        stack.push(MFrame::Obj(*obj1));
+                    } else {
                         let end = fold(Fold::Measure, arena, *obj1, st, marks);
                         st = State { pos: end, ..st };
-                    } else {
-                        stack.push(MFrame::Obj(*obj1));
                     }
                 }
                 ObjNode::Seq(obj1) => stack.push(MFrame::Obj(*obj1)),
@@ -189,24 +239,12 @@ fn fold(
                 ObjNode::Pack(index, obj1) => {
                     let index = *index as usize;
                     let lvl = st.lvl;
-                    match marks.get(&index) {
-                        None => {
-                            let pos = st.pos;
-                            marks.insert(index, pos);
-                            inserted.push(index);
-                            st = State {
-                                lvl: max(lvl, pos),
-                                ..st
-                            };
-                        }
-                        Some(&lvl1) => {
-                            let state1 = State {
-                                lvl: max(lvl, lvl1),
-                                ..st
-                            };
-                            let offset = get_offset(state1);
-                            st = inc_pos(offset, state1);
-                        }
+                    let step = resolve_pack(marks, index, st);
+                    st = step.state;
+                    // Measuring must not leak marks: record the ones it created
+                    // so they can be removed before returning.
+                    if step.fresh {
+                        inserted.push(index);
                     }
                     stack.push(MFrame::RestoreLvl(lvl));
                     stack.push(MFrame::Obj(*obj1));
@@ -264,11 +302,7 @@ fn will_fit(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, u
 }
 
 fn should_break(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> bool {
-    if state.broken {
-        true
-    } else {
-        state.width < next_comp(arena, obj, state, marks)
-    }
+    state.broken || state.width < next_comp(arena, obj, state, marks)
 }
 
 /// Frame for the output-producing object traversal.
@@ -341,25 +375,12 @@ fn render_obj(
                 ObjNode::Pack(index, obj1) => {
                     let index = *index as usize;
                     let lvl = st.lvl;
-                    match marks.get(&index) {
-                        None => {
-                            let pos = st.pos;
-                            marks.insert(index, pos);
-                            st = State {
-                                lvl: max(lvl, pos),
-                                ..st
-                            };
-                        }
-                        Some(&lvl1) => {
-                            let state1 = State {
-                                lvl: max(lvl, lvl1),
-                                ..st
-                            };
-                            let offset = get_offset(state1);
-                            st = inc_pos(offset, state1);
-                            push_spaces(result, offset);
-                        }
-                    }
+                    // Output keeps the mark (`fresh` is irrelevant here) and emits
+                    // the advance; on a fresh mark the offset is 0, so this is a
+                    // no-op push, exactly matching the measuring fold.
+                    let step = resolve_pack(marks, index, st);
+                    st = step.state;
+                    push_spaces(result, step.offset);
                     stack.push(RFrame::RestoreLvl(lvl));
                     stack.push(RFrame::Obj(*obj1));
                 }
