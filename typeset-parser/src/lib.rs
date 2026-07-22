@@ -1,51 +1,40 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Quoted;
 use quote::quote;
-use std::ops::ControlFlow;
 use syn::{
     Error, Ident, LitStr, parenthesized,
     parse::{Parse, ParseStream, Result, discouraged::Speculative},
     parse_macro_input,
 };
 
+/// Speculatively parse a `T`: advance `input` only on success, so a failed
+/// attempt leaves it untouched for the next alternative.
 fn parsed<T: Parse>(input: ParseStream) -> Result<T> {
-    let _input = input.fork();
-    match _input.parse::<T>() {
-        Err(error) => Err(error),
-        Ok(result) => {
-            input.advance_to(&_input);
-            Ok(result)
-        }
-    }
+    let fork = input.fork();
+    let result = fork.parse::<T>()?;
+    input.advance_to(&fork);
+    Ok(result)
 }
 
-fn parse_any<T>(input: ParseStream, parsers: Vec<fn(ParseStream) -> Result<T>>) -> Result<T> {
-    let result = parsers.iter().try_fold(Vec::new(), |mut errors, parser| {
-        let _input = input.fork();
-        match parser(&_input) {
+/// Try each parser in order against a fork of `input`, committing to the first
+/// that succeeds. If none does, the error combines every alternative's error.
+fn parse_any<T>(input: ParseStream, parsers: &[fn(ParseStream) -> Result<T>]) -> Result<T> {
+    let mut errors: Vec<Error> = Vec::new();
+    for parser in parsers {
+        let fork = input.fork();
+        match parser(&fork) {
             Ok(value) => {
-                input.advance_to(&_input);
-                ControlFlow::Break(value)
+                input.advance_to(&fork);
+                return Ok(value);
             }
-            Err(new_error) => {
-                errors.push(new_error);
-                ControlFlow::Continue(errors)
-            }
-        }
-    });
-    match result {
-        ControlFlow::Break(value) => Ok(value),
-        ControlFlow::Continue(errors) => {
-            let error = Error::new(input.span(), "Failed to parse any");
-            Err(errors
-                .iter()
-                .cloned()
-                .fold(error, |mut out_error, in_error| {
-                    out_error.combine(in_error);
-                    out_error
-                }))
+            Err(error) => errors.push(error),
         }
     }
+    let mut combined = Error::new(input.span(), "Failed to parse any");
+    for error in errors {
+        combined.combine(error);
+    }
+    Err(combined)
 }
 
 fn parse_group<T>(input: ParseStream, parser: fn(ParseStream) -> Result<T>) -> Result<T> {
@@ -99,7 +88,7 @@ fn parse_binary_op(input: ParseStream) -> Result<BinaryOp> {
     use binary_tokens::*;
     parse_any(
         input,
-        vec![
+        &[
             |input| parsed::<Unpadded>(input).map(|_| BinaryOp::Unpadded),
             |input| parsed::<Padded>(input).map(|_| BinaryOp::Padded),
             |input| parsed::<FixedUnpadded>(input).map(|_| BinaryOp::FixedUnpadded),
@@ -144,12 +133,12 @@ fn parse_group_ast(input: ParseStream) -> Result<Box<Ast>> {
 fn parse_primary(input: ParseStream) -> Result<Box<Ast>> {
     parse_any(
         input,
-        vec![parse_null, parse_variable, parse_text, parse_group_ast],
+        &[parse_null, parse_variable, parse_text, parse_group_ast],
     )
 }
 
 fn parse_atom(input: ParseStream) -> Result<Box<Ast>> {
-    parse_any(input, vec![parse_unary, parse_primary])
+    parse_any(input, &[parse_unary, parse_primary])
 }
 
 fn parse_unary(input: ParseStream) -> Result<Box<Ast>> {
@@ -166,25 +155,49 @@ fn parse_binary(input: ParseStream) -> Result<Box<Ast>> {
 }
 
 fn parse_ast(input: ParseStream) -> Result<Box<Ast>> {
-    parse_any(input, vec![parse_binary, parse_atom])
+    parse_any(input, &[parse_binary, parse_atom])
 }
 
 impl Parse for Box<Ast> {
     fn parse(input: ParseStream) -> Result<Self> {
-        let _input = input.fork();
-        match parse_ast(&_input) {
-            Err(error) => Err(error),
-            Ok(result) => {
-                input.advance_to(&_input);
-                if input.is_empty() {
-                    Ok(result)
-                } else {
-                    Err(Error::new(
-                        input.span(),
-                        format!("Failed to parse layout:\n{}", input),
-                    ))
-                }
-            }
+        let fork = input.fork();
+        let result = parse_ast(&fork)?;
+        input.advance_to(&fork);
+        if !input.is_empty() {
+            return Err(Error::new(
+                input.span(),
+                format!("Failed to parse layout:\n{}", input),
+            ));
+        }
+        Ok(result)
+    }
+}
+
+impl UnaryOp {
+    /// The `typeset` constructor call this operator reifies to.
+    fn reify(&self, layout: Quoted) -> Quoted {
+        match self {
+            UnaryOp::Fix => quote! { typeset::fix(#layout) },
+            UnaryOp::Grp => quote! { typeset::grp(#layout) },
+            UnaryOp::Seq => quote! { typeset::seq(#layout) },
+            UnaryOp::Nest => quote! { typeset::nest(#layout) },
+            UnaryOp::Pack => quote! { typeset::pack(#layout) },
+        }
+    }
+}
+
+impl BinaryOp {
+    /// The `typeset` constructor call this operator reifies to.
+    fn reify(&self, left: Quoted, right: Quoted) -> Quoted {
+        match self {
+            BinaryOp::Unpadded => quote! { typeset::unpad(#left, #right) },
+            BinaryOp::Padded => quote! { typeset::pad(#left, #right) },
+            BinaryOp::FixedUnpadded => quote! { typeset::fix_unpad(#left, #right) },
+            BinaryOp::FixedPadded => quote! { typeset::fix_pad(#left, #right) },
+            BinaryOp::Newline => quote! { typeset::line(#left, #right) },
+            BinaryOp::DoubleNewline => quote! {
+                typeset::line(#left, typeset::line(typeset::null(), #right))
+            },
         }
     }
 }
@@ -194,69 +207,8 @@ fn reify_layout(ast: Ast) -> Quoted {
         Ast::Null => quote! { typeset::null() },
         Ast::Variable(name) => quote! { #name.clone() },
         Ast::Text(data) => quote! { typeset::text(#data) },
-        Ast::Unary(UnaryOp::Fix, ast1) => {
-            let layout = reify_layout(*ast1);
-            quote! { typeset::fix(#layout) }
-        }
-        Ast::Unary(UnaryOp::Grp, ast1) => {
-            let layout = reify_layout(*ast1);
-            quote! { typeset::grp(#layout) }
-        }
-        Ast::Unary(UnaryOp::Seq, ast1) => {
-            let layout = reify_layout(*ast1);
-            quote! { typeset::seq(#layout) }
-        }
-        Ast::Unary(UnaryOp::Nest, ast1) => {
-            let layout = reify_layout(*ast1);
-            quote! { typeset::nest(#layout) }
-        }
-        Ast::Unary(UnaryOp::Pack, ast1) => {
-            let layout = reify_layout(*ast1);
-            quote! { typeset::pack(#layout) }
-        }
-        Ast::Binary(BinaryOp::Unpadded, left, right) => {
-            let left_layout = reify_layout(*left);
-            let right_layout = reify_layout(*right);
-            quote! { typeset::unpad(#left_layout, #right_layout) }
-        }
-        Ast::Binary(BinaryOp::Padded, left, right) => {
-            let left_layout = reify_layout(*left);
-            let right_layout = reify_layout(*right);
-            quote! { typeset::pad(#left_layout, #right_layout) }
-        }
-        Ast::Binary(BinaryOp::FixedUnpadded, left, right) => {
-            let left_layout = reify_layout(*left);
-            let right_layout = reify_layout(*right);
-            quote! { typeset::fix_unpad(#left_layout, #right_layout) }
-        }
-        Ast::Binary(BinaryOp::FixedPadded, left, right) => {
-            let left_layout = reify_layout(*left);
-            let right_layout = reify_layout(*right);
-            quote! { typeset::fix_pad(#left_layout, #right_layout) }
-        }
-        Ast::Binary(BinaryOp::Newline, left, right) => {
-            let left_layout = reify_layout(*left);
-            let right_layout = reify_layout(*right);
-            quote! {
-              typeset::line(
-                #left_layout,
-                #right_layout
-              )
-            }
-        }
-        Ast::Binary(BinaryOp::DoubleNewline, left, right) => {
-            let left_layout = reify_layout(*left);
-            let right_layout = reify_layout(*right);
-            quote! {
-              typeset::line(
-                #left_layout,
-                typeset::line(
-                  typeset::null(),
-                  #right_layout
-                )
-              )
-            }
-        }
+        Ast::Unary(op, ast1) => op.reify(reify_layout(*ast1)),
+        Ast::Binary(op, left, right) => op.reify(reify_layout(*left), reify_layout(*right)),
     }
 }
 
