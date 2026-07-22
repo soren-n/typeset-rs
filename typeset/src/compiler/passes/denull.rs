@@ -102,6 +102,20 @@ pub fn denull<'b, 'a: 'b>(mem: &'b Bump, doc: &'a RebuildDoc<'a>) -> &'b DenullD
     acc.unwrap_or_else(|| mem.alloc(DenullDoc::Eod))
 }
 
+/// Wraps a denulled object in a `Grp` or `Seq` (whichever `ctor` builds),
+/// propagating the "nothing survived" result unchanged. A surviving `NextNone`
+/// collapses to `Some` — the dropped-left pad is discarded at a wrapper.
+fn wrap_obj<'b>(
+    mem: &'b Bump,
+    val: ObjRes<'b>,
+    ctor: fn(&'b DenullObj<'b>) -> DenullObj<'b>,
+) -> ObjRes<'b> {
+    match val {
+        ObjRes::None => ObjRes::None,
+        ObjRes::Some(obj) | ObjRes::NextNone(_, obj) => ObjRes::Some(mem.alloc(ctor(obj))),
+    }
+}
+
 /// Denulls an object tree. `Comp` branches into left then right; `Grp`/`Seq`
 /// wrap their child; `Term`/`Fix` are leaves.
 fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a RebuildObj<'a>) -> ObjRes<'b> {
@@ -141,22 +155,8 @@ fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a RebuildObj<'a>) -> ObjRes<'b> {
         loop {
             match stack.pop() {
                 None => return val,
-                Some(ObjFrame::Grp) => {
-                    val = match val {
-                        ObjRes::None => ObjRes::None,
-                        ObjRes::Some(obj2) | ObjRes::NextNone(_, obj2) => {
-                            ObjRes::Some(mem.alloc(DenullObj::Grp(obj2)))
-                        }
-                    };
-                }
-                Some(ObjFrame::Seq) => {
-                    val = match val {
-                        ObjRes::None => ObjRes::None,
-                        ObjRes::Some(obj2) | ObjRes::NextNone(_, obj2) => {
-                            ObjRes::Some(mem.alloc(DenullObj::Seq(obj2)))
-                        }
-                    };
-                }
+                Some(ObjFrame::Grp) => val = wrap_obj(mem, val, DenullObj::Grp),
+                Some(ObjFrame::Seq) => val = wrap_obj(mem, val, DenullObj::Seq),
                 Some(ObjFrame::CompLeft { right, l_pad }) => {
                     // A composition's left operand never denulls to NextNone.
                     if matches!(val, ObjRes::NextNone(..)) {

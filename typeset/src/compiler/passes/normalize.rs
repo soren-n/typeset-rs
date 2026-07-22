@@ -2,18 +2,20 @@
 //!
 //! Runs the three grp/seq normalization folds back-to-back over each line's
 //! object, in this order (the order matters — the rules are not confluent):
-//! 1. [`elim_seqs`]  — drop seq wrappers grouping fewer than two compositions,
-//!    and absorb a seq nested directly under a seq.
-//! 2. [`elim_grps`]  — drop grp wrappers grouping fewer than two compositions,
-//!    and absorb a grp at the head of its enclosing group.
-//! 3. [`reassoc`]    — right-associate composition trees, reassociating inside
-//!    each Grp/Seq boundary independently.
+//! 1. seq elimination — `visit_obj_seqs`, applying the `elim_seq` rule: drop
+//!    seq wrappers grouping fewer than two compositions, and absorb a seq
+//!    nested directly under a seq.
+//! 2. grp elimination — `visit_obj_grps`, applying the `elim_grp` rule: drop
+//!    grp wrappers grouping fewer than two compositions, and absorb a grp at
+//!    the head of its enclosing group.
+//! 3. reassociation — `reassoc_obj`: right-associate composition trees,
+//!    reassociating inside each Grp/Seq boundary independently.
 //!
 //! All three are bottom-up folds over the same `DenullObj` shape, so they share
 //! one spine walk and one arena: each line's object is run through
-//! `reassoc ∘ elim_grps ∘ elim_seqs`. Composing per-object is equivalent to
-//! running the folds as three separate whole-document passes, since the spine
-//! walk maps each line independently.
+//! `reassoc_obj ∘ visit_obj_grps ∘ visit_obj_seqs` (see `norm_obj`). Composing
+//! per-object is equivalent to running the folds as three separate
+//! whole-document passes, since the spine walk maps each line independently.
 //!
 //! Each fold recurses on the native stack in its original direct-style form and
 //! aborted on deep inputs; here each object visitor is a descend/ascend
@@ -89,6 +91,41 @@ fn add(left: Count, right: Count) -> Count {
     }
 }
 
+/// The seq-elimination rule at a `Seq` boundary. A seq directly under a seq is
+/// absorbed; otherwise the wrapper is kept only when it groups two or more
+/// compositions (`Many`). The composition count passes through unchanged.
+fn elim_seq<'b>(
+    mem: &'b Bump,
+    node_under: bool,
+    val: (Count, &'b DenullObj<'b>),
+) -> (Count, &'b DenullObj<'b>) {
+    if node_under {
+        return val;
+    }
+    match val.0 {
+        Count::Zero | Count::One => val,
+        Count::Many => (Count::Many, mem.alloc(DenullObj::Seq(val.1))),
+    }
+}
+
+/// The grp-elimination rule at a `Grp` boundary. A grp at the head of its group
+/// is absorbed; otherwise the wrapper is kept only when it groups one or more
+/// compositions. Either way a grp contributes no composition to its enclosing
+/// count, so the result count is `Zero` whenever the wrapper is (re)built.
+fn elim_grp<'b>(
+    mem: &'b Bump,
+    node_in_head: bool,
+    val: (Count, &'b DenullObj<'b>),
+) -> (Count, &'b DenullObj<'b>) {
+    if node_in_head {
+        return val;
+    }
+    match val.0 {
+        Count::Zero => (Count::Zero, val.1),
+        Count::One | Count::Many => (Count::Zero, mem.alloc(DenullObj::Grp(val.1))),
+    }
+}
+
 // Fold 1: seq elimination
 // -----------------------
 
@@ -150,17 +187,7 @@ fn visit_obj_seqs<'b, 'a: 'b>(
             match stack.pop() {
                 None => return val,
                 Some(SeqFrame::Grp) => val = (Count::Zero, mem.alloc(DenullObj::Grp(val.1))),
-                Some(SeqFrame::Seq { node_under }) => {
-                    val = if node_under {
-                        // A seq directly under a seq is absorbed.
-                        val
-                    } else {
-                        match val.0 {
-                            Count::Zero | Count::One => val,
-                            Count::Many => (Count::Many, mem.alloc(DenullObj::Seq(val.1))),
-                        }
-                    };
-                }
+                Some(SeqFrame::Seq { node_under }) => val = elim_seq(mem, node_under, val),
                 Some(SeqFrame::CompLeft {
                     right,
                     pad,
@@ -235,19 +262,7 @@ fn visit_obj_grps<'b, 'a: 'b>(
         loop {
             match stack.pop() {
                 None => return val,
-                Some(GrpFrame::Grp { node_in_head }) => {
-                    val = if node_in_head {
-                        // A grp at the head of its group is absorbed.
-                        val
-                    } else {
-                        match val.0 {
-                            Count::Zero => (Count::Zero, val.1),
-                            Count::One | Count::Many => {
-                                (Count::Zero, mem.alloc(DenullObj::Grp(val.1)))
-                            }
-                        }
-                    };
-                }
+                Some(GrpFrame::Grp { node_in_head }) => val = elim_grp(mem, node_in_head, val),
                 Some(GrpFrame::Seq) => val = (val.0, mem.alloc(DenullObj::Seq(val.1))),
                 Some(GrpFrame::CompLeft { right, pad }) => {
                     // The right operand is never in head position; the left
