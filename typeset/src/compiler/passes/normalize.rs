@@ -10,27 +10,62 @@
 //!    each Grp/Seq boundary independently.
 //!
 //! All three are bottom-up folds over the same `DenullObj` shape, so they share
-//! one spine walk ([`map_denull_spine`]) and one arena: each line's object is
-//! run through `reassoc ∘ elim_grps ∘ elim_seqs`. Composing per-object is
-//! equivalent to running the folds as three separate whole-document passes,
-//! since the spine walk maps each line independently.
+//! one spine walk and one arena: each line's object is run through
+//! `reassoc ∘ elim_grps ∘ elim_seqs`. Composing per-object is equivalent to
+//! running the folds as three separate whole-document passes, since the spine
+//! walk maps each line independently.
 //!
 //! Each fold recurses on the native stack in its original direct-style form and
 //! aborted on deep inputs; here each object visitor is a descend/ascend
 //! trampoline over a heap-allocated frame stack, and the doc spine is a plain
 //! loop.
 
-use super::walk::map_denull_spine;
 use crate::compiler::types::{DenullDoc, DenullFix, DenullObj};
 use bumpalo::Bump;
 
 /// Normalize the grp/seq composition algebra.
+///
+/// Walks the linear `DenullDoc` spine, normalizing each line's object, and folds
+/// the results back onto the terminal as a fresh `DenullDoc`. Iterative: a plain
+/// loop down the spine collecting into a `Vec`, then a reverse fold, so
+/// arbitrarily deep documents use no native stack.
 pub fn normalize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    map_denull_spine(mem, doc, |mem, obj| {
-        let seqs = visit_obj_seqs(mem, obj, false).1;
-        let grps = visit_obj_grps(mem, seqs, true).1;
-        reassoc_obj(mem, grps)
-    })
+    enum Item<'b> {
+        Empty,
+        Break(&'b DenullObj<'b>),
+    }
+    let mut items: Vec<Item<'b>> = Vec::new();
+    let mut cur = doc;
+    let terminal: &'b DenullDoc<'b> = loop {
+        match cur {
+            DenullDoc::Eod => break mem.alloc(DenullDoc::Eod),
+            DenullDoc::Line(obj) => break mem.alloc(DenullDoc::Line(norm_obj(mem, obj))),
+            DenullDoc::Empty(doc1) => {
+                items.push(Item::Empty);
+                cur = doc1;
+            }
+            DenullDoc::Break(obj, doc1) => {
+                items.push(Item::Break(norm_obj(mem, obj)));
+                cur = doc1;
+            }
+        }
+    };
+    let mut result = terminal;
+    for item in items.into_iter().rev() {
+        result = match item {
+            Item::Empty => mem.alloc(DenullDoc::Empty(result)),
+            Item::Break(obj) => mem.alloc(DenullDoc::Break(obj, result)),
+        };
+    }
+    result
+}
+
+/// Run the three grp/seq folds over one line's object, in order:
+/// `reassoc ∘ elim_grps ∘ elim_seqs`.
+fn norm_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b DenullObj<'b> {
+    let seqs = visit_obj_seqs(mem, obj, false).1;
+    let grps = visit_obj_grps(mem, seqs, true).1;
+    reassoc_obj(mem, grps)
 }
 
 // Composition-count monoid

@@ -85,7 +85,7 @@ Build layout trees using constructors:
 1. **Compilation**: `compile()` applies optimization passes to layout trees
 2. **Rendering**: `render()` outputs formatted text with proper line breaks and indentation
 
-**Stack usage:** the entire pipeline runs iteratively — the nine transform
+**Stack usage:** the entire pipeline runs iteratively — the eight transform
 passes in `passes/` (the last, `rescope`, builds the owned heap `Doc` directly
 from the bump-allocated `DenullDoc`) and the renderer are each a descend/ascend
 trampoline over a heap-allocated frame stack (continuation-passing passes had
