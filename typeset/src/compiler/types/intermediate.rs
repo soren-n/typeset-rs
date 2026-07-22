@@ -171,35 +171,70 @@ pub struct RebuildDoc<'a> {
     pub fixes: Vec<RebuildFix<'a>>,
 }
 
-// Seventh intermediate representation: DenullDoc
-#[derive(Debug)]
-pub enum DenullDoc<'a> {
-    Eod,
-    Line(&'a DenullObj<'a>),
-    Empty(&'a DenullDoc<'a>),
-    Break(&'a DenullObj<'a>, &'a DenullDoc<'a>),
+// Seventh intermediate representation: DenullDoc.
+//
+// A flat postorder arena like `RebuildDoc`, but owned (no bump arena backs
+// it): nulls are gone, so terms are a stripped `(props, text)` pair rather
+// than a wrapper chain, and the spine is a row list with the same semantics
+// as the final `Doc` (a `Line` row is always last; a document ending in `Eod`
+// simply has no `Line` row).
+
+/// Index into a [`DenullDoc`]'s object arena.
+pub type DObjId = u32;
+
+/// Index into a [`DenullDoc`]'s fixed-object arena.
+pub type DFixId = u32;
+
+/// A nest/pack wrapper on a term, outermost first.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Prop {
+    Nest,
+    Pack(u64),
 }
 
-#[derive(Debug)]
+/// A denulled term: its nest/pack wrappers (outermost first) over a non-empty
+/// text leaf. The chain shape of [`Term`] carries no other information, so
+/// post-denulling it is stored stripped — `rescope` factors these prop lists
+/// directly.
+#[derive(Debug, Clone)]
+pub struct DenullTerm<'a> {
+    pub props: Vec<Prop>,
+    pub text: &'a str,
+}
+
+#[derive(Debug, Clone)]
 pub enum DenullObj<'a> {
-    Term(&'a DenullTerm<'a>),
-    Fix(&'a DenullFix<'a>),
-    Grp(&'a DenullObj<'a>),
-    Seq(&'a DenullObj<'a>),
-    Comp(&'a DenullObj<'a>, &'a DenullObj<'a>, bool),
+    Term(DenullTerm<'a>),
+    Fix(DFixId),
+    Grp(DObjId),
+    Seq(DObjId),
+    Comp(DObjId, DObjId, bool),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DenullFix<'a> {
-    Term(&'a DenullTerm<'a>),
-    Comp(&'a DenullFix<'a>, &'a DenullFix<'a>, bool),
+    Term(DenullTerm<'a>),
+    Comp(DFixId, DFixId, bool),
+}
+
+/// One row of the denulled document spine, in document order. Same semantics
+/// as the final `Doc`'s rows: `Line` is always the last row, and a document
+/// with no `Line` row ends in `Eod`.
+#[derive(Debug, Copy, Clone)]
+pub enum DenullRow {
+    Empty,
+    Break(DObjId),
+    Line(DObjId),
 }
 
 #[derive(Debug)]
-pub enum DenullTerm<'a> {
-    Text(&'a str),
-    Nest(&'a DenullTerm<'a>),
-    Pack(u64, &'a DenullTerm<'a>),
+pub struct DenullDoc<'a> {
+    /// The spine rows, in document order.
+    pub rows: Vec<DenullRow>,
+    /// Object arena in postorder: children precede parents.
+    pub objs: Vec<DenullObj<'a>>,
+    /// Fixed-object arena in postorder: children precede parents.
+    pub fixes: Vec<DenullFix<'a>>,
 }
 
 // The final pass, `rescope`, lowers `DenullDoc` straight into the owned heap

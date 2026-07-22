@@ -65,14 +65,9 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     let mem5 = Bump::new();
     let rebuild_doc = structurize(&mem5, fixed_doc);
 
-    let mem6 = Bump::new();
-    let denull_doc = denull(&mem6, &rebuild_doc);
-
-    let mem7 = Bump::new();
-    let normalized_doc = normalize(&mem7, denull_doc);
-
-    // Final pass: DenullDoc → Doc. `rescope` builds the owned heap Doc directly,
-    // so there is no arena here and no separate heap-conversion pass.
+    // The final three passes work on owned flat arenas — no bumps needed.
+    let denull_doc = denull(&rebuild_doc);
+    let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)
 }
 

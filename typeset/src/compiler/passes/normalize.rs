@@ -1,73 +1,24 @@
 //! Pass 7: DenullDoc → DenullDoc (normalize the composition algebra)
 //!
-//! Runs the three grp/seq normalization folds back-to-back over each line's
-//! object, in this order (the order matters — the rules are not confluent):
-//! 1. seq elimination — `visit_obj_seqs`, applying the `elim_seq` rule: drop
-//!    seq wrappers grouping fewer than two compositions, and absorb a seq
-//!    nested directly under a seq.
-//! 2. grp elimination — `visit_obj_grps`, applying the `elim_grp` rule: drop
-//!    grp wrappers grouping fewer than two compositions, and absorb a grp at
-//!    the head of its enclosing group.
-//! 3. reassociation — `reassoc_obj`: right-associate composition trees,
+//! Runs the three grp/seq normalization folds back-to-back, in this order (the
+//! order matters — the rules are not confluent):
+//! 1. seq elimination — [`elim_seqs`]: drop seq wrappers grouping fewer than
+//!    two compositions, and absorb a seq nested directly under a seq.
+//! 2. grp elimination — [`elim_grps`]: drop grp wrappers grouping fewer than
+//!    two compositions, and absorb a grp at the head of its enclosing group.
+//! 3. reassociation — [`reassoc`]: right-associate composition trees,
 //!    reassociating inside each Grp/Seq boundary independently.
 //!
-//! All three are bottom-up folds over the same `DenullObj` shape, so they share
-//! one spine walk and one arena: each line's object is run through
-//! `reassoc_obj ∘ visit_obj_grps ∘ visit_obj_seqs` (see `norm_obj`). Composing
-//! per-object is equivalent to running the folds as three separate
-//! whole-document passes, since the spine walk maps each line independently.
-//!
-//! Each fold recurses on the native stack in its original direct-style form and
-//! aborted on deep inputs; here each object visitor is a descend/ascend
-//! trampoline over a heap-allocated frame stack, and the doc spine is a plain
-//! loop.
+//! The document is a flat postorder arena, so each fold is two plain loops: a
+//! backward pass distributing the inherited context (parents precede children
+//! in reverse order), and a forward pass computing the bottom-up rebuild
+//! (children precede parents in forward order). No frame stacks anywhere.
 
-use crate::compiler::types::{DenullDoc, DenullFix, DenullObj};
-use bumpalo::Bump;
+use crate::compiler::types::{DObjId, DenullDoc, DenullFix, DenullObj, DenullRow};
 
 /// Normalize the grp/seq composition algebra.
-///
-/// Walks the linear `DenullDoc` spine, normalizing each line's object, and folds
-/// the results back onto the terminal as a fresh `DenullDoc`. Iterative: a plain
-/// loop down the spine collecting into a `Vec`, then a reverse fold, so
-/// arbitrarily deep documents use no native stack.
-pub fn normalize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a DenullDoc<'a>) -> &'b DenullDoc<'b> {
-    enum Item<'b> {
-        Empty,
-        Break(&'b DenullObj<'b>),
-    }
-    let mut items: Vec<Item<'b>> = Vec::new();
-    let mut cur = doc;
-    let terminal: &'b DenullDoc<'b> = loop {
-        match cur {
-            DenullDoc::Eod => break mem.alloc(DenullDoc::Eod),
-            DenullDoc::Line(obj) => break mem.alloc(DenullDoc::Line(norm_obj(mem, obj))),
-            DenullDoc::Empty(doc1) => {
-                items.push(Item::Empty);
-                cur = doc1;
-            }
-            DenullDoc::Break(obj, doc1) => {
-                items.push(Item::Break(norm_obj(mem, obj)));
-                cur = doc1;
-            }
-        }
-    };
-    let mut result = terminal;
-    for item in items.into_iter().rev() {
-        result = match item {
-            Item::Empty => mem.alloc(DenullDoc::Empty(result)),
-            Item::Break(obj) => mem.alloc(DenullDoc::Break(obj, result)),
-        };
-    }
-    result
-}
-
-/// Run the three grp/seq folds over one line's object, in order:
-/// `reassoc ∘ elim_grps ∘ elim_seqs`.
-fn norm_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b DenullObj<'b> {
-    let seqs = visit_obj_seqs(mem, obj, false).1;
-    let grps = visit_obj_grps(mem, seqs, true).1;
-    reassoc_obj(mem, grps)
+pub fn normalize(doc: DenullDoc) -> DenullDoc {
+    reassoc(elim_grps(elim_seqs(doc)))
 }
 
 // Composition-count monoid
@@ -91,287 +42,273 @@ fn add(left: Count, right: Count) -> Count {
     }
 }
 
-/// The seq-elimination rule at a `Seq` boundary. A seq directly under a seq is
-/// absorbed; otherwise the wrapper is kept only when it groups two or more
-/// compositions (`Many`). The composition count passes through unchanged.
-fn elim_seq<'b>(
-    mem: &'b Bump,
-    node_under: bool,
-    val: (Count, &'b DenullObj<'b>),
-) -> (Count, &'b DenullObj<'b>) {
-    if node_under {
-        return val;
-    }
-    match val.0 {
-        Count::Zero | Count::One => val,
-        Count::Many => (Count::Many, mem.alloc(DenullObj::Seq(val.1))),
+/// Append an arena node and return its index.
+fn push<'a>(objs: &mut Vec<DenullObj<'a>>, node: DenullObj<'a>) -> DObjId {
+    let id = objs.len() as DObjId;
+    objs.push(node);
+    id
+}
+
+/// Remap a spine row through the fold's old-id → new-id table.
+fn map_row(row: DenullRow, out: &[DObjId]) -> DenullRow {
+    match row {
+        DenullRow::Empty => DenullRow::Empty,
+        DenullRow::Break(id) => DenullRow::Break(out[id as usize]),
+        DenullRow::Line(id) => DenullRow::Line(out[id as usize]),
     }
 }
 
-/// The grp-elimination rule at a `Grp` boundary. A grp at the head of its group
-/// is absorbed; otherwise the wrapper is kept only when it groups one or more
-/// compositions. Either way a grp contributes no composition to its enclosing
-/// count, so the result count is `Zero` whenever the wrapper is (re)built.
-fn elim_grp<'b>(
-    mem: &'b Bump,
-    node_in_head: bool,
-    val: (Count, &'b DenullObj<'b>),
-) -> (Count, &'b DenullObj<'b>) {
-    if node_in_head {
-        return val;
-    }
-    match val.0 {
-        Count::Zero => (Count::Zero, val.1),
-        Count::One | Count::Many => (Count::Zero, mem.alloc(DenullObj::Grp(val.1))),
+/// A leaf in the elimination folds: a term contributes no compositions, and a
+/// fix that holds a single term unwraps to that term.
+fn leaf_obj<'a>(
+    objs: &mut Vec<DenullObj<'a>>,
+    fixes: &[DenullFix<'a>],
+    node: DenullObj<'a>,
+) -> DObjId {
+    match node {
+        DenullObj::Fix(fix) => match &fixes[fix as usize] {
+            DenullFix::Term(term) => push(objs, DenullObj::Term(term.clone())),
+            DenullFix::Comp(..) => push(objs, DenullObj::Fix(fix)),
+        },
+        other => push(objs, other),
     }
 }
 
 // Fold 1: seq elimination
 // -----------------------
 
-/// Frames for the seq-elimination object trampoline.
-enum SeqFrame<'b, 'a> {
-    Grp,
-    Seq {
-        node_under: bool,
-    },
-    CompLeft {
-        right: &'a DenullObj<'a>,
-        pad: bool,
-        under: bool,
-    },
-    CompRight {
-        left: (Count, &'b DenullObj<'b>),
-        pad: bool,
-    },
-}
-
-/// Bottom-up fold eliminating seq wrappers that group fewer than two
-/// compositions, and absorbing directly nested seqs.
-fn visit_obj_seqs<'b, 'a: 'b>(
-    mem: &'b Bump,
-    obj: &'a DenullObj<'a>,
-    under_seq: bool,
-) -> (Count, &'b DenullObj<'b>) {
-    let mut stack: Vec<SeqFrame<'b, 'a>> = Vec::new();
-    let mut cur = obj;
-    let mut under = under_seq;
-    'machine: loop {
-        let mut val: (Count, &'b DenullObj<'b>) = loop {
-            match cur {
-                DenullObj::Term(term) | DenullObj::Fix(DenullFix::Term(term)) => {
-                    break (Count::Zero, mem.alloc(DenullObj::Term(term)));
-                }
-                DenullObj::Fix(fix) => break (Count::Zero, mem.alloc(DenullObj::Fix(fix))),
-                DenullObj::Grp(obj1) => {
-                    stack.push(SeqFrame::Grp);
-                    cur = obj1;
-                    under = false;
-                }
-                DenullObj::Seq(obj1) => {
-                    stack.push(SeqFrame::Seq { node_under: under });
-                    cur = obj1;
-                    under = true;
-                }
-                DenullObj::Comp(left, right, pad) => {
-                    stack.push(SeqFrame::CompLeft {
-                        right,
-                        pad: *pad,
-                        under,
-                    });
-                    cur = left;
-                }
+/// Drop seq wrappers grouping fewer than two compositions, and absorb a seq
+/// nested directly under a seq.
+fn elim_seqs(doc: DenullDoc) -> DenullDoc {
+    // Backward pass: whether each node sits directly under a seq. Roots start
+    // outside any seq; comps pass the flag through, grp resets it.
+    let mut under = vec![false; doc.objs.len()];
+    for i in (0..doc.objs.len()).rev() {
+        match doc.objs[i] {
+            DenullObj::Grp(c) => under[c as usize] = false,
+            DenullObj::Seq(c) => under[c as usize] = true,
+            DenullObj::Comp(l, r, _) => {
+                under[l as usize] = under[i];
+                under[r as usize] = under[i];
             }
-        };
-        loop {
-            match stack.pop() {
-                None => return val,
-                Some(SeqFrame::Grp) => val = (Count::Zero, mem.alloc(DenullObj::Grp(val.1))),
-                Some(SeqFrame::Seq { node_under }) => val = elim_seq(mem, node_under, val),
-                Some(SeqFrame::CompLeft {
-                    right,
-                    pad,
-                    under: u,
-                }) => {
-                    stack.push(SeqFrame::CompRight { left: val, pad });
-                    cur = right;
-                    under = u;
-                    continue 'machine;
-                }
-                Some(SeqFrame::CompRight { left, pad }) => {
-                    let count = add(Count::One, add(left.0, val.0));
-                    val = (count, mem.alloc(DenullObj::Comp(left.1, val.1, pad)));
-                }
-            }
+            DenullObj::Term(_) | DenullObj::Fix(_) => {}
         }
+    }
+    // Forward pass: rebuild bottom-up, tracking each subtree's composition
+    // count. The count passes through a seq wrapper unchanged.
+    let mut objs: Vec<DenullObj> = Vec::with_capacity(doc.objs.len());
+    let mut out: Vec<DObjId> = Vec::with_capacity(doc.objs.len());
+    let mut count: Vec<Count> = Vec::with_capacity(doc.objs.len());
+    for (i, node) in doc.objs.into_iter().enumerate() {
+        let (c, id) = match node {
+            DenullObj::Term(_) | DenullObj::Fix(_) => {
+                (Count::Zero, leaf_obj(&mut objs, &doc.fixes, node))
+            }
+            DenullObj::Grp(c1) => (
+                Count::Zero,
+                push(&mut objs, DenullObj::Grp(out[c1 as usize])),
+            ),
+            DenullObj::Seq(c1) => {
+                let (cc, cid) = (count[c1 as usize], out[c1 as usize]);
+                if under[i] {
+                    // Directly under a seq: absorb the wrapper.
+                    (cc, cid)
+                } else {
+                    match cc {
+                        Count::Zero | Count::One => (cc, cid),
+                        Count::Many => (Count::Many, push(&mut objs, DenullObj::Seq(cid))),
+                    }
+                }
+            }
+            DenullObj::Comp(l, r, pad) => (
+                add(Count::One, add(count[l as usize], count[r as usize])),
+                push(
+                    &mut objs,
+                    DenullObj::Comp(out[l as usize], out[r as usize], pad),
+                ),
+            ),
+        };
+        count.push(c);
+        out.push(id);
+    }
+    DenullDoc {
+        rows: doc.rows.into_iter().map(|r| map_row(r, &out)).collect(),
+        objs,
+        fixes: doc.fixes,
     }
 }
 
 // Fold 2: grp elimination
 // -----------------------
 
-/// Frames for the grp-elimination object trampoline.
-enum GrpFrame<'b, 'a> {
-    Grp {
-        node_in_head: bool,
-    },
-    Seq,
-    CompLeft {
-        right: &'a DenullObj<'a>,
-        pad: bool,
-    },
-    CompRight {
-        left: (Count, &'b DenullObj<'b>),
-        pad: bool,
-    },
-}
-
-/// Bottom-up fold eliminating grp wrappers that group fewer than two
-/// compositions, and absorbing grps at the head of their enclosing group.
-fn visit_obj_grps<'b, 'a: 'b>(
-    mem: &'b Bump,
-    obj: &'a DenullObj<'a>,
-    in_head: bool,
-) -> (Count, &'b DenullObj<'b>) {
-    let mut stack: Vec<GrpFrame<'b, 'a>> = Vec::new();
-    let mut cur = obj;
-    let mut head = in_head;
-    'machine: loop {
-        let mut val: (Count, &'b DenullObj<'b>) = loop {
-            match cur {
-                DenullObj::Term(term) | DenullObj::Fix(DenullFix::Term(term)) => {
-                    break (Count::Zero, mem.alloc(DenullObj::Term(term)));
-                }
-                DenullObj::Fix(fix) => break (Count::Zero, mem.alloc(DenullObj::Fix(fix))),
-                DenullObj::Grp(obj1) => {
-                    stack.push(GrpFrame::Grp { node_in_head: head });
-                    cur = obj1;
-                    // The child inherits the node's in_head flag.
-                }
-                DenullObj::Seq(obj1) => {
-                    stack.push(GrpFrame::Seq);
-                    cur = obj1;
-                    head = false;
-                }
-                DenullObj::Comp(left, right, pad) => {
-                    stack.push(GrpFrame::CompLeft { right, pad: *pad });
-                    cur = left;
-                }
-            }
-        };
-        loop {
-            match stack.pop() {
-                None => return val,
-                Some(GrpFrame::Grp { node_in_head }) => val = elim_grp(mem, node_in_head, val),
-                Some(GrpFrame::Seq) => val = (val.0, mem.alloc(DenullObj::Seq(val.1))),
-                Some(GrpFrame::CompLeft { right, pad }) => {
-                    // The right operand is never in head position; the left
-                    // already descended with the node's in_head flag.
-                    stack.push(GrpFrame::CompRight { left: val, pad });
-                    cur = right;
-                    head = false;
-                    continue 'machine;
-                }
-                Some(GrpFrame::CompRight { left, pad }) => {
-                    let count = add(Count::One, add(left.0, val.0));
-                    val = (count, mem.alloc(DenullObj::Comp(left.1, val.1, pad)));
-                }
-            }
+/// Drop grp wrappers grouping fewer than one composition, and absorb a grp at
+/// the head of its enclosing group.
+fn elim_grps(doc: DenullDoc) -> DenullDoc {
+    // Backward pass: whether each node is in head position of its enclosing
+    // group. Roots are; a comp's left operand inherits, its right does not;
+    // seq resets.
+    let mut head = vec![false; doc.objs.len()];
+    for row in &doc.rows {
+        match row {
+            DenullRow::Break(id) | DenullRow::Line(id) => head[*id as usize] = true,
+            DenullRow::Empty => {}
         }
+    }
+    for i in (0..doc.objs.len()).rev() {
+        match doc.objs[i] {
+            DenullObj::Grp(c) => head[c as usize] = head[i],
+            DenullObj::Seq(c) => head[c as usize] = false,
+            DenullObj::Comp(l, r, _) => {
+                head[l as usize] = head[i];
+                head[r as usize] = false;
+            }
+            DenullObj::Term(_) | DenullObj::Fix(_) => {}
+        }
+    }
+    // Forward pass: rebuild bottom-up. A grp contributes no composition to its
+    // enclosing count, so the count resets to Zero wherever a wrapper is kept
+    // or dropped for grouping too little; an absorbed head grp passes its
+    // count through.
+    let mut objs: Vec<DenullObj> = Vec::with_capacity(doc.objs.len());
+    let mut out: Vec<DObjId> = Vec::with_capacity(doc.objs.len());
+    let mut count: Vec<Count> = Vec::with_capacity(doc.objs.len());
+    for (i, node) in doc.objs.into_iter().enumerate() {
+        let (c, id) = match node {
+            DenullObj::Term(_) | DenullObj::Fix(_) => {
+                (Count::Zero, leaf_obj(&mut objs, &doc.fixes, node))
+            }
+            DenullObj::Seq(c1) => (
+                count[c1 as usize],
+                push(&mut objs, DenullObj::Seq(out[c1 as usize])),
+            ),
+            DenullObj::Grp(c1) => {
+                let (cc, cid) = (count[c1 as usize], out[c1 as usize]);
+                if head[i] {
+                    // At the head of the enclosing group: absorb the wrapper.
+                    (cc, cid)
+                } else {
+                    match cc {
+                        Count::Zero => (Count::Zero, cid),
+                        Count::One | Count::Many => {
+                            (Count::Zero, push(&mut objs, DenullObj::Grp(cid)))
+                        }
+                    }
+                }
+            }
+            DenullObj::Comp(l, r, pad) => (
+                add(Count::One, add(count[l as usize], count[r as usize])),
+                push(
+                    &mut objs,
+                    DenullObj::Comp(out[l as usize], out[r as usize], pad),
+                ),
+            ),
+        };
+        count.push(c);
+        out.push(id);
+    }
+    DenullDoc {
+        rows: doc.rows.into_iter().map(|r| map_row(r, &out)).collect(),
+        objs,
+        fixes: doc.fixes,
     }
 }
 
 // Fold 3: reassociation
 // ---------------------
-// Right-associates composition trees (e.g. `Comp(Comp(a, b, p1), c, p2)`
-// becomes `Comp(a, Comp(b, c, p2), p1)`), treating Term/Fix/Grp/Seq as atoms
-// and reassociating inside each Grp/Seq independently. The original expressed
-// this with two nested continuations (a `partial` left-wrapper and a `cont`);
-// here the object walk is a descend/ascend trampoline: `partial` is a small
-// enum applied at each leaf, and `cont` is a heap-allocated frame stack.
 
-/// A pending left-wrapper applied to a reassociated object at a leaf.
-#[derive(Copy, Clone)]
-enum Partial<'b> {
-    /// Identity: pass the object through unchanged.
-    Id,
-    /// Wrap the object as the left operand of a composition with `right`.
-    Comp { right: &'b DenullObj<'b>, pad: bool },
-}
+/// Right-associate composition trees (e.g. `Comp(Comp(a, b, p1), c, p2)`
+/// becomes `Comp(a, Comp(b, c, p2), p1)`), treating Term/Fix/Grp/Seq as atoms
+/// and reassociating inside each Grp/Seq boundary independently.
+///
+/// Each comp subtree is threaded as a chain of atoms with the pads between
+/// them: an atom is its own one-element chain, and a comp links its left
+/// chain's tail to its right chain's head in O(1). At each boundary (a grp or
+/// seq child, or a row root) the chain is materialized as a right-nested
+/// composition spine.
+fn reassoc(doc: DenullDoc) -> DenullDoc {
+    let n = doc.objs.len();
+    let mut objs: Vec<DenullObj> = Vec::with_capacity(n);
+    // Chain state per input node: `head`/`tail` are input ids of the chain's
+    // endpoints, `atom_out` is an atom's output id, and `next[tail] = (pad,
+    // head-of-next)` links adjacent atoms.
+    let mut atom_out: Vec<DObjId> = vec![0; n];
+    let mut head: Vec<DObjId> = vec![0; n];
+    let mut tail: Vec<DObjId> = vec![0; n];
+    let mut next: Vec<Option<(bool, DObjId)>> = vec![None; n];
 
-/// A pending continuation frame (the defunctionalized `cont`).
-enum Frame<'b, 'a> {
-    /// Wrap the ascending value in a Grp, then apply the saved partial.
-    Grp(Partial<'b>),
-    /// Wrap the ascending value in a Seq, then apply the saved partial.
-    Seq(Partial<'b>),
-    /// The left operand of a composition, still to be reassociated with the
-    /// ascending value (the reassociated right operand) as its `right`.
-    Comp { left: &'a DenullObj<'a>, pad: bool },
-}
-
-/// Reassociates a single object, right-associating its compositions.
-fn reassoc_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a DenullObj<'a>) -> &'b DenullObj<'b> {
-    let mut stack: Vec<Frame<'b, 'a>> = Vec::new();
-    let mut cur = obj;
-    let mut partial = Partial::Id;
-    'machine: loop {
-        // Descend, visiting a composition's right operand first, until a leaf
-        // produces an ascending value.
-        let mut value: &'b DenullObj<'b> = loop {
-            match cur {
-                DenullObj::Term(term) => {
-                    break apply_partial(mem, partial, mem.alloc(DenullObj::Term(term)));
-                }
-                DenullObj::Fix(fix) => {
-                    break apply_partial(mem, partial, mem.alloc(DenullObj::Fix(fix)));
-                }
-                DenullObj::Grp(obj1) => {
-                    // Grp is a boundary: reassociate its contents afresh.
-                    stack.push(Frame::Grp(partial));
-                    partial = Partial::Id;
-                    cur = obj1;
-                }
-                DenullObj::Seq(obj1) => {
-                    stack.push(Frame::Seq(partial));
-                    partial = Partial::Id;
-                    cur = obj1;
-                }
-                DenullObj::Comp(left, right, pad) => {
-                    stack.push(Frame::Comp { left, pad: *pad });
-                    cur = right;
-                }
-            }
-        };
-        // Ascend, applying frames until we must descend a Comp's left operand.
+    fn materialize<'a>(
+        objs: &mut Vec<DenullObj<'a>>,
+        atom_out: &[DObjId],
+        next: &[Option<(bool, DObjId)>],
+        start: DObjId,
+    ) -> DObjId {
+        // Collect the chain's atoms (output ids) and the pads between them.
+        let mut atoms: Vec<DObjId> = Vec::new();
+        let mut pads: Vec<bool> = Vec::new();
+        let mut cur = start;
         loop {
-            match stack.pop() {
-                None => return value,
-                Some(Frame::Grp(p)) => {
-                    value = apply_partial(mem, p, mem.alloc(DenullObj::Grp(value)));
+            atoms.push(atom_out[cur as usize]);
+            match next[cur as usize] {
+                Some((pad, nxt)) => {
+                    pads.push(pad);
+                    cur = nxt;
                 }
-                Some(Frame::Seq(p)) => {
-                    value = apply_partial(mem, p, mem.alloc(DenullObj::Seq(value)));
-                }
-                Some(Frame::Comp { left, pad }) => {
-                    cur = left;
-                    partial = Partial::Comp { right: value, pad };
-                    continue 'machine;
-                }
+                None => break,
+            }
+        }
+        // Rebuild right-nested: Comp(a0, Comp(a1, ..., p1), p0).
+        let mut result = *atoms.last().expect("a chain has at least one atom");
+        for k in (0..pads.len()).rev() {
+            result = push(objs, DenullObj::Comp(atoms[k], result, pads[k]));
+        }
+        result
+    }
+
+    for (i, node) in doc.objs.into_iter().enumerate() {
+        match node {
+            DenullObj::Term(_) | DenullObj::Fix(_) => {
+                atom_out[i] = push(&mut objs, node);
+                head[i] = i as DObjId;
+                tail[i] = i as DObjId;
+            }
+            DenullObj::Grp(c) => {
+                let spine = materialize(&mut objs, &atom_out, &next, head[c as usize]);
+                atom_out[i] = push(&mut objs, DenullObj::Grp(spine));
+                head[i] = i as DObjId;
+                tail[i] = i as DObjId;
+            }
+            DenullObj::Seq(c) => {
+                let spine = materialize(&mut objs, &atom_out, &next, head[c as usize]);
+                atom_out[i] = push(&mut objs, DenullObj::Seq(spine));
+                head[i] = i as DObjId;
+                tail[i] = i as DObjId;
+            }
+            DenullObj::Comp(l, r, pad) => {
+                next[tail[l as usize] as usize] = Some((pad, head[r as usize]));
+                head[i] = head[l as usize];
+                tail[i] = tail[r as usize];
             }
         }
     }
-}
 
-/// Applies a pending left-wrapper to a reassociated object.
-fn apply_partial<'b>(
-    mem: &'b Bump,
-    partial: Partial<'b>,
-    obj: &'b DenullObj<'b>,
-) -> &'b DenullObj<'b> {
-    match partial {
-        Partial::Id => obj,
-        Partial::Comp { right, pad } => mem.alloc(DenullObj::Comp(obj, right, pad)),
+    let rows = doc
+        .rows
+        .into_iter()
+        .map(|row| match row {
+            DenullRow::Empty => DenullRow::Empty,
+            DenullRow::Break(id) => {
+                DenullRow::Break(materialize(&mut objs, &atom_out, &next, head[id as usize]))
+            }
+            DenullRow::Line(id) => {
+                DenullRow::Line(materialize(&mut objs, &atom_out, &next, head[id as usize]))
+            }
+        })
+        .collect();
+
+    DenullDoc {
+        rows,
+        objs,
+        fixes: doc.fixes,
     }
 }
 
@@ -380,104 +317,126 @@ mod tests {
     use super::*;
     use crate::compiler::types::DenullTerm;
 
-    /// Deeper than a native-stack recursion could survive (~hundreds of levels
-    /// on a 2 MB stack). Reaching it without aborting proves iteration.
+    /// Far past where a native-stack recursion could survive; with flat arenas
+    /// the folds are plain loops, so this now guards sizing behavior only.
     const DEEP: usize = 50_000;
 
-    fn term<'b>(mem: &'b Bump, s: &'b str) -> &'b DenullObj<'b> {
-        mem.alloc(DenullObj::Term(mem.alloc(DenullTerm::Text(s))))
+    fn term(text: &'static str) -> DenullObj<'static> {
+        DenullObj::Term(DenullTerm {
+            props: Vec::new(),
+            text,
+        })
+    }
+
+    fn line_doc(objs: Vec<DenullObj>, root: DObjId) -> DenullDoc {
+        DenullDoc {
+            rows: vec![DenullRow::Line(root)],
+            objs,
+            fixes: Vec::new(),
+        }
     }
 
     #[test]
     fn normalize_right_associates_deep_left_nested_comp() {
-        let mem = Bump::new();
         // Left-nested comp chain, no grp/seq: normalization rebuilds it
         // right-nested (a right spine of DEEP compositions).
-        let mut obj: &DenullObj = term(&mem, "a");
+        let mut objs: Vec<DenullObj> = Vec::new();
+        let mut cur = push(&mut objs, term("a"));
         for _ in 0..DEEP {
-            obj = mem.alloc(DenullObj::Comp(obj, term(&mem, "b"), false));
+            let right = push(&mut objs, term("b"));
+            cur = push(&mut objs, DenullObj::Comp(cur, right, false));
         }
-        let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
-        let out = normalize(&mem, doc);
-        let DenullDoc::Line(result) = out else {
-            panic!("expected a line")
+        let out = normalize(line_doc(objs, cur));
+        let [DenullRow::Line(root)] = out.rows[..] else {
+            panic!("expected a line");
         };
         let mut count = 0usize;
-        let mut cur: &DenullObj = result;
-        while let DenullObj::Comp(_left, right, _pad) = cur {
+        let mut walk = root;
+        while let DenullObj::Comp(_left, right, _pad) = out.objs[walk as usize] {
             count += 1;
-            cur = right;
+            walk = right;
         }
-        assert!(matches!(cur, DenullObj::Term(_)));
+        assert!(matches!(out.objs[walk as usize], DenullObj::Term(_)));
         assert_eq!(count, DEEP);
     }
 
     #[test]
-    fn normalize_handles_deep_seq_nesting() {
-        let mem = Bump::new();
-        // Deep seq nesting exercises the seq trampoline's unary frames; a seq
-        // around a single term collapses away.
-        let mut obj: &DenullObj = term(&mem, "x");
+    fn normalize_collapses_deep_seq_nesting() {
+        // Deep seq nesting over a single term collapses away entirely.
+        let mut objs: Vec<DenullObj> = Vec::new();
+        let mut cur = push(&mut objs, term("x"));
         for _ in 0..DEEP {
-            obj = mem.alloc(DenullObj::Seq(obj));
+            cur = push(&mut objs, DenullObj::Seq(cur));
         }
-        let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
-        let out = normalize(&mem, doc);
-        assert!(matches!(out, DenullDoc::Line(_)));
+        let out = normalize(line_doc(objs, cur));
+        let [DenullRow::Line(root)] = out.rows[..] else {
+            panic!("expected a line");
+        };
+        assert!(matches!(out.objs[root as usize], DenullObj::Term(_)));
     }
 
     #[test]
-    fn normalize_handles_deep_grp_nesting() {
-        let mem = Bump::new();
-        let mut obj: &DenullObj = term(&mem, "x");
+    fn normalize_collapses_deep_grp_nesting() {
+        let mut objs: Vec<DenullObj> = Vec::new();
+        let mut cur = push(&mut objs, term("x"));
         for _ in 0..DEEP {
-            obj = mem.alloc(DenullObj::Grp(obj));
+            cur = push(&mut objs, DenullObj::Grp(cur));
         }
-        let doc: &DenullDoc = mem.alloc(DenullDoc::Line(obj));
-        let out = normalize(&mem, doc);
-        assert!(matches!(out, DenullDoc::Line(_)));
+        let out = normalize(line_doc(objs, cur));
+        let [DenullRow::Line(root)] = out.rows[..] else {
+            panic!("expected a line");
+        };
+        assert!(matches!(out.objs[root as usize], DenullObj::Term(_)));
     }
 
     #[test]
     fn normalize_handles_long_doc_spine() {
-        let mem = Bump::new();
-        let mut doc: &DenullDoc = mem.alloc(DenullDoc::Eod);
+        let mut objs: Vec<DenullObj> = Vec::new();
+        let mut rows: Vec<DenullRow> = Vec::new();
         for _ in 0..DEEP {
-            doc = mem.alloc(DenullDoc::Break(term(&mem, "x"), doc));
+            rows.push(DenullRow::Break(push(&mut objs, term("x"))));
         }
-        let out = normalize(&mem, doc);
-        let mut count = 0usize;
-        let mut cur = out;
-        while let DenullDoc::Break(_, rest) = cur {
-            count += 1;
-            cur = rest;
-        }
-        assert!(matches!(cur, DenullDoc::Eod));
-        assert_eq!(count, DEEP);
+        let doc = DenullDoc {
+            rows,
+            objs,
+            fixes: Vec::new(),
+        };
+        let out = normalize(doc);
+        assert_eq!(out.rows.len(), DEEP);
     }
 
     #[test]
     fn seq_of_one_comp_is_dropped_but_two_kept() {
         // A seq grouping a single composition collapses; a seq grouping two or
         // more is kept.
-        let mem = Bump::new();
-        let one = mem.alloc(DenullObj::Seq(mem.alloc(DenullObj::Comp(
-            term(&mem, "a"),
-            term(&mem, "b"),
-            false,
-        ))));
-        let out = visit_obj_seqs(&mem, one, false).1;
+        let mut objs: Vec<DenullObj> = Vec::new();
+        let a = push(&mut objs, term("a"));
+        let b = push(&mut objs, term("b"));
+        let comp = push(&mut objs, DenullObj::Comp(a, b, false));
+        let one = push(&mut objs, DenullObj::Seq(comp));
+        let out = elim_seqs(line_doc(objs, one));
+        let [DenullRow::Line(root)] = out.rows[..] else {
+            panic!("expected a line");
+        };
         assert!(
-            matches!(out, DenullObj::Comp(..)),
+            matches!(out.objs[root as usize], DenullObj::Comp(..)),
             "seq of one comp dropped"
         );
 
-        let two = mem.alloc(DenullObj::Seq(mem.alloc(DenullObj::Comp(
-            mem.alloc(DenullObj::Comp(term(&mem, "a"), term(&mem, "b"), false)),
-            term(&mem, "c"),
-            false,
-        ))));
-        let out = visit_obj_seqs(&mem, two, false).1;
-        assert!(matches!(out, DenullObj::Seq(_)), "seq of two comps kept");
+        let mut objs: Vec<DenullObj> = Vec::new();
+        let a = push(&mut objs, term("a"));
+        let b = push(&mut objs, term("b"));
+        let ab = push(&mut objs, DenullObj::Comp(a, b, false));
+        let c = push(&mut objs, term("c"));
+        let abc = push(&mut objs, DenullObj::Comp(ab, c, false));
+        let two = push(&mut objs, DenullObj::Seq(abc));
+        let out = elim_seqs(line_doc(objs, two));
+        let [DenullRow::Line(root)] = out.rows[..] else {
+            panic!("expected a line");
+        };
+        assert!(
+            matches!(out.objs[root as usize], DenullObj::Seq(_)),
+            "seq of two comps kept"
+        );
     }
 }
