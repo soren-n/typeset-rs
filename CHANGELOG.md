@@ -6,10 +6,10 @@ entry for each release before tagging it (see the release steps in
 [Semantic Versioning](https://semver.org/). Entries below `3.2.1` were generated
 by the previous automated release tooling.
 
-## [Unreleased]
+## [4.0.0](https://github.com/soren-n/typeset-rs/compare/v3.2.1...v4.0.0) (2026-07-22)
 
-The next release is a **major version bump**: the entries below include breaking
-API changes. Migrate per the notes in each item.
+A **major version bump**: the entries below include breaking API changes.
+Migrate per the notes in each item.
 
 ### Breaking Changes
 
