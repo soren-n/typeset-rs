@@ -1,4 +1,4 @@
-//! Pass 1: LayoutArena → EdslDoc (collapse broken sequences)
+//! resolve_breaks: LayoutArena → EdslDoc (collapse broken sequences)
 //!
 //! Resolves hard line breaks: a composition inside a broken sequence becomes a
 //! `Line`, and a seq wrapper whose subtree already breaks is dropped (its
@@ -12,7 +12,7 @@
 
 use crate::compiler::types::{EdslDoc, EdslId, EdslNode, LayoutArena, LayoutNode};
 
-pub fn broken(arena: &LayoutArena) -> EdslDoc<'_> {
+pub fn resolve_breaks(arena: &LayoutArena) -> EdslDoc<'_> {
     let n = arena.nodes.len();
 
     // 1. mark: whether each subtree contains a hard line break. Wrappers pass
@@ -120,7 +120,7 @@ mod tests {
             Break::Breakable,
         ));
         let arena = flatten(layout);
-        let edsl = broken(&arena);
+        let edsl = resolve_breaks(&arena);
         let EdslNode::Line(l, _) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the comp to become a line");
         };
@@ -131,7 +131,7 @@ mod tests {
     fn unbroken_seq_keeps_wrapper_and_comps() {
         let layout = seq(comp(text("a"), text("b"), Pad::Padded, Break::Breakable));
         let arena = flatten(layout);
-        let edsl = broken(&arena);
+        let edsl = resolve_breaks(&arena);
         let EdslNode::Seq(c) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the seq wrapper to survive");
         };
@@ -149,7 +149,7 @@ mod tests {
             Break::Breakable,
         ));
         let arena = flatten(layout);
-        let edsl = broken(&arena);
+        let edsl = resolve_breaks(&arena);
         // Root is the outer comp turned line; its left is the fixed comp.
         let EdslNode::Line(l, _) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the outer comp to become a line");

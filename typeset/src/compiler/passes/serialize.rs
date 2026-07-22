@@ -1,4 +1,4 @@
-//! Pass 2: Edsl → Serial (serialize in order to normalize)
+//! serialize: EdslDoc → Serial (serialize in order to normalize)
 //!
 //! Flattens the Edsl tree into a flat Serial slice. The original threaded
 //! four accumulator closures (terms, comps, glue, result) plus counters

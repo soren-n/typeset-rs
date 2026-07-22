@@ -1,25 +1,34 @@
 //! Compilation pipeline: [`Layout`] → [`Doc`].
 //!
-//! The pipeline runs eight sequential passes, each lowering the tree through one
-//! intermediate representation:
+//! This is the authoritative description of the pass order; the pass modules
+//! and crate docs link here rather than repeating it.
 //!
-//! ```text
-//! Layout → Edsl → Serial → LinearDoc → FixedDoc → RebuildDoc →
-//! DenullDoc → (normalize) DenullDoc → Doc
-//! ```
+//! | Pass             | Lowers                    | Does |
+//! |------------------|---------------------------|------|
+//! | `flatten`        | `Layout` → `LayoutArena`  | flatten the input `Box` tree into a postorder arena |
+//! | `resolve_breaks` | `LayoutArena` → `EdslDoc` | collapse broken sequences into hard lines |
+//! | `serialize`      | `EdslDoc` → `Serial`      | flatten to leaf entries, computing scope open/close deltas |
+//! | `split_lines`    | `Serial` → `FixedDoc`     | split at hard lines, coalesce fixed-composition runs |
+//! | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve, and read back the grp/seq scope graph |
+//! | `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms, strip term wrappers to prop lists |
+//! | `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq, right-associate compositions |
+//! | `rescope`        | `DenullDoc` → `Doc`       | factor shared nest/pack prefixes, build the heap `Doc` |
 //!
-//! Each intermediate pass allocates its output in a fresh bump arena; the final
-//! pass ([`rescope`](crate::compiler::passes::rescope)) builds the owned heap
-//! [`Doc`] directly. The passes and renderer are iterative, and the output
-//! [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop` are non-recursive
-//! by construction, so the whole pipeline runs in constant native stack and deep
-//! layouts never overflow it. Depth shows up as O(depth) heap instead.
+//! Every representation after the input tree is a flat structure — postorder
+//! index arenas or plain vectors — so every pass is a loop (or an explicit
+//! work-stack walk) and the whole pipeline runs in constant native stack: no
+//! layout is too deep to compile, and depth shows up as O(depth) heap instead.
+//! The one bump arena backs `serialize`'s persistent scope accumulators; text
+//! lives in the `LayoutArena` and is borrowed all the way down. The output
+//! [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop`/`Debug` are
+//! derived and non-recursive by construction.
 //!
-//! [`compile`] is the sole entry point and is infallible: the pipeline is
-//! iterative, so no layout is too deep to compile and there is no depth cap.
+//! [`compile`] is the sole entry point and is infallible.
 
 use crate::compiler::{
-    passes::{broken, denull, fixed, flatten, normalize, rescope, serialize, structurize},
+    passes::{
+        denull, flatten, normalize, rescope, resolve_breaks, resolve_scopes, serialize, split_lines,
+    },
     types::{Doc, Layout},
 };
 
@@ -41,19 +50,16 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     run_passes(layout)
 }
 
-/// Runs the eight-pass pipeline, lowering [`Layout`] to a heap [`Doc`].
-///
-/// Infallible and iterative. Each intermediate pass allocates its output in a
-/// fresh bump arena, so every intermediate representation is freed once this
-/// returns; the final pass builds the heap [`Doc`] directly.
+/// Runs the pass pipeline, lowering [`Layout`] to a heap [`Doc`]. See the
+/// module docs for the pass table.
 fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     use bumpalo::Bump;
 
     // Flattening is the one step that walks the owning `Box` tree; every later
-    // pass folds flat structures with plain loops. Text lives in the layout
-    // arena and is borrowed all the way down the pipeline.
+    // pass folds flat structures. Text lives in the layout arena and is
+    // borrowed all the way down the pipeline.
     let arena = flatten(layout);
-    let edsl = broken(&arena);
+    let edsl = resolve_breaks(&arena);
 
     // serialize's persistent scope accumulators share structure, so it keeps
     // the pipeline's one bump arena; its terms are borrowed through every
@@ -61,9 +67,9 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     let mem = Bump::new();
     let serial = serialize(&mem, &edsl);
 
-    let fixed_doc = fixed(&serial);
-    let rebuild_doc = structurize(&fixed_doc);
-    let denull_doc = denull(&rebuild_doc);
+    let line_doc = split_lines(&serial);
+    let scoped_doc = resolve_scopes(&line_doc);
+    let denull_doc = denull(&scoped_doc);
     let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)
 }

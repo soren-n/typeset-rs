@@ -43,18 +43,9 @@
 //!
 //! ### Compilation Pipeline
 //!
-//! The library uses a sophisticated multi-pass compiler that transforms layouts
-//! through several intermediate representations, each lowered in a fresh bump
-//! arena (the final pass builds the owned heap `Doc` directly):
-//!
-//! ```text
-//! Layout → Edsl → Serial → LinearDoc → FixedDoc → RebuildDoc →
-//! DenullDoc → Doc → String
-//! ```
-//!
-//! The `DenullDoc → DenullDoc` `normalize` pass (grp/seq identity removal and
-//! composition reassociation) is elided above for brevity. This pipeline ensures
-//! optimal layout decisions and efficient memory usage.
+//! [`compile()`] lowers a layout through a multi-pass compiler whose
+//! intermediate representations are flat postorder arenas; the pass-by-pass
+//! description lives in the (internal) `compiler::pipeline` module docs.
 //!
 //! ## Architecture Overview
 //!
@@ -77,10 +68,13 @@
 //!
 //! Typeset is designed for high performance:
 //!
-//! - Zero-copy transformations using bump allocation
-//! - Optimal line breaking algorithms
-//! - Fully iterative pipeline: the passes and renderer run in constant native
-//!   stack, and the output [`Doc`] is a flat `Vec`-backed arena, so cloning or
+//! - Flat, loop-based compilation: every intermediate representation is a
+//!   flat arena folded with plain loops, and text is borrowed (never copied)
+//!   through the whole pipeline
+//! - Width-bounded line-breaking decisions: the renderer stops measuring a
+//!   subtree as soon as it passes the target width
+//! - Constant native stack throughout: the passes and renderer never recurse,
+//!   and the output [`Doc`] is a flat `Vec`-backed arena, so cloning or
 //!   freeing it is non-recursive too — deep layouts never overflow the stack
 //!
 //! ## Examples

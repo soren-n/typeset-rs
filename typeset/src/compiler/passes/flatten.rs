@@ -1,4 +1,4 @@
-//! Pass 0: Layout → LayoutArena (flatten the input tree)
+//! flatten: Layout → LayoutArena (flatten the input tree)
 //!
 //! Lowers the public `Box`-recursive [`Layout`] tree into a flat postorder
 //! arena (children precede parents). This is the pipeline's entry step and the

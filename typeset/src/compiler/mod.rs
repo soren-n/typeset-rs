@@ -1,13 +1,8 @@
 //! Typeset Compiler Module
 //!
-//! This module contains the complete compiler implementation for the typeset
-//! pretty printing library. The compiler transforms Layout ASTs through
-//! multiple intermediate representations before producing the final Doc output.
-//!
-//! ## Architecture
-//!
-//! The compiler uses a multi-pass architecture; see [`pipeline`] for the
-//! authoritative pass-by-pass description of the intermediate representations.
+//! The compiler transforms Layout ASTs through multiple flat intermediate
+//! representations before producing the final Doc output; see [`pipeline`]
+//! for the authoritative pass-by-pass description.
 //!
 //! ## Module Organization
 //!

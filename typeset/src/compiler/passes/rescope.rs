@@ -1,4 +1,4 @@
-//! Pass 8 (final): DenullDoc → Doc (rescope nest and pack, into the heap)
+//! rescope (final): DenullDoc → Doc (rescope nest and pack, into the heap)
 //!
 //! Each term arrives with its nest/pack wrappers already stripped into a prop
 //! list (index 0 = outermost). This pass factors the common prefix shared by a

@@ -1,4 +1,4 @@
-//! Pass 7: DenullDoc → DenullDoc (normalize the composition algebra)
+//! normalize: DenullDoc → DenullDoc (normalize the composition algebra)
 //!
 //! Runs the three grp/seq normalization folds back-to-back, in this order (the
 //! order matters — the rules are not confluent):

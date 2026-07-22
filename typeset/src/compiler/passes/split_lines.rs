@@ -1,4 +1,4 @@
-//! Pass 3: Serial → FixedDoc (lift newlines to spine, coalesce fixed comps)
+//! split_lines: Serial → FixedDoc (lift newlines to spine, coalesce fixed comps)
 //!
 //! One sweep over the serial entries: a hard line break flushes the current
 //! line, and maximal runs of terms joined by fixed compositions coalesce into
@@ -10,7 +10,7 @@ use crate::compiler::types::{
     FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Serial, SerialComp, SerialEntry, Term,
 };
 
-pub fn fixed<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
+pub fn split_lines<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
     let mut lines: Vec<FixedLine<'a>> = Vec::new();
     // The line currently being built.
     let mut items: Vec<FixedItem<'a>> = Vec::new();
@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_coalesces_deep_fixed_run() {
+    fn split_lines_coalesces_deep_fixed_run() {
         let mem = Bump::new();
         // All comps fixed: the whole line collapses to one Fix item.
         let mut entries: Vec<SerialEntry> = Vec::new();
@@ -114,7 +114,7 @@ mod tests {
         }
         entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
         let serial: Serial = entries;
-        let out = fixed(&serial);
+        let out = split_lines(&serial);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
@@ -126,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_keeps_nonfixed_comps_as_separators() {
+    fn split_lines_keeps_nonfixed_comps_as_separators() {
         let mem = Bump::new();
         // No fixed comps: DEEP + 1 plain term items with DEEP separators.
         let mut entries: Vec<SerialEntry> = Vec::new();
@@ -135,7 +135,7 @@ mod tests {
         }
         entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
         let serial: Serial = entries;
-        let out = fixed(&serial);
+        let out = split_lines(&serial);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_splits_lines_at_hard_breaks() {
+    fn split_lines_splits_lines_at_hard_breaks() {
         let mem = Bump::new();
         let mut entries: Vec<SerialEntry> = Vec::new();
         for _ in 0..DEEP {
@@ -156,12 +156,12 @@ mod tests {
         }
         entries.push(SerialEntry::Last(mem.alloc(Term::Text("end"))));
         let serial: Serial = entries;
-        let out = fixed(&serial);
+        let out = split_lines(&serial);
         assert_eq!(out.lines.len(), DEEP + 1);
     }
 
     #[test]
-    fn fixed_closes_run_at_nonfixed_comp() {
+    fn split_lines_closes_run_at_nonfixed_comp() {
         let mem = Bump::new();
         // a !& b & c: the fixed run (a, b) closes at the non-fixed comp, which
         // becomes the separator before the plain term c.
@@ -170,7 +170,7 @@ mod tests {
             comp_entry(&mem, "b", false),
             SerialEntry::Last(mem.alloc(Term::Text("c"))),
         ];
-        let out = fixed(&serial);
+        let out = split_lines(&serial);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };

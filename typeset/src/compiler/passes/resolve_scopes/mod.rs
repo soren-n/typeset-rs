@@ -1,4 +1,4 @@
-//! Pass 4: FixedDoc → RebuildDoc (rebuild with graph structure)
+//! resolve_scopes: FixedDoc → RebuildDoc (rebuild with graph structure)
 //!
 //! The pass runs in three phases, one per submodule:
 //! 1. [`graphify`] — FixedDoc → GraphDoc: build the grp/seq scope graph.
@@ -17,7 +17,7 @@ mod solve;
 
 use crate::compiler::types::{FixedDoc, RebuildDoc};
 
-pub fn structurize<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
+pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
     let mut graph = graphify::graphify(doc);
     solve::solve(&mut graph);
     rebuild::rebuild(&graph)
@@ -45,7 +45,7 @@ mod tests {
     }
 
     #[test]
-    fn structurize_handles_deep_comp_line() {
+    fn resolve_scopes_handles_deep_comp_line() {
         let mem = Bump::new();
         // A single line of many plain compositions (no grp/seq scopes). This
         // path is linear (no scope stacks to carry), so a large depth well past
@@ -62,7 +62,7 @@ mod tests {
         let doc = FixedDoc {
             lines: vec![FixedLine { items, seps }],
         };
-        let out = structurize(&doc);
+        let out = resolve_scopes(&doc);
         // One line, rebuilt as a right-nested composition spine.
         let [root] = out.lines[..] else {
             panic!("expected one line")
@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    fn structurize_handles_deep_nest_term() {
+    fn resolve_scopes_handles_deep_nest_term() {
         let mem = Bump::new();
         // A deep Nest term passes through graphify/rebuild by borrow.
         let mut term: &Term = mem.alloc(Term::Text("x"));
@@ -90,7 +90,7 @@ mod tests {
                 seps: Vec::new(),
             }],
         };
-        let out = structurize(&doc);
+        let out = resolve_scopes(&doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -107,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn structurize_handles_deep_fix_group() {
+    fn resolve_scopes_handles_deep_fix_group() {
         let mem = Bump::new();
         // A deep fixed run exercises the fix walks in graphify/rebuild.
         let mut terms: Vec<&Term> = Vec::new();
@@ -126,7 +126,7 @@ mod tests {
                 seps: Vec::new(),
             }],
         };
-        let out = structurize(&doc);
+        let out = resolve_scopes(&doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -143,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn structurize_handles_long_doc_spine() {
+    fn resolve_scopes_handles_long_doc_spine() {
         let mem = Bump::new();
         // Many document rows exercise the doc-spine walks in all three phases.
         let lines: Vec<FixedLine> = (0..DEEP)
@@ -153,7 +153,7 @@ mod tests {
             })
             .collect();
         let doc = FixedDoc { lines };
-        let out = structurize(&doc);
+        let out = resolve_scopes(&doc);
         assert_eq!(out.lines.len(), DEEP);
     }
 }

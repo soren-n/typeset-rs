@@ -1,4 +1,4 @@
-//! Pass 6: RebuildDoc → DenullDoc (remove null identities)
+//! denull: RebuildDoc → DenullDoc (remove null identities)
 //!
 //! Drops `Null`/empty-text terms, collapsing objects that reduce to nothing,
 //! and strips each surviving term's nest/pack chain into a flat prop list.
