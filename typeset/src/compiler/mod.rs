@@ -14,19 +14,16 @@
 //! - `types/` - Type definitions for Layout, intermediate representations, and Doc
 //! - `passes/` - Individual compiler passes
 //! - `render/` - Document rendering system
-//! - `error.rs` - Error types and handling
 //! - `constructors/` - Layout construction functions
 
 pub mod constructors;
-pub mod error;
 pub mod passes;
 pub mod pipeline;
 pub mod render;
 pub mod types;
 
 // Re-export core types
-pub use error::DepthLimitExceeded;
 pub use types::{Break, Doc, Layout, Pad};
 
 // Re-export the main compilation and rendering functions.
-pub use pipeline::{compile, compile_within_depth, render, render_ref};
+pub use pipeline::{compile, render, render_ref};

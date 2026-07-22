@@ -3,10 +3,7 @@
 //! These tests verify that the modular compiler architecture works correctly
 //! and produces the same results as the original monolithic implementation.
 
-use typeset::{
-    Break, DepthLimitExceeded, Pad, comp, compile, compile_within_depth, grp, line, nest, pack,
-    render, seq, text,
-};
+use typeset::{Break, Pad, comp, compile, grp, line, nest, pack, render, seq, text};
 
 /// Test basic compilation functionality
 #[test]
@@ -18,19 +15,8 @@ fn test_basic_compilation() {
         Break::Breakable,
     );
 
-    // A bounded compile of a shallow layout succeeds...
-    let bounded_result = compile_within_depth(layout.clone(), 10000);
-    assert!(bounded_result.is_ok());
-
-    let bounded_output = render(bounded_result.unwrap(), 2, 80);
-
-    // ...and produces identical output to the infallible path.
-    let original_output = render(compile(layout), 2, 80);
-    assert_eq!(
-        bounded_output, original_output,
-        "Bounded and infallible compile should produce identical output"
-    );
-    assert_eq!(bounded_output, "HelloWorld");
+    let output = render(compile(layout), 2, 80);
+    assert_eq!(output, "HelloWorld");
 }
 
 /// Test padded composition
@@ -41,19 +27,6 @@ fn test_padded_composition() {
     let doc = compile(layout);
     let output = render(doc, 2, 80);
     assert_eq!(output, "Hello World");
-}
-
-/// A depth bound of 0 rejects even the shallowest layout.
-#[test]
-fn test_depth_bound_rejection() {
-    let result = compile_within_depth(text("test"), 0);
-    assert_eq!(
-        result.unwrap_err(),
-        DepthLimitExceeded {
-            depth: 1,
-            max_depth: 0
-        }
-    );
 }
 
 /// Test complex nested layout
@@ -81,16 +54,11 @@ fn test_complex_layout() {
         Break::Breakable,
     );
 
-    let result = compile_within_depth(complex_layout, 10000);
-    assert!(result.is_ok());
-
-    if let Ok(doc) = result {
-        let output = render(doc, 4, 40);
-        assert!(!output.is_empty());
-        assert!(output.contains("fn"));
-        assert!(output.contains("main"));
-        assert!(output.contains("println!"));
-    }
+    let output = render(compile(complex_layout), 4, 40);
+    assert!(!output.is_empty());
+    assert!(output.contains("fn"));
+    assert!(output.contains("main"));
+    assert!(output.contains("println!"));
 }
 
 /// Test line breaks and formatting

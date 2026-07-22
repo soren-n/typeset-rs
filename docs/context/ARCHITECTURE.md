@@ -100,10 +100,8 @@ and `Debug` still print the historical tree-shaped forms, walked by an explicit
 index stack so printing a deep document does not recurse either. `Layout` (the
 input AST) is still a `Box`-recursive tree, so it keeps the iterative
 `Drop`/`Clone`/`Debug` trampoline (see `types/traversal.rs`).
-`compile()` is therefore infallible and imposes no depth cap; the `max_depth`
-bound in `compile_within_depth` is an opt-in resource limit (capping the
-O(depth) heap an untrusted layout can allocate) rather than a stack-safety
-guard.
+`compile()` is therefore infallible and imposes no depth cap; layout depth shows
+up only as O(depth) heap, freed once compilation returns.
 
 ## Key Layout Concepts
 

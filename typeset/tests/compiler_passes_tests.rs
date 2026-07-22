@@ -4,8 +4,8 @@
 //! and that the overall pipeline produces correct results.
 
 use typeset::{
-    Break, Pad, braces, comp, compile, compile_within_depth, fix, grp, join_with_commas,
-    join_with_spaces, nest, pack, parens, render, seq, text,
+    Break, Pad, braces, comp, compile, fix, grp, join_with_commas, join_with_spaces, nest, pack,
+    parens, render, seq, text,
 };
 
 /// Test the complete compiler pipeline with various layout constructs
@@ -65,15 +65,10 @@ fn test_deep_nesting() {
         ));
     }
 
-    let result = compile_within_depth(layout, 10000);
-    assert!(result.is_ok());
-
-    if let Ok(doc) = result {
-        let output = render(doc, 2, 100);
-        assert!(output.contains("base"));
-        assert!(output.contains("level_0"));
-        assert!(output.contains("level_19"));
-    }
+    let output = render(compile(layout), 2, 100);
+    assert!(output.contains("base"));
+    assert!(output.contains("level_0"));
+    assert!(output.contains("level_19"));
 }
 
 /// Test wide layouts with many compositions
@@ -91,15 +86,10 @@ fn test_wide_layouts() {
         );
     }
 
-    let result = compile_within_depth(layout, 200);
-    assert!(result.is_ok());
-
-    if let Ok(doc) = result {
-        let output = render(doc, 2, 500); // Wide render
-        assert!(output.contains("first"));
-        assert!(output.contains("item_1"));
-        assert!(output.contains("item_19"));
-    }
+    let output = render(compile(layout), 2, 500); // Wide render
+    assert!(output.contains("first"));
+    assert!(output.contains("item_1"));
+    assert!(output.contains("item_19"));
 }
 
 /// Test that fix construct prevents breaking
@@ -234,16 +224,11 @@ fn test_mixed_constructs() {
         Break::Breakable,
     )));
 
-    let result = compile_within_depth(layout, 10000);
-    assert!(result.is_ok());
-
-    if let Ok(doc) = result {
-        let output = render(doc, 3, 30);
-        assert!(output.contains("FIXED"));
-        assert!(output.contains("item_a"));
-        assert!(output.contains("item_b"));
-        assert!(output.contains("item_c"));
-    }
+    let output = render(compile(layout), 3, 30);
+    assert!(output.contains("FIXED"));
+    assert!(output.contains("item_a"));
+    assert!(output.contains("item_b"));
+    assert!(output.contains("item_c"));
 }
 
 /// Test edge cases with empty and null layouts

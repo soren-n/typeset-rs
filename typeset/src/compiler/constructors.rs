@@ -376,10 +376,8 @@ pub fn braces(layout: Box<Layout>) -> Box<Layout> {
 /// `tab` is the number of spaces per indentation level; `width` is the target
 /// line width for breaking decisions (not a hard limit — fixed content may
 /// exceed it). To format the same layout repeatedly, prefer [`crate::compile`]
-/// once with [`crate::render()`] per call. Uses the infallible
-/// [`crate::compile`] path; the pipeline is iterative, so it does not overflow
-/// the stack on deep input. To bound layout depth, compile with
-/// [`crate::compile_within_depth`] and render the result yourself.
+/// once with [`crate::render()`] per call. The pipeline is iterative, so it does
+/// not overflow the stack on deep input.
 ///
 /// ```rust
 /// use typeset::*;

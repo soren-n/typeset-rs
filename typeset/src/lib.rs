@@ -67,14 +67,11 @@
 //!   [`render()`] to render a document once, or [`render_ref()`] to render the
 //!   same [`Doc`] repeatedly (e.g. at several widths) without cloning it
 //!
-//! ## Compilation modes
+//! ## Compilation
 //!
-//! - **[`compile()`]** - Infallible. The pipeline is iterative, so no layout is
-//!   too deep to compile and there is no depth cap.
-//! - **[`compile_within_depth()`]** - Rejects layouts deeper than a
-//!   caller-supplied bound with [`DepthLimitExceeded`]. The bound is a resource
-//!   limit (it caps the O(depth) heap an untrusted layout can allocate), not a
-//!   stack-safety guard.
+//! [`compile()`] is infallible: the pipeline is iterative, so no layout is too
+//! deep to compile and there is no depth cap. Layout depth shows up as O(depth)
+//! heap, freed once compilation returns.
 //!
 //! ## Performance
 //!
@@ -144,15 +141,12 @@ mod compiler;
 pub use self::compiler::{
     // Composition axes for `comp`
     Break,
-    // Error handling
-    DepthLimitExceeded,
     // Core types
     Doc,
     Layout,
     Pad,
     // Core compilation functions
     compile,
-    compile_within_depth,
 
     // Rendering
     render,

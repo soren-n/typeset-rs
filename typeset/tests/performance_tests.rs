@@ -4,7 +4,7 @@
 //! characteristics and doesn't introduce regressions.
 
 use std::time::{Duration, Instant};
-use typeset::{Break, Pad, comp, compile, compile_within_depth, grp, nest, render, seq, text};
+use typeset::{Break, Pad, comp, compile, grp, nest, render, seq, text};
 
 /// Helper function to create a layout with specified depth
 fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
@@ -44,9 +44,7 @@ fn test_compilation_performance() {
     let layout = create_deep_layout(15);
 
     let start = Instant::now();
-    let result = compile_within_depth(layout, 100);
-    assert!(result.is_ok(), "Deep layout compilation failed");
-    let doc = result.unwrap();
+    let doc = compile(layout);
     let compile_duration = start.elapsed();
 
     // Compilation should complete within reasonable time (adjust as needed)
@@ -74,10 +72,9 @@ fn test_safe_compilation_performance() {
     let layout = create_wide_layout(20);
 
     let start = Instant::now();
-    let result = compile_within_depth(layout, 100);
+    let _doc = compile(layout);
     let duration = start.elapsed();
 
-    assert!(result.is_ok(), "Safe compilation failed");
     assert!(
         duration < Duration::from_secs(2),
         "Safe compilation took too long: {:?}",
@@ -92,14 +89,10 @@ fn test_large_layout_handling() {
     let layout = create_deep_layout(10);
 
     // Should complete without crashing
-    let result = compile_within_depth(layout, 50);
-    assert!(result.is_ok(), "Large layout compilation failed");
-
-    if let Ok(doc) = result {
-        let output = render(doc, 2, 100);
-        assert!(!output.is_empty());
-        assert!(output.contains("base"));
-    }
+    let doc = compile(layout);
+    let output = render(doc, 2, 100);
+    assert!(!output.is_empty());
+    assert!(output.contains("base"));
 }
 
 /// Test that wide layouts are processed efficiently
@@ -108,9 +101,7 @@ fn test_wide_layout_performance() {
     let layout = create_wide_layout(20);
 
     let start = Instant::now();
-    let result = compile_within_depth(layout, 100);
-    assert!(result.is_ok(), "Wide layout compilation failed");
-    let doc = result.unwrap();
+    let doc = compile(layout);
     let compile_duration = start.elapsed();
 
     // Should handle wide layouts efficiently
@@ -147,13 +138,7 @@ fn test_memory_efficiency() {
             Break::Breakable,
         );
 
-        let result = compile_within_depth(layout, 50);
-        assert!(
-            result.is_ok(),
-            "Memory efficiency test failed at iteration {}",
-            i
-        );
-        let doc = result.unwrap();
+        let doc = compile(layout);
         let output = render(doc, 2, 80);
 
         assert!(output.contains(&format!("iteration_{}", i)));
