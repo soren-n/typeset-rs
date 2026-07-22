@@ -20,7 +20,7 @@
 //! the recursive version.
 
 use crate::compiler::types::{
-    Attr, EdslDoc, EdslId, EdslNode, Scope, Serial, SerialComp, SerialEntry, Term,
+    Attr, Break, EdslDoc, EdslId, EdslNode, Scope, Serial, SerialComp, SerialEntry, Term,
 };
 use bumpalo::Bump;
 
@@ -203,9 +203,10 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
                 });
             }
             EdslNode::Comp(left, right, attr) => {
+                // Inside a fix wrapper every composition is fixed.
                 let attr1 = Attr {
                     pad: attr.pad,
-                    fix: fixed || attr.fix,
+                    brk: if fixed { Break::Fixed } else { attr.brk },
                 };
                 let comp_glue = Glue::Comp { comps, attr: attr1 };
                 stack.push(Work {
@@ -336,6 +337,7 @@ fn apply_terms<'b>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::types::Pad;
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
@@ -360,8 +362,8 @@ mod tests {
     #[test]
     fn serialize_handles_deep_comp_chain() {
         let attr = Attr {
-            pad: false,
-            fix: false,
+            pad: Pad::Unpadded,
+            brk: Break::Breakable,
         };
         // Right-nested Comp chain of DEEP compositions over DEEP + 1 texts.
         let mut nodes: Vec<EdslNode> = Vec::new();

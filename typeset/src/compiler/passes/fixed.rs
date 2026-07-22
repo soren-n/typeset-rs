@@ -51,11 +51,11 @@ pub fn fixed<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
             }
             SerialEntry::Next(term, SerialComp::Comp(attr, opens, closes)) => {
                 let comp = FixedComp {
-                    pad: attr.pad,
+                    pad: attr.pad.is_padded(),
                     opens,
                     closes,
                 };
-                if attr.fix {
+                if attr.brk.is_fixed() {
                     // A fixed composition: extend (or start) the current run.
                     run_terms.push(term);
                     run_seps.push(comp);
@@ -83,7 +83,7 @@ pub fn fixed<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::Attr;
+    use crate::compiler::types::{Attr, Break, Pad};
     use bumpalo::Bump;
 
     /// Far past where a native-stack recursion could survive; the pass is a
@@ -93,7 +93,14 @@ mod tests {
     fn comp_entry<'a>(mem: &'a Bump, text: &'a str, fix: bool) -> SerialEntry<'a> {
         SerialEntry::Next(
             mem.alloc(Term::Text(text)),
-            mem.alloc(SerialComp::Comp(Attr { pad: false, fix }, &[], &[])),
+            mem.alloc(SerialComp::Comp(
+                Attr {
+                    pad: Pad::Unpadded,
+                    brk: if fix { Break::Fixed } else { Break::Breakable },
+                },
+                &[],
+                &[],
+            )),
         )
     }
 

@@ -80,7 +80,7 @@ pub fn broken(arena: &LayoutArena) -> EdslDoc<'_> {
             LayoutNode::Comp(l, r, attr) => {
                 // Inside a broken sequence, a breakable composition becomes a
                 // hard line.
-                if brk[i] && !attr.fix {
+                if brk[i] && !attr.brk.is_fixed() {
                     push(
                         &mut nodes,
                         EdslNode::Line(out[*l as usize], out[*r as usize]),

@@ -153,14 +153,7 @@ pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// assert_eq!(format_layout(padded, 2, 80), "function name()");
 /// ```
 pub fn comp(left: Box<Layout>, right: Box<Layout>, pad: Pad, brk: Break) -> Box<Layout> {
-    Box::new(Layout::Comp(
-        left,
-        right,
-        Attr {
-            pad: pad.is_padded(),
-            fix: brk.is_fixed(),
-        },
-    ))
+    Box::new(Layout::Comp(left, right, Attr { pad, brk }))
 }
 
 /// Padded, breakable composition — `comp(left, right, Pad::Padded,

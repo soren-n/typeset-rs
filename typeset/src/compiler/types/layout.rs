@@ -2,11 +2,12 @@ use super::traversal::DismantleTree;
 use std::fmt;
 use std::mem;
 
-/// Attribute structure for Layout compositions
+/// The two axes of a composition: padding and breakability. Carried as the
+/// public [`Pad`]/[`Break`] enums end to end — no shadow boolean encoding.
 #[derive(Debug, Copy, Clone)]
 pub struct Attr {
-    pub pad: bool,
-    pub fix: bool,
+    pub pad: Pad,
+    pub brk: Break,
 }
 
 /// Whether a composition puts a space between its two operands when they share
@@ -40,7 +41,7 @@ impl Pad {
 }
 
 impl Break {
-    /// The internal boolean encoding (`Fixed` is `true`, matching `Attr::fix`).
+    /// Whether this is the fixed (never-breaking) axis value.
     pub(crate) fn is_fixed(self) -> bool {
         matches!(self, Break::Fixed)
     }
@@ -48,10 +49,10 @@ impl Break {
 
 /// Layout AST - the input language for the compiler
 ///
-/// `Clone`, `Drop`, `Debug`, and `Display` are implemented iteratively below
-/// rather than derived: a derived (recursive) impl would overflow the native
-/// stack on a deeply nested layout, the same hazard the compiler passes and
-/// renderer avoid.
+/// `Clone`, `Drop`, and `Debug` are implemented iteratively below rather than
+/// derived: a derived (recursive) impl would overflow the native stack on a
+/// deeply nested layout, the same hazard the compiler passes and renderer
+/// avoid.
 #[derive(Default)]
 pub enum Layout {
     #[default]
@@ -280,8 +281,8 @@ mod tests {
                 layout,
                 Box::new(Layout::Text("y".to_string())),
                 Attr {
-                    pad: false,
-                    fix: false,
+                    pad: Pad::Unpadded,
+                    brk: Break::Breakable,
                 },
             ));
         }
@@ -320,12 +321,12 @@ mod tests {
                 Box::new(Layout::Null),
             )))),
             Attr {
-                pad: true,
-                fix: false,
+                pad: Pad::Padded,
+                brk: Break::Breakable,
             },
         );
         let expected =
-            "Comp(Text(\"a\"), Grp(Line(Text(\"b\"), Null)), Attr { pad: true, fix: false })";
+            "Comp(Text(\"a\"), Grp(Line(Text(\"b\"), Null)), Attr { pad: Padded, brk: Breakable })";
         assert_eq!(format!("{:?}", layout), expected);
         assert_eq!(format!("{:?}", layout.clone()), expected);
     }
