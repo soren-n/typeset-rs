@@ -11,16 +11,15 @@
 //! 4. fixed - LinearDoc → FixedDoc (coalesce fixed comps)
 //! 5. structurize - FixedDoc → RebuildDoc (rebuild with graph structure)
 //! 6. denull - RebuildDoc → DenullDoc (remove null identities)
-//! 7. identities - DenullDoc → DenullDoc (remove grp/seq identities)
-//! 8. reassociate - DenullDoc → DenullDoc (reassociate compositions)
-//! 9. rescope - DenullDoc → Doc (rescope nest and pack, into the heap)
+//! 7. normalize - DenullDoc → DenullDoc (eliminate grp/seq identities and
+//!    reassociate compositions)
+//! 8. rescope - DenullDoc → Doc (rescope nest and pack, into the heap)
 
 pub mod broken;
 pub mod denull;
 pub mod fixed;
-pub mod identities;
 pub mod linearize;
-pub mod reassociate;
+pub mod normalize;
 pub mod rescope;
 pub mod serialize;
 pub mod structurize;
@@ -31,9 +30,8 @@ mod walk;
 pub use broken::broken;
 pub use denull::denull;
 pub use fixed::fixed;
-pub use identities::identities;
 pub use linearize::linearize;
-pub use reassociate::reassociate;
+pub use normalize::normalize;
 pub use rescope::rescope;
 pub use serialize::serialize;
 pub use structurize::structurize;

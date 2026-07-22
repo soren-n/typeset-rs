@@ -52,9 +52,9 @@
 //! DenullDoc → Doc → String
 //! ```
 //!
-//! The `DenullDoc → DenullDoc` identity-removal and reassociation passes are
-//! elided above for brevity. This pipeline ensures optimal layout decisions and
-//! efficient memory usage.
+//! The `DenullDoc → DenullDoc` `normalize` pass (grp/seq identity removal and
+//! composition reassociation) is elided above for brevity. This pipeline ensures
+//! optimal layout decisions and efficient memory usage.
 //!
 //! ## Architecture Overview
 //!

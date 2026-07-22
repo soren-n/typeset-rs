@@ -1,11 +1,12 @@
-//! Shared spine walking for the identity-simplifying passes.
+//! Shared spine walking for the `normalize` pass.
 //!
-//! `identities` and `reassociate` both walk the same linear `DenullDoc` spine
-//! (`Eod`/`Empty`/`Break`/`Line`), transform each line's object, and fold the
-//! results back onto the terminal as a fresh `DenullDoc`. They differ only in
-//! the per-object transform, which [`map_denull_spine`] takes as a closure. (The
-//! final `rescope` pass walks the same spine but folds directly into the heap
-//! [`Doc`], so it does its own spine walk rather than allocating a `DenullDoc`.)
+//! `normalize` walks the linear `DenullDoc` spine (`Eod`/`Empty`/`Break`/`Line`),
+//! transforms each line's object (running the seq/grp elimination and
+//! reassociation folds), and folds the results back onto the terminal as a fresh
+//! `DenullDoc`. The per-object transform is passed to [`map_denull_spine`] as a
+//! closure. (The final `rescope` pass walks the same spine but folds directly
+//! into the heap [`Doc`], so it does its own spine walk rather than allocating a
+//! `DenullDoc`.)
 
 use crate::compiler::types::{DenullDoc, DenullObj};
 use bumpalo::Bump;

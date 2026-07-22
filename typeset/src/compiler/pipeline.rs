@@ -1,11 +1,11 @@
 //! Compilation pipeline: [`Layout`] → [`Doc`].
 //!
-//! The pipeline runs nine sequential passes, each lowering the tree through one
+//! The pipeline runs eight sequential passes, each lowering the tree through one
 //! intermediate representation:
 //!
 //! ```text
 //! Layout → Edsl → Serial → LinearDoc → FixedDoc → RebuildDoc →
-//! DenullDoc → IdentitiesDoc → ReassociateDoc → Doc
+//! DenullDoc → (normalize) DenullDoc → Doc
 //! ```
 //!
 //! Each intermediate pass allocates its output in a fresh bump arena; the final
@@ -19,9 +19,7 @@
 //! iterative, so no layout is too deep to compile and there is no depth cap.
 
 use crate::compiler::{
-    passes::{
-        broken, denull, fixed, identities, linearize, reassociate, rescope, serialize, structurize,
-    },
+    passes::{broken, denull, fixed, linearize, normalize, rescope, serialize, structurize},
     render::render_ref as render_ref_impl,
     types::{Doc, Layout},
 };
@@ -44,7 +42,7 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     run_passes(layout)
 }
 
-/// Runs the nine-pass pipeline, lowering [`Layout`] to a heap [`Doc`].
+/// Runs the eight-pass pipeline, lowering [`Layout`] to a heap [`Doc`].
 ///
 /// Infallible and iterative. Each intermediate pass allocates its output in a
 /// fresh bump arena, so every intermediate representation is freed once this
@@ -71,14 +69,11 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     let denull_doc = denull(&mem6, rebuild_doc);
 
     let mem7 = Bump::new();
-    let identities_doc = identities(&mem7, denull_doc);
-
-    let mem8 = Bump::new();
-    let reassociate_doc = reassociate(&mem8, identities_doc);
+    let normalized_doc = normalize(&mem7, denull_doc);
 
     // Final pass: DenullDoc → Doc. `rescope` builds the owned heap Doc directly,
     // so there is no arena here and no separate heap-conversion pass.
-    rescope(reassociate_doc)
+    rescope(normalized_doc)
 }
 
 /// Renders a compiled document to a formatted string, consuming it.
