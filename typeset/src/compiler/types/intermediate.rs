@@ -132,26 +132,43 @@ pub enum FixedFix<'a> {
     Last(&'a Term<'a>),
 }
 
-// Sixth intermediate representation: RebuildDoc
-#[derive(Debug)]
-pub enum RebuildDoc<'a> {
-    Eod,
-    Break(&'a RebuildObj<'a>, &'a RebuildDoc<'a>),
-}
+// Sixth intermediate representation: RebuildDoc.
+//
+// A flat postorder arena, like the final `Doc`: objects and fixed objects live
+// in index-linked `Vec`s where children always precede their parents, and the
+// document spine is one root object per line. Consumers fold it bottom-up with
+// a plain forward loop over the arena — by the time a node is visited its
+// children's results are already computed — so no walk needs a frame stack.
 
-#[derive(Debug)]
+/// Index into a [`RebuildDoc`]'s object arena.
+pub type RObjId = u32;
+
+/// Index into a [`RebuildDoc`]'s fixed-object arena.
+pub type RFixId = u32;
+
+#[derive(Debug, Copy, Clone)]
 pub enum RebuildObj<'a> {
     Term(&'a Term<'a>),
-    Fix(&'a RebuildFix<'a>),
-    Grp(&'a RebuildObj<'a>),
-    Seq(&'a RebuildObj<'a>),
-    Comp(&'a RebuildObj<'a>, &'a RebuildObj<'a>, bool),
+    Fix(RFixId),
+    Grp(RObjId),
+    Seq(RObjId),
+    Comp(RObjId, RObjId, bool),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RebuildFix<'a> {
+    Term(&'a Term<'a>),
+    Comp(RFixId, RFixId, bool),
 }
 
 #[derive(Debug)]
-pub enum RebuildFix<'a> {
-    Term(&'a Term<'a>),
-    Comp(&'a RebuildFix<'a>, &'a RebuildFix<'a>, bool),
+pub struct RebuildDoc<'a> {
+    /// One root object per line, in document order.
+    pub lines: Vec<RObjId>,
+    /// Object arena in postorder: children precede parents.
+    pub objs: Vec<RebuildObj<'a>>,
+    /// Fixed-object arena in postorder: children precede parents.
+    pub fixes: Vec<RebuildFix<'a>>,
 }
 
 // Seventh intermediate representation: DenullDoc

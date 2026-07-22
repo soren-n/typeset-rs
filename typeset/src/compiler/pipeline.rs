@@ -66,7 +66,7 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     let rebuild_doc = structurize(&mem5, fixed_doc);
 
     let mem6 = Bump::new();
-    let denull_doc = denull(&mem6, rebuild_doc);
+    let denull_doc = denull(&mem6, &rebuild_doc);
 
     let mem7 = Bump::new();
     let normalized_doc = normalize(&mem7, denull_doc);

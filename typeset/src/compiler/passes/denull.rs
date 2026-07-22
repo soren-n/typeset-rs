@@ -1,11 +1,10 @@
 //! Pass 6: RebuildDoc → DenullDoc (remove null identities)
 //!
 //! Drops `Null`/empty-text terms, collapsing objects that reduce to nothing.
-//! The original expressed this as a multi-continuation CPS fold (none / some /
-//! next_none) recursing on the native stack. Here each visitor instead returns
-//! an explicit result enum, and the tree visitors (`visit_obj`, `visit_fix`)
-//! run as descend/ascend trampolines over a heap-allocated frame stack so deep
-//! inputs no longer overflow.
+//! The input is a flat postorder arena (children precede parents), so the
+//! object and fix walks are plain forward folds over the arena: by the time a
+//! node is visited its children's results are already computed. No frame
+//! stacks, and deep documents use no native stack by construction.
 
 use crate::compiler::types::{
     DenullDoc, DenullFix, DenullObj, DenullTerm, RebuildDoc, RebuildFix, RebuildObj, Term,
@@ -15,6 +14,7 @@ use bumpalo::Bump;
 /// Result of denulling an object: nothing survived (`None`); an object
 /// survived (`Some`); or everything to the left of a composition was dropped,
 /// leaving a surviving object plus the accumulated pad (`NextNone`).
+#[derive(Copy, Clone)]
 enum ObjRes<'b> {
     None,
     Some(&'b DenullObj<'b>),
@@ -22,6 +22,7 @@ enum ObjRes<'b> {
 }
 
 /// Same three-way result for fixed sub-objects.
+#[derive(Copy, Clone)]
 enum FixRes<'b> {
     None,
     Some(&'b DenullFix<'b>),
@@ -34,32 +35,6 @@ enum TermWrap {
     Pack(u64),
 }
 
-/// Frames for the `visit_obj` trampoline.
-enum ObjFrame<'b, 'a> {
-    Grp,
-    Seq,
-    CompLeft {
-        right: &'a RebuildObj<'a>,
-        l_pad: bool,
-    },
-    CompRight {
-        left: ObjRes<'b>,
-        l_pad: bool,
-    },
-}
-
-/// Frames for the `visit_fix` trampoline.
-enum FixFrame<'b, 'a> {
-    CompLeft {
-        right: &'a RebuildFix<'a>,
-        l_pad: bool,
-    },
-    CompRight {
-        left: FixRes<'b>,
-        l_pad: bool,
-    },
-}
-
 /// One line's outcome after denulling: either the object survived, or it
 /// reduced to nothing (an empty line).
 enum Kind<'b> {
@@ -67,30 +42,85 @@ enum Kind<'b> {
     Obj(&'b DenullObj<'b>),
 }
 
-/// Remove null identities
-pub fn denull<'b, 'a: 'b>(mem: &'b Bump, doc: &'a RebuildDoc<'a>) -> &'b DenullDoc<'b> {
-    // RebuildDoc is a linear spine; walk it, denulling each object.
-    let mut kinds: Vec<Kind<'b>> = Vec::new();
-    let mut cur = doc;
-    loop {
-        match cur {
-            RebuildDoc::Eod => break,
-            RebuildDoc::Break(obj, doc1) => {
-                let kind = match visit_obj(mem, obj) {
-                    ObjRes::None => Kind::Empty,
-                    ObjRes::Some(obj1) | ObjRes::NextNone(_, obj1) => Kind::Obj(obj1),
-                };
-                kinds.push(kind);
-                cur = doc1;
+/// Remove null identities.
+pub fn denull<'b, 'a: 'b>(mem: &'b Bump, doc: &RebuildDoc<'a>) -> &'b DenullDoc<'b> {
+    // Fold the fixed-object arena bottom-up (forward, children first).
+    let mut fix_res: Vec<FixRes<'b>> = Vec::with_capacity(doc.fixes.len());
+    for node in &doc.fixes {
+        let res = match node {
+            RebuildFix::Term(term) => match visit_term(mem, term) {
+                None => FixRes::None,
+                Some(term1) => FixRes::Some(mem.alloc(DenullFix::Term(term1))),
+            },
+            RebuildFix::Comp(left, right, l_pad) => {
+                match (fix_res[*left as usize], fix_res[*right as usize]) {
+                    (FixRes::None, FixRes::None) => FixRes::None,
+                    (FixRes::None, FixRes::Some(right1)) => FixRes::NextNone(*l_pad, right1),
+                    (FixRes::None, FixRes::NextNone(r_pad, right1)) => {
+                        FixRes::NextNone(*l_pad || r_pad, right1)
+                    }
+                    (FixRes::Some(left1), FixRes::None) => FixRes::Some(left1),
+                    (FixRes::Some(left1), FixRes::Some(right1)) => {
+                        FixRes::Some(mem.alloc(DenullFix::Comp(left1, right1, *l_pad)))
+                    }
+                    (FixRes::Some(left1), FixRes::NextNone(r_pad, right1)) => {
+                        FixRes::Some(mem.alloc(DenullFix::Comp(left1, right1, *l_pad || r_pad)))
+                    }
+                    // A composition's left operand never denulls to NextNone.
+                    (FixRes::NextNone(..), _) => unreachable!("Invariant"),
+                }
             }
-        }
+        };
+        fix_res.push(res);
+    }
+
+    // Fold the object arena bottom-up the same way.
+    let mut obj_res: Vec<ObjRes<'b>> = Vec::with_capacity(doc.objs.len());
+    for node in &doc.objs {
+        let res = match node {
+            RebuildObj::Term(term) => match visit_term(mem, term) {
+                None => ObjRes::None,
+                Some(term1) => ObjRes::Some(mem.alloc(DenullObj::Term(term1))),
+            },
+            RebuildObj::Fix(fix) => match fix_res[*fix as usize] {
+                FixRes::None => ObjRes::None,
+                FixRes::Some(fix1) | FixRes::NextNone(_, fix1) => {
+                    ObjRes::Some(mem.alloc(DenullObj::Fix(fix1)))
+                }
+            },
+            RebuildObj::Grp(obj1) => wrap_obj(mem, obj_res[*obj1 as usize], DenullObj::Grp),
+            RebuildObj::Seq(obj1) => wrap_obj(mem, obj_res[*obj1 as usize], DenullObj::Seq),
+            RebuildObj::Comp(left, right, l_pad) => {
+                match (obj_res[*left as usize], obj_res[*right as usize]) {
+                    (ObjRes::None, ObjRes::None) => ObjRes::None,
+                    (ObjRes::None, ObjRes::Some(right1)) => ObjRes::NextNone(*l_pad, right1),
+                    (ObjRes::None, ObjRes::NextNone(r_pad, right1)) => {
+                        ObjRes::NextNone(*l_pad || r_pad, right1)
+                    }
+                    (ObjRes::Some(left1), ObjRes::None) => ObjRes::Some(left1),
+                    (ObjRes::Some(left1), ObjRes::Some(right1)) => {
+                        ObjRes::Some(mem.alloc(DenullObj::Comp(left1, right1, *l_pad)))
+                    }
+                    (ObjRes::Some(left1), ObjRes::NextNone(r_pad, right1)) => {
+                        ObjRes::Some(mem.alloc(DenullObj::Comp(left1, right1, *l_pad || r_pad)))
+                    }
+                    // A composition's left operand never denulls to NextNone.
+                    (ObjRes::NextNone(..), _) => unreachable!("Invariant"),
+                }
+            }
+        };
+        obj_res.push(res);
     }
 
     // Fold the line outcomes from the tail: a surviving object becomes a
     // Break (or a Line if it is the last), an empty object becomes an Empty
     // wrapper (or Eod if it is the last).
+    let kinds = doc.lines.iter().map(|&root| match obj_res[root as usize] {
+        ObjRes::None => Kind::Empty,
+        ObjRes::Some(obj1) | ObjRes::NextNone(_, obj1) => Kind::Obj(obj1),
+    });
     let mut acc: Option<&'b DenullDoc<'b>> = None;
-    for kind in kinds.iter().rev() {
+    for kind in kinds.collect::<Vec<_>>().into_iter().rev() {
         let next: &'b DenullDoc<'b> = match (kind, acc) {
             (Kind::Empty, None) => mem.alloc(DenullDoc::Eod),
             (Kind::Empty, Some(doc2)) => mem.alloc(DenullDoc::Empty(doc2)),
@@ -113,131 +143,6 @@ fn wrap_obj<'b>(
     match val {
         ObjRes::None => ObjRes::None,
         ObjRes::Some(obj) | ObjRes::NextNone(_, obj) => ObjRes::Some(mem.alloc(ctor(obj))),
-    }
-}
-
-/// Denulls an object tree. `Comp` branches into left then right; `Grp`/`Seq`
-/// wrap their child; `Term`/`Fix` are leaves.
-fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a RebuildObj<'a>) -> ObjRes<'b> {
-    let mut stack: Vec<ObjFrame<'b, 'a>> = Vec::new();
-    let mut cur = obj;
-    'descend: loop {
-        let mut val: ObjRes<'b> = match cur {
-            RebuildObj::Term(term) => match visit_term(mem, term) {
-                None => ObjRes::None,
-                Some(term1) => ObjRes::Some(mem.alloc(DenullObj::Term(term1))),
-            },
-            RebuildObj::Fix(fix) => match visit_fix(mem, fix) {
-                FixRes::None => ObjRes::None,
-                FixRes::Some(fix1) | FixRes::NextNone(_, fix1) => {
-                    ObjRes::Some(mem.alloc(DenullObj::Fix(fix1)))
-                }
-            },
-            RebuildObj::Grp(obj1) => {
-                stack.push(ObjFrame::Grp);
-                cur = obj1;
-                continue 'descend;
-            }
-            RebuildObj::Seq(obj1) => {
-                stack.push(ObjFrame::Seq);
-                cur = obj1;
-                continue 'descend;
-            }
-            RebuildObj::Comp(left, right, l_pad) => {
-                stack.push(ObjFrame::CompLeft {
-                    right,
-                    l_pad: *l_pad,
-                });
-                cur = left;
-                continue 'descend;
-            }
-        };
-        loop {
-            match stack.pop() {
-                None => return val,
-                Some(ObjFrame::Grp) => val = wrap_obj(mem, val, DenullObj::Grp),
-                Some(ObjFrame::Seq) => val = wrap_obj(mem, val, DenullObj::Seq),
-                Some(ObjFrame::CompLeft { right, l_pad }) => {
-                    // A composition's left operand never denulls to NextNone.
-                    if matches!(val, ObjRes::NextNone(..)) {
-                        unreachable!("Invariant");
-                    }
-                    stack.push(ObjFrame::CompRight { left: val, l_pad });
-                    cur = right;
-                    continue 'descend;
-                }
-                Some(ObjFrame::CompRight { left, l_pad }) => {
-                    val = match (left, val) {
-                        (ObjRes::None, ObjRes::None) => ObjRes::None,
-                        (ObjRes::None, ObjRes::Some(right1)) => ObjRes::NextNone(l_pad, right1),
-                        (ObjRes::None, ObjRes::NextNone(r_pad, right1)) => {
-                            ObjRes::NextNone(l_pad || r_pad, right1)
-                        }
-                        (ObjRes::Some(left1), ObjRes::None) => ObjRes::Some(left1),
-                        (ObjRes::Some(left1), ObjRes::Some(right1)) => {
-                            ObjRes::Some(mem.alloc(DenullObj::Comp(left1, right1, l_pad)))
-                        }
-                        (ObjRes::Some(left1), ObjRes::NextNone(r_pad, right1)) => {
-                            ObjRes::Some(mem.alloc(DenullObj::Comp(left1, right1, l_pad || r_pad)))
-                        }
-                        (ObjRes::NextNone(..), _) => unreachable!("Invariant"),
-                    };
-                }
-            }
-        }
-    }
-}
-
-/// Denulls a fixed sub-object tree. Mirrors `visit_obj` but only `Comp`
-/// branches and `Term` is the sole leaf.
-fn visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a RebuildFix<'a>) -> FixRes<'b> {
-    let mut stack: Vec<FixFrame<'b, 'a>> = Vec::new();
-    let mut cur = fix;
-    'descend: loop {
-        let mut val: FixRes<'b> = match cur {
-            RebuildFix::Term(term) => match visit_term(mem, term) {
-                None => FixRes::None,
-                Some(term1) => FixRes::Some(mem.alloc(DenullFix::Term(term1))),
-            },
-            RebuildFix::Comp(left, right, l_pad) => {
-                stack.push(FixFrame::CompLeft {
-                    right,
-                    l_pad: *l_pad,
-                });
-                cur = left;
-                continue 'descend;
-            }
-        };
-        loop {
-            match stack.pop() {
-                None => return val,
-                Some(FixFrame::CompLeft { right, l_pad }) => {
-                    if matches!(val, FixRes::NextNone(..)) {
-                        unreachable!("Invariant");
-                    }
-                    stack.push(FixFrame::CompRight { left: val, l_pad });
-                    cur = right;
-                    continue 'descend;
-                }
-                Some(FixFrame::CompRight { left, l_pad }) => {
-                    val = match (left, val) {
-                        (FixRes::None, FixRes::None) => FixRes::None,
-                        (FixRes::None, FixRes::Some(right1)) => FixRes::NextNone(l_pad, right1),
-                        (FixRes::None, FixRes::NextNone(r_pad, right1)) => {
-                            FixRes::NextNone(l_pad || r_pad, right1)
-                        }
-                        (FixRes::Some(left1), FixRes::None) => FixRes::Some(left1),
-                        (FixRes::Some(left1), FixRes::Some(right1)) => {
-                            FixRes::Some(mem.alloc(DenullFix::Comp(left1, right1, l_pad)))
-                        }
-                        (FixRes::Some(left1), FixRes::NextNone(r_pad, right1)) => {
-                            FixRes::Some(mem.alloc(DenullFix::Comp(left1, right1, l_pad || r_pad)))
-                        }
-                        (FixRes::NextNone(..), _) => unreachable!("Invariant"),
-                    };
-                }
-            }
-        }
     }
 }
 
@@ -280,36 +185,51 @@ fn visit_term<'b, 'a: 'b>(mem: &'b Bump, term: &'a Term<'a>) -> Option<&'b Denul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::types::{RFixId, RObjId};
 
-    /// Deeper than a native-stack recursion could survive (~hundreds of levels
-    /// on a 2 MB stack). Reaching it without aborting proves iteration.
+    /// Far past where a native-stack recursion could survive; with flat arenas
+    /// the folds are plain loops, so this now guards the row/term walks only.
     const DEEP: usize = 50_000;
+
+    fn push_obj<'a>(objs: &mut Vec<RebuildObj<'a>>, node: RebuildObj<'a>) -> RObjId {
+        let id = objs.len() as RObjId;
+        objs.push(node);
+        id
+    }
+
+    fn push_fix<'a>(fixes: &mut Vec<RebuildFix<'a>>, node: RebuildFix<'a>) -> RFixId {
+        let id = fixes.len() as RFixId;
+        fixes.push(node);
+        id
+    }
 
     #[test]
     fn denull_handles_deep_comp_object() {
         let mem = Bump::new();
         // Right-nested Comp chain: Comp(Term, Comp(Term, ... Term)). Each left
         // operand is a surviving Term, so the whole object survives.
-        let mut obj: &RebuildObj = mem.alloc(RebuildObj::Term(mem.alloc(Term::Text("z"))));
+        let mut objs: Vec<RebuildObj> = Vec::new();
+        let mut cur = push_obj(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("z"))));
         for _ in 0..DEEP {
-            obj = mem.alloc(RebuildObj::Comp(
-                mem.alloc(RebuildObj::Term(mem.alloc(Term::Text("y")))),
-                obj,
-                false,
-            ));
+            let left = push_obj(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("y"))));
+            cur = push_obj(&mut objs, RebuildObj::Comp(left, cur, false));
         }
-        let doc: &RebuildDoc = mem.alloc(RebuildDoc::Break(obj, mem.alloc(RebuildDoc::Eod)));
-        let out = denull(&mem, doc);
+        let doc = RebuildDoc {
+            lines: vec![cur],
+            objs,
+            fixes: Vec::new(),
+        };
+        let out = denull(&mem, &doc);
         // Count the surviving comps in the single line.
         let obj_out = match out {
             DenullDoc::Line(o) => *o,
             _ => panic!("expected a single line"),
         };
         let mut count = 0usize;
-        let mut cur = obj_out;
-        while let DenullObj::Comp(_left, right, _pad) = cur {
+        let mut walk = obj_out;
+        while let DenullObj::Comp(_left, right, _pad) = walk {
             count += 1;
-            cur = right;
+            walk = right;
         }
         assert_eq!(count, DEEP);
     }
@@ -321,9 +241,14 @@ mod tests {
         for _ in 0..DEEP {
             term = mem.alloc(Term::Nest(term));
         }
-        let obj: &RebuildObj = mem.alloc(RebuildObj::Term(term));
-        let doc: &RebuildDoc = mem.alloc(RebuildDoc::Break(obj, mem.alloc(RebuildDoc::Eod)));
-        let out = denull(&mem, doc);
+        let mut objs: Vec<RebuildObj> = Vec::new();
+        let root = push_obj(&mut objs, RebuildObj::Term(term));
+        let doc = RebuildDoc {
+            lines: vec![root],
+            objs,
+            fixes: Vec::new(),
+        };
+        let out = denull(&mem, &doc);
         let DenullDoc::Line(DenullObj::Term(t)) = out else {
             panic!("expected a single term line")
         };
@@ -337,14 +262,46 @@ mod tests {
     }
 
     #[test]
+    fn denull_drops_null_left_and_merges_pads() {
+        let mem = Bump::new();
+        // Comp(Null, Comp(Null, Text, pad=true), pad=false): the nulls vanish
+        // and the pads merge onto the surviving text via NextNone.
+        let mut objs: Vec<RebuildObj> = Vec::new();
+        let n1 = push_obj(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
+        let t = push_obj(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("x"))));
+        let inner = push_obj(&mut objs, RebuildObj::Comp(n1, t, true));
+        let a = push_obj(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("a"))));
+        let root = push_obj(&mut objs, RebuildObj::Comp(a, inner, false));
+        let doc = RebuildDoc {
+            lines: vec![root],
+            objs,
+            fixes: Vec::new(),
+        };
+        let out = denull(&mem, &doc);
+        // The dropped null's pad (true) survives onto the comp.
+        let DenullDoc::Line(DenullObj::Comp(_, _, pad)) = out else {
+            panic!("expected a comp line")
+        };
+        assert!(pad, "the dropped left's pad must merge into the comp");
+    }
+
+    #[test]
     fn denull_handles_long_doc_spine() {
         let mem = Bump::new();
-        let mut doc: &RebuildDoc = mem.alloc(RebuildDoc::Eod);
+        let mut objs: Vec<RebuildObj> = Vec::new();
+        let mut lines: Vec<RObjId> = Vec::new();
         for _ in 0..DEEP {
-            let obj: &RebuildObj = mem.alloc(RebuildObj::Term(mem.alloc(Term::Text("x"))));
-            doc = mem.alloc(RebuildDoc::Break(obj, doc));
+            lines.push(push_obj(
+                &mut objs,
+                RebuildObj::Term(mem.alloc(Term::Text("x"))),
+            ));
         }
-        let out = denull(&mem, doc);
+        let doc = RebuildDoc {
+            lines,
+            objs,
+            fixes: Vec::new(),
+        };
+        let out = denull(&mem, &doc);
         let mut count = 0usize;
         let mut cur = out;
         loop {
@@ -361,5 +318,28 @@ mod tests {
             }
         }
         assert_eq!(count, DEEP);
+    }
+
+    #[test]
+    fn denull_fix_arena_folds_bottom_up() {
+        let mem = Bump::new();
+        // Fix(Comp(Text "a", Text "", pad=true)): the empty right vanishes and
+        // the fix survives as its left.
+        let mut objs: Vec<RebuildObj> = Vec::new();
+        let mut fixes: Vec<RebuildFix> = Vec::new();
+        let fa = push_fix(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text("a"))));
+        let fe = push_fix(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text(""))));
+        let fc = push_fix(&mut fixes, RebuildFix::Comp(fa, fe, true));
+        let root = push_obj(&mut objs, RebuildObj::Fix(fc));
+        let doc = RebuildDoc {
+            lines: vec![root],
+            objs,
+            fixes,
+        };
+        let out = denull(&mem, &doc);
+        let DenullDoc::Line(DenullObj::Fix(DenullFix::Term(DenullTerm::Text(data)))) = out else {
+            panic!("expected the fix to survive as its left term")
+        };
+        assert_eq!(*data, "a");
     }
 }
