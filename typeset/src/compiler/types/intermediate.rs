@@ -1,30 +1,71 @@
 use super::layout::Attr;
 
-// First intermediate representation: Edsl. (`Broken`, the internal step the
-// `broken` pass lowers Layout through on the way to `Edsl`, lives privately in
-// that pass rather than here.)
+// Zeroth intermediate representation: the flat layout arena.
+//
+// `flatten` lowers the public `Box`-recursive [`Layout`](super::layout::Layout)
+// tree into this postorder arena (children precede parents) as the pipeline's
+// entry step — the one place that walks owning boxes. Text is moved out of the
+// tree here; every later representation borrows it from this arena.
+
+/// Index into a [`LayoutArena`]'s node list.
+pub type LayId = u32;
+
 #[derive(Debug)]
-pub enum Edsl<'a> {
+pub enum LayoutNode {
+    Null,
+    Text(String),
+    Fix(LayId),
+    Grp(LayId),
+    Seq(LayId),
+    Nest(LayId),
+    Pack(LayId),
+    Line(LayId, LayId),
+    Comp(LayId, LayId, Attr),
+}
+
+#[derive(Debug)]
+pub struct LayoutArena {
+    /// Node arena in postorder: children precede parents.
+    pub nodes: Vec<LayoutNode>,
+    pub root: LayId,
+}
+
+// First intermediate representation: Edsl.
+//
+// Like the layout arena, but with hard line breaks resolved: compositions
+// inside a broken sequence have become `Line`s and already-broken seq wrappers
+// are gone. Owned; text is borrowed from the layout arena.
+
+/// Index into an [`EdslDoc`]'s node list.
+pub type EdslId = u32;
+
+#[derive(Debug)]
+pub enum EdslNode<'a> {
     Null,
     Text(&'a str),
-    Fix(&'a Edsl<'a>),
-    Grp(&'a Edsl<'a>),
-    Seq(&'a Edsl<'a>),
-    Nest(&'a Edsl<'a>),
-    Pack(&'a Edsl<'a>),
-    Line(&'a Edsl<'a>, &'a Edsl<'a>),
-    Comp(&'a Edsl<'a>, &'a Edsl<'a>, Attr),
+    Fix(EdslId),
+    Grp(EdslId),
+    Seq(EdslId),
+    Nest(EdslId),
+    Pack(EdslId),
+    Line(EdslId, EdslId),
+    Comp(EdslId, EdslId, Attr),
+}
+
+#[derive(Debug)]
+pub struct EdslDoc<'a> {
+    /// Node arena in postorder: children precede parents.
+    pub nodes: Vec<EdslNode<'a>>,
+    pub root: EdslId,
 }
 
 // Third intermediate representation: Serial.
 //
-// A flat slice of leaf entries in document order; each entry is a term plus how
-// it glues to what follows. The slice is always non-empty and its final entry
-// is always `Last`. (Formerly a `Next`/`Last`/`Past` cons-list, but the spine
-// has no structural sharing — `serialize` builds it from a `Vec` — so a slice
-// is the honest shape. The load-bearing persistent lists are `serialize`'s
+// A flat list of leaf entries in document order; each entry is a term plus how
+// it glues to what follows. The list is always non-empty and its final entry
+// is always `Last`. (The load-bearing persistent lists are `serialize`'s
 // internal `TermList`/`CompList` scope accumulators, not this output.)
-pub type Serial<'a> = &'a [SerialEntry<'a>];
+pub type Serial<'a> = Vec<SerialEntry<'a>>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SerialEntry<'a> {

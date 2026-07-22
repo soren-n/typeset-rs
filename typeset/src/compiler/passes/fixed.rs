@@ -10,7 +10,7 @@ use crate::compiler::types::{
     FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Serial, SerialComp, SerialEntry, Term,
 };
 
-pub fn fixed<'a>(serial: Serial<'a>) -> FixedDoc<'a> {
+pub fn fixed<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
     let mut lines: Vec<FixedLine<'a>> = Vec::new();
     // The line currently being built.
     let mut items: Vec<FixedItem<'a>> = Vec::new();
@@ -106,8 +106,8 @@ mod tests {
             entries.push(comp_entry(&mem, "y", true));
         }
         entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
-        let serial: Serial = mem.alloc_slice_copy(&entries);
-        let out = fixed(serial);
+        let serial: Serial = entries;
+        let out = fixed(&serial);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
@@ -127,8 +127,8 @@ mod tests {
             entries.push(comp_entry(&mem, "y", false));
         }
         entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
-        let serial: Serial = mem.alloc_slice_copy(&entries);
-        let out = fixed(serial);
+        let serial: Serial = entries;
+        let out = fixed(&serial);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
@@ -148,8 +148,8 @@ mod tests {
             ));
         }
         entries.push(SerialEntry::Last(mem.alloc(Term::Text("end"))));
-        let serial: Serial = mem.alloc_slice_copy(&entries);
-        let out = fixed(serial);
+        let serial: Serial = entries;
+        let out = fixed(&serial);
         assert_eq!(out.lines.len(), DEEP + 1);
     }
 
@@ -158,13 +158,12 @@ mod tests {
         let mem = Bump::new();
         // a !& b & c: the fixed run (a, b) closes at the non-fixed comp, which
         // becomes the separator before the plain term c.
-        let entries = [
+        let serial: Serial = vec![
             comp_entry(&mem, "a", true),
             comp_entry(&mem, "b", false),
             SerialEntry::Last(mem.alloc(Term::Text("c"))),
         ];
-        let serial: Serial = mem.alloc_slice_copy(&entries);
-        let out = fixed(serial);
+        let out = fixed(&serial);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };

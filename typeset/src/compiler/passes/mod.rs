@@ -5,8 +5,9 @@
 //! producing the final Doc structure.
 //!
 //! The passes execute in the following order:
-//! 1. broken - Layout → Edsl (collapse broken sequences)
-//! 2. serialize - Edsl → Serial (serialize to normalize)
+//! 0. flatten - Layout → LayoutArena (flatten the input tree)
+//! 1. broken - LayoutArena → EdslDoc (collapse broken sequences)
+//! 2. serialize - EdslDoc → Serial (serialize to normalize)
 //! 3. fixed - Serial → FixedDoc (lift newlines to spine, coalesce fixed comps)
 //! 4. structurize - FixedDoc → RebuildDoc (rebuild with graph structure)
 //! 5. denull - RebuildDoc → DenullDoc (remove null identities)
@@ -17,6 +18,7 @@
 pub mod broken;
 pub mod denull;
 pub mod fixed;
+pub mod flatten;
 pub mod normalize;
 pub mod rescope;
 pub mod serialize;
@@ -26,6 +28,7 @@ pub mod structurize;
 pub use broken::broken;
 pub use denull::denull;
 pub use fixed::fixed;
+pub use flatten::flatten;
 pub use normalize::normalize;
 pub use rescope::rescope;
 pub use serialize::serialize;

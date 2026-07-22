@@ -19,7 +19,7 @@
 //! iterative, so no layout is too deep to compile and there is no depth cap.
 
 use crate::compiler::{
-    passes::{broken, denull, fixed, normalize, rescope, serialize, structurize},
+    passes::{broken, denull, fixed, flatten, normalize, rescope, serialize, structurize},
     render::render_ref as render_ref_impl,
     types::{Doc, Layout},
 };
@@ -50,14 +50,19 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
 fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     use bumpalo::Bump;
 
-    let mem1 = Bump::new();
-    let edsl = broken(&mem1, layout);
+    // Flattening is the one step that walks the owning `Box` tree; every later
+    // pass folds flat structures with plain loops. Text lives in the layout
+    // arena and is borrowed all the way down the pipeline.
+    let arena = flatten(layout);
+    let edsl = broken(&arena);
 
-    let mem2 = Bump::new();
-    let serial = serialize(&mem2, edsl);
+    // serialize's persistent scope accumulators share structure, so it keeps
+    // the pipeline's one bump arena; its terms are borrowed through every
+    // later pass.
+    let mem = Bump::new();
+    let serial = serialize(&mem, &edsl);
 
-    // The remaining passes work on owned flat structures — no bumps needed.
-    let fixed_doc = fixed(serial);
+    let fixed_doc = fixed(&serial);
     let rebuild_doc = structurize(&fixed_doc);
     let denull_doc = denull(&rebuild_doc);
     let normalized_doc = normalize(denull_doc);

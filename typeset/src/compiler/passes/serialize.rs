@@ -19,7 +19,9 @@
 //! composition's scope open/close deltas in the same sweep — byte-identical to
 //! the recursive version.
 
-use crate::compiler::types::{Attr, Edsl, Scope, Serial, SerialComp, SerialEntry, Term};
+use crate::compiler::types::{
+    Attr, EdslDoc, EdslId, EdslNode, Scope, Serial, SerialComp, SerialEntry, Term,
+};
 use bumpalo::Bump;
 
 /// A nest/pack wrapper accumulated on the path to a term.
@@ -76,15 +78,15 @@ struct Entry<'b> {
 
 /// A pending subtree to visit, with its scoped path state. `i`/`j` are global
 /// counters and deliberately not carried here.
-struct Work<'b, 'a> {
-    layout: &'a Edsl<'a>,
+struct Work<'b> {
+    node: EdslId,
     terms: Option<&'b TermList<'b>>,
     comps: Option<&'b CompList<'b>>,
     glue: Glue<'b>,
     fixed: bool,
 }
 
-pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> {
+pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> {
     let mut i: u64 = 0;
     let mut j: u64 = 0;
     let mut entries: Vec<Entry<'b>> = Vec::new();
@@ -92,8 +94,8 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> 
     // Right-to-left visitation is achieved by a stack: pushing the right child
     // before the left makes the left pop (and fully process) first, so the
     // counters thread left-to-right just as the recursion did.
-    let mut stack: Vec<Work<'b, 'a>> = vec![Work {
-        layout,
+    let mut stack: Vec<Work<'b>> = vec![Work {
+        node: doc.root,
         terms: None,
         comps: None,
         glue: Glue::Last,
@@ -102,37 +104,37 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> 
 
     while let Some(work) = stack.pop() {
         let Work {
-            layout,
+            node,
             terms,
             comps,
             glue,
             fixed,
         } = work;
-        match layout {
-            Edsl::Null => {
+        match &doc.nodes[node as usize] {
+            EdslNode::Null => {
                 entries.push(Entry {
                     glue,
                     term: apply_terms(mem, terms, mem.alloc(Term::Null)),
                 });
             }
-            Edsl::Text(data) => {
+            EdslNode::Text(data) => {
                 entries.push(Entry {
                     glue,
                     term: apply_terms(mem, terms, mem.alloc(Term::Text(data))),
                 });
             }
-            Edsl::Fix(layout1) => stack.push(Work {
-                layout: layout1,
+            EdslNode::Fix(child) => stack.push(Work {
+                node: *child,
                 terms,
                 comps,
                 glue,
                 fixed: true,
             }),
-            Edsl::Grp(layout1) => {
+            EdslNode::Grp(child) => {
                 let index = i;
                 i += 1;
                 stack.push(Work {
-                    layout: layout1,
+                    node: *child,
                     terms,
                     comps: Some(mem.alloc(CompList {
                         wrap: CompWrap::Grp(index),
@@ -143,11 +145,11 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> 
                     fixed,
                 });
             }
-            Edsl::Seq(layout1) => {
+            EdslNode::Seq(child) => {
                 let index = i;
                 i += 1;
                 stack.push(Work {
-                    layout: layout1,
+                    node: *child,
                     terms,
                     comps: Some(mem.alloc(CompList {
                         wrap: CompWrap::Seq(index),
@@ -158,8 +160,8 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> 
                     fixed,
                 });
             }
-            Edsl::Nest(layout1) => stack.push(Work {
-                layout: layout1,
+            EdslNode::Nest(child) => stack.push(Work {
+                node: *child,
                 terms: Some(mem.alloc(TermList {
                     wrap: TermWrap::Nest,
                     next: terms,
@@ -168,11 +170,11 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> 
                 glue,
                 fixed,
             }),
-            Edsl::Pack(layout1) => {
+            EdslNode::Pack(child) => {
                 let index = j;
                 j += 1;
                 stack.push(Work {
-                    layout: layout1,
+                    node: *child,
                     terms: Some(mem.alloc(TermList {
                         wrap: TermWrap::Pack(index),
                         next: terms,
@@ -182,39 +184,39 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> 
                     fixed,
                 });
             }
-            Edsl::Line(left, right) => {
+            EdslNode::Line(left, right) => {
                 // Right inherits the outer glue; left's trailing term gets a
                 // hard line. Push right first so left is processed first.
                 stack.push(Work {
-                    layout: right,
+                    node: *right,
                     terms,
                     comps,
                     glue,
                     fixed,
                 });
                 stack.push(Work {
-                    layout: left,
+                    node: *left,
                     terms,
                     comps,
                     glue: Glue::Line,
                     fixed,
                 });
             }
-            Edsl::Comp(left, right, attr) => {
+            EdslNode::Comp(left, right, attr) => {
                 let attr1 = Attr {
                     pad: attr.pad,
                     fix: fixed || attr.fix,
                 };
                 let comp_glue = Glue::Comp { comps, attr: attr1 };
                 stack.push(Work {
-                    layout: right,
+                    node: *right,
                     terms,
                     comps,
                     glue,
                     fixed,
                 });
                 stack.push(Work {
-                    layout: left,
+                    node: *left,
                     terms,
                     comps,
                     glue: comp_glue,
@@ -256,7 +258,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, layout: &'a Edsl<'a>) -> Serial<'b> 
         };
         items.push(item);
     }
-    mem.alloc_slice_copy(&items)
+    items
 }
 
 /// Diffs two enclosing-scope lists (innermost-first, sharing an outer tail by
@@ -339,19 +341,38 @@ mod tests {
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
     const DEEP: usize = 50_000;
 
+    fn push<'a>(nodes: &mut Vec<EdslNode<'a>>, node: EdslNode<'a>) -> EdslId {
+        let id = nodes.len() as EdslId;
+        nodes.push(node);
+        id
+    }
+
+    /// Wraps a `Text` leaf in `DEEP` layers of `wrap`.
+    fn deep_unary(text: &'static str, wrap: fn(EdslId) -> EdslNode<'static>) -> EdslDoc<'static> {
+        let mut nodes: Vec<EdslNode> = Vec::new();
+        let mut cur = push(&mut nodes, EdslNode::Text(text));
+        for _ in 0..DEEP {
+            cur = push(&mut nodes, wrap(cur));
+        }
+        EdslDoc { nodes, root: cur }
+    }
+
     #[test]
     fn serialize_handles_deep_comp_chain() {
-        let mem = Bump::new();
         let attr = Attr {
             pad: false,
             fix: false,
         };
         // Right-nested Comp chain of DEEP compositions over DEEP + 1 texts.
-        let mut edsl: &Edsl = mem.alloc(Edsl::Text("z"));
+        let mut nodes: Vec<EdslNode> = Vec::new();
+        let mut cur = push(&mut nodes, EdslNode::Text("z"));
         for _ in 0..DEEP {
-            edsl = mem.alloc(Edsl::Comp(mem.alloc(Edsl::Text("y")), edsl, attr));
+            let left = push(&mut nodes, EdslNode::Text("y"));
+            cur = push(&mut nodes, EdslNode::Comp(left, cur, attr));
         }
-        let serial = serialize(&mem, edsl);
+        let doc = EdslDoc { nodes, root: cur };
+        let mem = Bump::new();
+        let serial = serialize(&mem, &doc);
         // DEEP Next entries, then a final Last entry.
         let count = serial
             .iter()
@@ -363,14 +384,11 @@ mod tests {
 
     #[test]
     fn serialize_handles_deep_nest_chain() {
+        let doc = deep_unary("x", EdslNode::Nest);
         let mem = Bump::new();
-        let mut edsl: &Edsl = mem.alloc(Edsl::Text("x"));
-        for _ in 0..DEEP {
-            edsl = mem.alloc(Edsl::Nest(edsl));
-        }
-        let serial = serialize(&mem, edsl);
+        let serial = serialize(&mem, &doc);
         // Single leaf: one Last carrying a Nest^DEEP term.
-        let [SerialEntry::Last(term)] = serial else {
+        let [SerialEntry::Last(term)] = serial[..] else {
             panic!("expected a single Last")
         };
         let mut count = 0usize;
@@ -384,13 +402,10 @@ mod tests {
 
     #[test]
     fn serialize_handles_deep_pack_chain_indices() {
+        let doc = deep_unary("x", EdslNode::Pack);
         let mem = Bump::new();
-        let mut edsl: &Edsl = mem.alloc(Edsl::Text("x"));
-        for _ in 0..DEEP {
-            edsl = mem.alloc(Edsl::Pack(edsl));
-        }
-        let serial = serialize(&mem, edsl);
-        let [SerialEntry::Last(term)] = serial else {
+        let serial = serialize(&mem, &doc);
+        let [SerialEntry::Last(term)] = serial[..] else {
             panic!("expected a single Last")
         };
         // The outermost Pack is entered first and gets index 0; indices then
@@ -407,14 +422,11 @@ mod tests {
 
     #[test]
     fn serialize_handles_deep_grp_chain() {
-        let mem = Bump::new();
         // Deep grp nesting exercises the i counter and CompList/stack depth.
-        let mut edsl: &Edsl = mem.alloc(Edsl::Text("x"));
-        for _ in 0..DEEP {
-            edsl = mem.alloc(Edsl::Grp(edsl));
-        }
+        let doc = deep_unary("x", EdslNode::Grp);
+        let mem = Bump::new();
         // Should not overflow; a single leaf yields a trivial one-Last serial.
-        let serial = serialize(&mem, edsl);
-        assert!(matches!(serial, [SerialEntry::Last(_)]));
+        let serial = serialize(&mem, &doc);
+        assert!(matches!(serial[..], [SerialEntry::Last(_)]));
     }
 }
