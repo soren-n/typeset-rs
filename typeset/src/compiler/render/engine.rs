@@ -289,14 +289,14 @@ fn fold(
             MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
             MFrame::RestoreHead(head) => st = State { head, ..st },
             MFrame::CompMid(right, pad) => {
-                st = inc_pos(if pad { 1 } else { 0 }, st);
+                st = inc_pos(usize::from(pad), st);
                 let head = st.head;
                 st = State { head: false, ..st };
                 stack.push(MFrame::RestoreHead(head));
                 stack.push(MFrame::Obj(right));
             }
             MFrame::FixCompMid(right, pad) => {
-                st = inc_pos(if pad { 1 } else { 0 }, st);
+                st = inc_pos(usize::from(pad), st);
                 stack.push(MFrame::Fix(right));
             }
         }
@@ -365,23 +365,21 @@ fn render_obj(
                 }
                 ObjNode::Fix(fix) => stack.push(RFrame::Fix(*fix)),
                 ObjNode::Grp(obj1) => {
-                    let broken = st.broken;
+                    stack.push(RFrame::RestoreBreak(st.broken));
                     st = State {
                         broken: false,
                         ..st
                     };
-                    stack.push(RFrame::RestoreBreak(broken));
                     stack.push(RFrame::Obj(*obj1));
                 }
                 ObjNode::Seq(obj1) => {
-                    if will_fit(arena, *obj1, st, marks) {
-                        stack.push(RFrame::Obj(*obj1));
-                    } else {
-                        let broken = st.broken;
+                    // A sequence that doesn't fit renders broken; either way
+                    // the child renders next.
+                    if !will_fit(arena, *obj1, st, marks) {
+                        stack.push(RFrame::RestoreBreak(st.broken));
                         st = State { broken: true, ..st };
-                        stack.push(RFrame::RestoreBreak(broken));
-                        stack.push(RFrame::Obj(*obj1));
                     }
+                    stack.push(RFrame::Obj(*obj1));
                 }
                 ObjNode::Nest(obj1) => {
                     let lvl = st.lvl;
@@ -426,7 +424,7 @@ fn render_obj(
                 let state1 = st;
                 let state3 = State {
                     head: false,
-                    ..inc_pos(if pad { 1 } else { 0 }, state1)
+                    ..inc_pos(usize::from(pad), state1)
                 };
                 if should_break(arena, right, state3, marks) {
                     let state2 = newline(state1);
@@ -435,13 +433,13 @@ fn render_obj(
                     result.push('\n');
                     push_spaces(result, offset);
                 } else {
-                    push_spaces(result, if pad { 1 } else { 0 });
+                    push_spaces(result, usize::from(pad));
                     st = state3;
                 }
                 stack.push(RFrame::Obj(right));
             }
             RFrame::FixCompMid(right, pad) => {
-                let padding = if pad { 1 } else { 0 };
+                let padding = usize::from(pad);
                 push_spaces(result, padding);
                 st = inc_pos(padding, st);
                 stack.push(RFrame::Fix(right));

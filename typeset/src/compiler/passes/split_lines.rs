@@ -10,44 +10,50 @@ use crate::compiler::types::{
     FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Serial, SerialComp, SerialEntry, Term,
 };
 
-pub fn split_lines<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
-    let mut lines: Vec<FixedLine<'a>> = Vec::new();
-    // The line currently being built.
-    let mut items: Vec<FixedItem<'a>> = Vec::new();
-    let mut seps: Vec<FixedComp<'a>> = Vec::new();
-    // The fix run currently being built (non-empty terms means a run is open).
-    let mut run_terms: Vec<&'a Term<'a>> = Vec::new();
-    let mut run_seps: Vec<FixedComp<'a>> = Vec::new();
+/// Accumulates the line currently being built, plus the fix run currently
+/// being coalesced within it (non-empty `run_terms` means a run is open).
+#[derive(Default)]
+struct LineAccum<'a> {
+    lines: Vec<FixedLine<'a>>,
+    items: Vec<FixedItem<'a>>,
+    seps: Vec<FixedComp<'a>>,
+    run_terms: Vec<&'a Term<'a>>,
+    run_seps: Vec<FixedComp<'a>>,
+}
 
-    // Appends `term` as the line's next item: as the final term of the open
-    // fix run if one is being built, else as a plain term.
-    fn push_item<'a>(
-        items: &mut Vec<FixedItem<'a>>,
-        run_terms: &mut Vec<&'a Term<'a>>,
-        run_seps: &mut Vec<FixedComp<'a>>,
-        term: &'a Term<'a>,
-    ) {
-        if run_terms.is_empty() {
-            items.push(FixedItem::Term(term));
-        } else {
-            run_terms.push(term);
-            items.push(FixedItem::Fix(FixRun {
-                terms: std::mem::take(run_terms),
-                seps: std::mem::take(run_seps),
-            }));
+impl<'a> LineAccum<'a> {
+    /// Appends `term` as the line's next item: as the final term of the open
+    /// fix run if one is being built, else as a plain term.
+    fn push_item(&mut self, term: &'a Term<'a>) {
+        if self.run_terms.is_empty() {
+            self.items.push(FixedItem::Term(term));
+            return;
         }
+        self.run_terms.push(term);
+        self.items.push(FixedItem::Fix(FixRun {
+            terms: std::mem::take(&mut self.run_terms),
+            seps: std::mem::take(&mut self.run_seps),
+        }));
     }
 
+    /// Ends the current line with `term` as its last item.
+    fn flush_line(&mut self, term: &'a Term<'a>) {
+        self.push_item(term);
+        self.lines.push(FixedLine {
+            items: std::mem::take(&mut self.items),
+            seps: std::mem::take(&mut self.seps),
+        });
+    }
+}
+
+pub fn split_lines<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
+    let mut acc = LineAccum::default();
     for entry in serial {
         match entry {
-            // A hard line break ends the current line: this entry's term is
-            // the line's last item.
-            SerialEntry::Next(term, SerialComp::Line) => {
-                push_item(&mut items, &mut run_terms, &mut run_seps, term);
-                lines.push(FixedLine {
-                    items: std::mem::take(&mut items),
-                    seps: std::mem::take(&mut seps),
-                });
+            // A hard line break ends the current line, as does the document's
+            // final term: either way this entry's term is the line's last item.
+            SerialEntry::Next(term, SerialComp::Line) | SerialEntry::Last(term) => {
+                acc.flush_line(term);
             }
             SerialEntry::Next(term, SerialComp::Comp(attr, opens, closes)) => {
                 let comp = FixedComp {
@@ -57,27 +63,18 @@ pub fn split_lines<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
                 };
                 if attr.brk.is_fixed() {
                     // A fixed composition: extend (or start) the current run.
-                    run_terms.push(term);
-                    run_seps.push(comp);
+                    acc.run_terms.push(term);
+                    acc.run_seps.push(comp);
                 } else {
                     // A non-fixed composition separates items (closing the
                     // open run, if any).
-                    push_item(&mut items, &mut run_terms, &mut run_seps, term);
-                    seps.push(comp);
+                    acc.push_item(term);
+                    acc.seps.push(comp);
                 }
-            }
-            // The document's final term: flush the last line.
-            SerialEntry::Last(term) => {
-                push_item(&mut items, &mut run_terms, &mut run_seps, term);
-                lines.push(FixedLine {
-                    items: std::mem::take(&mut items),
-                    seps: std::mem::take(&mut seps),
-                });
             }
         }
     }
-
-    FixedDoc { lines }
+    FixedDoc { lines: acc.lines }
 }
 
 #[cfg(test)]

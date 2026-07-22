@@ -47,12 +47,6 @@ use crate::compiler::{
 /// assert_eq!(render(&doc, 2, 80), "Hello, world!");
 /// ```
 pub fn compile(layout: Box<Layout>) -> Box<Doc> {
-    run_passes(layout)
-}
-
-/// Runs the pass pipeline, lowering [`Layout`] to a heap [`Doc`]. See the
-/// module docs for the pass table.
-fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     use bumpalo::Bump;
 
     // Flattening is the one step that walks the owning `Box` tree; every later

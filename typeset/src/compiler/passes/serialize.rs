@@ -111,16 +111,15 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
             fixed,
         } = work;
         match &doc.nodes[node as usize] {
-            EdslNode::Null => {
+            // A leaf: emit its term with the accumulated wrappers applied.
+            leaf @ (EdslNode::Null | EdslNode::Text(_)) => {
+                let base = match leaf {
+                    EdslNode::Text(data) => Term::Text(data),
+                    _ => Term::Null,
+                };
                 entries.push(Entry {
                     glue,
-                    term: apply_terms(mem, terms, mem.alloc(Term::Null)),
-                });
-            }
-            EdslNode::Text(data) => {
-                entries.push(Entry {
-                    glue,
-                    term: apply_terms(mem, terms, mem.alloc(Term::Text(data))),
+                    term: apply_terms(mem, terms, mem.alloc(base)),
                 });
             }
             EdslNode::Fix(child) => stack.push(Work {
@@ -130,14 +129,20 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
                 glue,
                 fixed: true,
             }),
-            EdslNode::Grp(child) => {
+            // A grp/seq wrapper: push it onto the comp accumulator (assigning
+            // the next scope index in DFS pre-order) and descend.
+            wrapper @ (EdslNode::Grp(child) | EdslNode::Seq(child)) => {
                 let index = i;
                 i += 1;
+                let wrap = match wrapper {
+                    EdslNode::Grp(_) => CompWrap::Grp(index),
+                    _ => CompWrap::Seq(index),
+                };
                 stack.push(Work {
                     node: *child,
                     terms,
                     comps: Some(mem.alloc(CompList {
-                        wrap: CompWrap::Grp(index),
+                        wrap,
                         next: comps,
                         depth: comps.map_or(0, |c| c.depth) + 1,
                     })),
@@ -145,40 +150,20 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
                     fixed,
                 });
             }
-            EdslNode::Seq(child) => {
-                let index = i;
-                i += 1;
+            // A nest/pack wrapper: push it onto the term accumulator (pack
+            // assigning the next pack index in DFS pre-order) and descend.
+            wrapper @ (EdslNode::Nest(child) | EdslNode::Pack(child)) => {
+                let wrap = match wrapper {
+                    EdslNode::Nest(_) => TermWrap::Nest,
+                    _ => {
+                        let index = j;
+                        j += 1;
+                        TermWrap::Pack(index)
+                    }
+                };
                 stack.push(Work {
                     node: *child,
-                    terms,
-                    comps: Some(mem.alloc(CompList {
-                        wrap: CompWrap::Seq(index),
-                        next: comps,
-                        depth: comps.map_or(0, |c| c.depth) + 1,
-                    })),
-                    glue,
-                    fixed,
-                });
-            }
-            EdslNode::Nest(child) => stack.push(Work {
-                node: *child,
-                terms: Some(mem.alloc(TermList {
-                    wrap: TermWrap::Nest,
-                    next: terms,
-                })),
-                comps,
-                glue,
-                fixed,
-            }),
-            EdslNode::Pack(child) => {
-                let index = j;
-                j += 1;
-                stack.push(Work {
-                    node: *child,
-                    terms: Some(mem.alloc(TermList {
-                        wrap: TermWrap::Pack(index),
-                        next: terms,
-                    })),
+                    terms: Some(mem.alloc(TermList { wrap, next: terms })),
                     comps,
                     glue,
                     fixed,
@@ -337,24 +322,18 @@ fn apply_terms<'b>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::Pad;
+    use crate::compiler::types::{Pad, push_node};
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
     const DEEP: usize = 50_000;
 
-    fn push<'a>(nodes: &mut Vec<EdslNode<'a>>, node: EdslNode<'a>) -> EdslId {
-        let id = nodes.len() as EdslId;
-        nodes.push(node);
-        id
-    }
-
     /// Wraps a `Text` leaf in `DEEP` layers of `wrap`.
     fn deep_unary(text: &'static str, wrap: fn(EdslId) -> EdslNode<'static>) -> EdslDoc<'static> {
         let mut nodes: Vec<EdslNode> = Vec::new();
-        let mut cur = push(&mut nodes, EdslNode::Text(text));
+        let mut cur = push_node(&mut nodes, EdslNode::Text(text));
         for _ in 0..DEEP {
-            cur = push(&mut nodes, wrap(cur));
+            cur = push_node(&mut nodes, wrap(cur));
         }
         EdslDoc { nodes, root: cur }
     }
@@ -367,10 +346,10 @@ mod tests {
         };
         // Right-nested Comp chain of DEEP compositions over DEEP + 1 texts.
         let mut nodes: Vec<EdslNode> = Vec::new();
-        let mut cur = push(&mut nodes, EdslNode::Text("z"));
+        let mut cur = push_node(&mut nodes, EdslNode::Text("z"));
         for _ in 0..DEEP {
-            let left = push(&mut nodes, EdslNode::Text("y"));
-            cur = push(&mut nodes, EdslNode::Comp(left, cur, attr));
+            let left = push_node(&mut nodes, EdslNode::Text("y"));
+            cur = push_node(&mut nodes, EdslNode::Comp(left, cur, attr));
         }
         let doc = EdslDoc { nodes, root: cur };
         let mem = Bump::new();
