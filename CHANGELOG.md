@@ -6,6 +6,47 @@ entry for each release before tagging it (see the release steps in
 [Semantic Versioning](https://semver.org/). Entries below `3.2.1` were generated
 by the previous automated release tooling.
 
+## [Unreleased]
+
+The next release is a **major version bump**: the entries below include breaking
+API changes. Migrate per the notes in each item.
+
+### Breaking Changes
+
+* **`comp`'s composition axes are now enums.** `comp(left, right, pad: bool, fix:
+  bool)` becomes `comp(left, right, pad: Pad, brk: Break)`, with `Pad::{Padded,
+  Unpadded}` and `Break::{Breakable, Fixed}` exported from the crate root.
+  Migration: on the pad axis `true` → `Padded`, `false` → `Unpadded`; on the
+  break axis `true` → `Fixed`, `false` → `Breakable`. The
+  `pad`/`unpad`/`fix_pad`/`fix_unpad` shortcuts are unchanged.
+* **The depth-limiting and error-handling API is removed.** `compile_safe`,
+  `compile_safe_with_depth`, `compile_within_depth`, `CompilerError`, and
+  `DepthLimitExceeded` are all gone — the crate no longer exports an error type.
+  `compile()` is the sole entry point and is infallible: the pipeline is fully
+  iterative, so no layout is too deep to compile and there is no depth cap.
+  Migration: replace `compile_safe(l)` / `compile_within_depth(l, n)` with
+  `compile(l)`, which returns `Box<Doc>` directly rather than a `Result`.
+* **`text()` now accepts `impl Into<String>`** (so it takes `&str` or `String`);
+  the separate `text_str()` is removed. Migration: drop `text_str`, call `text`.
+* **`Doc` is now an opaque struct** (a flat `Vec`-backed arena) instead of a
+  public enum; the `DocObj` / `DocObjFix` payload types are removed. `Doc` was
+  already opaque in use — no public constructors, payload types unexported — and
+  the `compile` / `render` / `render_ref` signatures are unchanged, so only code
+  that pattern-matched `Doc`'s variants is affected. `Debug` / `Display` output
+  is byte-identical.
+
+### Performance Improvements
+
+* Deeply nested `grp`/`seq` scopes now compile in **linear time** (previously
+  O(n²)); e.g. a 16k-deep nested-`seq` chain dropped from ~5s to ~9ms.
+
+### Changed
+
+* `compile()` no longer panics on very deep layouts (it previously aborted past
+  ~10,000 levels). The passes, heap conversion, renderer, and the `Doc`/`Layout`
+  `Clone`/`Drop`/`Debug` impls all run iteratively, so deep layouts never
+  overflow the native stack; depth shows up as O(depth) heap instead.
+
 ## [3.2.1](https://github.com/soren-n/typeset-rs/compare/v3.2.0...v3.2.1) (2026-07-21)
 
 
