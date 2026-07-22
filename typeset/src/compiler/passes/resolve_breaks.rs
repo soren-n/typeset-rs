@@ -10,7 +10,7 @@
 //! 3. build — forward: emit the Edsl arena, rewriting compositions to lines
 //!    and dropping broken seq wrappers as the flags dictate.
 
-use crate::compiler::types::{EdslDoc, EdslId, EdslNode, LayoutArena, LayoutNode};
+use crate::compiler::types::{EdslDoc, EdslId, EdslNode, LayoutArena, LayoutNode, push_node};
 
 pub fn resolve_breaks(arena: &LayoutArena) -> EdslDoc<'_> {
     let n = arena.nodes.len();
@@ -49,31 +49,26 @@ pub fn resolve_breaks(arena: &LayoutArena) -> EdslDoc<'_> {
     }
 
     // 3. build: emit the Edsl arena bottom-up.
-    fn push<'a>(nodes: &mut Vec<EdslNode<'a>>, node: EdslNode<'a>) -> EdslId {
-        let id = nodes.len() as EdslId;
-        nodes.push(node);
-        id
-    }
     let mut nodes: Vec<EdslNode> = Vec::with_capacity(n);
     let mut out: Vec<EdslId> = Vec::with_capacity(n);
     for (i, node) in arena.nodes.iter().enumerate() {
         let id = match node {
-            LayoutNode::Null => push(&mut nodes, EdslNode::Null),
-            LayoutNode::Text(data) => push(&mut nodes, EdslNode::Text(data)),
-            LayoutNode::Fix(c) => push(&mut nodes, EdslNode::Fix(out[*c as usize])),
-            LayoutNode::Grp(c) => push(&mut nodes, EdslNode::Grp(out[*c as usize])),
+            LayoutNode::Null => push_node(&mut nodes, EdslNode::Null),
+            LayoutNode::Text(data) => push_node(&mut nodes, EdslNode::Text(data)),
+            LayoutNode::Fix(c) => push_node(&mut nodes, EdslNode::Fix(out[*c as usize])),
+            LayoutNode::Grp(c) => push_node(&mut nodes, EdslNode::Grp(out[*c as usize])),
             LayoutNode::Seq(c) => {
                 // A sequence that already breaks is dropped: its content is
                 // unconditionally broken (the flag spread takes care of that).
                 if has_line[*c as usize] {
                     out[*c as usize]
                 } else {
-                    push(&mut nodes, EdslNode::Seq(out[*c as usize]))
+                    push_node(&mut nodes, EdslNode::Seq(out[*c as usize]))
                 }
             }
-            LayoutNode::Nest(c) => push(&mut nodes, EdslNode::Nest(out[*c as usize])),
-            LayoutNode::Pack(c) => push(&mut nodes, EdslNode::Pack(out[*c as usize])),
-            LayoutNode::Line(l, r) => push(
+            LayoutNode::Nest(c) => push_node(&mut nodes, EdslNode::Nest(out[*c as usize])),
+            LayoutNode::Pack(c) => push_node(&mut nodes, EdslNode::Pack(out[*c as usize])),
+            LayoutNode::Line(l, r) => push_node(
                 &mut nodes,
                 EdslNode::Line(out[*l as usize], out[*r as usize]),
             ),
@@ -81,12 +76,12 @@ pub fn resolve_breaks(arena: &LayoutArena) -> EdslDoc<'_> {
                 // Inside a broken sequence, a breakable composition becomes a
                 // hard line.
                 if brk[i] && !attr.brk.is_fixed() {
-                    push(
+                    push_node(
                         &mut nodes,
                         EdslNode::Line(out[*l as usize], out[*r as usize]),
                     )
                 } else {
-                    push(
+                    push_node(
                         &mut nodes,
                         EdslNode::Comp(out[*l as usize], out[*r as usize], *attr),
                     )

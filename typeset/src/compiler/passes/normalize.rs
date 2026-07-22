@@ -14,7 +14,7 @@
 //! in reverse order), and a forward pass computing the bottom-up rebuild
 //! (children precede parents in forward order). No frame stacks anywhere.
 
-use crate::compiler::types::{DObjId, DenullDoc, DenullFix, DenullObj, DenullRow};
+use crate::compiler::types::{DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, push_node};
 
 /// Normalize the grp/seq composition algebra.
 pub fn normalize(doc: DenullDoc) -> DenullDoc {
@@ -42,13 +42,6 @@ fn add(left: Count, right: Count) -> Count {
     }
 }
 
-/// Append an arena node and return its index.
-fn push<'a>(objs: &mut Vec<DenullObj<'a>>, node: DenullObj<'a>) -> DObjId {
-    let id = objs.len() as DObjId;
-    objs.push(node);
-    id
-}
-
 /// Remap a spine row through the fold's old-id → new-id table.
 fn map_row(row: DenullRow, out: &[DObjId]) -> DenullRow {
     match row {
@@ -67,10 +60,10 @@ fn leaf_obj<'a>(
 ) -> DObjId {
     match node {
         DenullObj::Fix(fix) => match &fixes[fix as usize] {
-            DenullFix::Term(term) => push(objs, DenullObj::Term(term.clone())),
-            DenullFix::Comp(..) => push(objs, DenullObj::Fix(fix)),
+            DenullFix::Term(term) => push_node(objs, DenullObj::Term(term.clone())),
+            DenullFix::Comp(..) => push_node(objs, DenullObj::Fix(fix)),
         },
-        other => push(objs, other),
+        other => push_node(objs, other),
     }
 }
 
@@ -106,7 +99,7 @@ fn elim_seqs(doc: DenullDoc) -> DenullDoc {
             }
             DenullObj::Grp(c1) => (
                 Count::Zero,
-                push(&mut objs, DenullObj::Grp(out[c1 as usize])),
+                push_node(&mut objs, DenullObj::Grp(out[c1 as usize])),
             ),
             DenullObj::Seq(c1) => {
                 let (cc, cid) = (count[c1 as usize], out[c1 as usize]);
@@ -116,13 +109,13 @@ fn elim_seqs(doc: DenullDoc) -> DenullDoc {
                 } else {
                     match cc {
                         Count::Zero | Count::One => (cc, cid),
-                        Count::Many => (Count::Many, push(&mut objs, DenullObj::Seq(cid))),
+                        Count::Many => (Count::Many, push_node(&mut objs, DenullObj::Seq(cid))),
                     }
                 }
             }
             DenullObj::Comp(l, r, pad) => (
                 add(Count::One, add(count[l as usize], count[r as usize])),
-                push(
+                push_node(
                     &mut objs,
                     DenullObj::Comp(out[l as usize], out[r as usize], pad),
                 ),
@@ -179,7 +172,7 @@ fn elim_grps(doc: DenullDoc) -> DenullDoc {
             }
             DenullObj::Seq(c1) => (
                 count[c1 as usize],
-                push(&mut objs, DenullObj::Seq(out[c1 as usize])),
+                push_node(&mut objs, DenullObj::Seq(out[c1 as usize])),
             ),
             DenullObj::Grp(c1) => {
                 let (cc, cid) = (count[c1 as usize], out[c1 as usize]);
@@ -190,14 +183,14 @@ fn elim_grps(doc: DenullDoc) -> DenullDoc {
                     match cc {
                         Count::Zero => (Count::Zero, cid),
                         Count::One | Count::Many => {
-                            (Count::Zero, push(&mut objs, DenullObj::Grp(cid)))
+                            (Count::Zero, push_node(&mut objs, DenullObj::Grp(cid)))
                         }
                     }
                 }
             }
             DenullObj::Comp(l, r, pad) => (
                 add(Count::One, add(count[l as usize], count[r as usize])),
-                push(
+                push_node(
                     &mut objs,
                     DenullObj::Comp(out[l as usize], out[r as usize], pad),
                 ),
@@ -259,7 +252,7 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
         // Rebuild right-nested: Comp(a0, Comp(a1, ..., p1), p0).
         let mut result = *atoms.last().expect("a chain has at least one atom");
         for k in (0..pads.len()).rev() {
-            result = push(objs, DenullObj::Comp(atoms[k], result, pads[k]));
+            result = push_node(objs, DenullObj::Comp(atoms[k], result, pads[k]));
         }
         result
     }
@@ -267,19 +260,19 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
     for (i, node) in doc.objs.into_iter().enumerate() {
         match node {
             DenullObj::Term(_) | DenullObj::Fix(_) => {
-                atom_out[i] = push(&mut objs, node);
+                atom_out[i] = push_node(&mut objs, node);
                 head[i] = i as DObjId;
                 tail[i] = i as DObjId;
             }
             DenullObj::Grp(c) => {
                 let spine = materialize(&mut objs, &atom_out, &next, head[c as usize]);
-                atom_out[i] = push(&mut objs, DenullObj::Grp(spine));
+                atom_out[i] = push_node(&mut objs, DenullObj::Grp(spine));
                 head[i] = i as DObjId;
                 tail[i] = i as DObjId;
             }
             DenullObj::Seq(c) => {
                 let spine = materialize(&mut objs, &atom_out, &next, head[c as usize]);
-                atom_out[i] = push(&mut objs, DenullObj::Seq(spine));
+                atom_out[i] = push_node(&mut objs, DenullObj::Seq(spine));
                 head[i] = i as DObjId;
                 tail[i] = i as DObjId;
             }
@@ -341,10 +334,10 @@ mod tests {
         // Left-nested comp chain, no grp/seq: normalization rebuilds it
         // right-nested (a right spine of DEEP compositions).
         let mut objs: Vec<DenullObj> = Vec::new();
-        let mut cur = push(&mut objs, term("a"));
+        let mut cur = push_node(&mut objs, term("a"));
         for _ in 0..DEEP {
-            let right = push(&mut objs, term("b"));
-            cur = push(&mut objs, DenullObj::Comp(cur, right, false));
+            let right = push_node(&mut objs, term("b"));
+            cur = push_node(&mut objs, DenullObj::Comp(cur, right, false));
         }
         let out = normalize(line_doc(objs, cur));
         let [DenullRow::Line(root)] = out.rows[..] else {
@@ -364,9 +357,9 @@ mod tests {
     fn normalize_collapses_deep_seq_nesting() {
         // Deep seq nesting over a single term collapses away entirely.
         let mut objs: Vec<DenullObj> = Vec::new();
-        let mut cur = push(&mut objs, term("x"));
+        let mut cur = push_node(&mut objs, term("x"));
         for _ in 0..DEEP {
-            cur = push(&mut objs, DenullObj::Seq(cur));
+            cur = push_node(&mut objs, DenullObj::Seq(cur));
         }
         let out = normalize(line_doc(objs, cur));
         let [DenullRow::Line(root)] = out.rows[..] else {
@@ -378,9 +371,9 @@ mod tests {
     #[test]
     fn normalize_collapses_deep_grp_nesting() {
         let mut objs: Vec<DenullObj> = Vec::new();
-        let mut cur = push(&mut objs, term("x"));
+        let mut cur = push_node(&mut objs, term("x"));
         for _ in 0..DEEP {
-            cur = push(&mut objs, DenullObj::Grp(cur));
+            cur = push_node(&mut objs, DenullObj::Grp(cur));
         }
         let out = normalize(line_doc(objs, cur));
         let [DenullRow::Line(root)] = out.rows[..] else {
@@ -394,7 +387,7 @@ mod tests {
         let mut objs: Vec<DenullObj> = Vec::new();
         let mut rows: Vec<DenullRow> = Vec::new();
         for _ in 0..DEEP {
-            rows.push(DenullRow::Break(push(&mut objs, term("x"))));
+            rows.push(DenullRow::Break(push_node(&mut objs, term("x"))));
         }
         let doc = DenullDoc {
             rows,
@@ -410,10 +403,10 @@ mod tests {
         // A seq grouping a single composition collapses; a seq grouping two or
         // more is kept.
         let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push(&mut objs, term("a"));
-        let b = push(&mut objs, term("b"));
-        let comp = push(&mut objs, DenullObj::Comp(a, b, false));
-        let one = push(&mut objs, DenullObj::Seq(comp));
+        let a = push_node(&mut objs, term("a"));
+        let b = push_node(&mut objs, term("b"));
+        let comp = push_node(&mut objs, DenullObj::Comp(a, b, false));
+        let one = push_node(&mut objs, DenullObj::Seq(comp));
         let out = elim_seqs(line_doc(objs, one));
         let [DenullRow::Line(root)] = out.rows[..] else {
             panic!("expected a line");
@@ -424,12 +417,12 @@ mod tests {
         );
 
         let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push(&mut objs, term("a"));
-        let b = push(&mut objs, term("b"));
-        let ab = push(&mut objs, DenullObj::Comp(a, b, false));
-        let c = push(&mut objs, term("c"));
-        let abc = push(&mut objs, DenullObj::Comp(ab, c, false));
-        let two = push(&mut objs, DenullObj::Seq(abc));
+        let a = push_node(&mut objs, term("a"));
+        let b = push_node(&mut objs, term("b"));
+        let ab = push_node(&mut objs, DenullObj::Comp(a, b, false));
+        let c = push_node(&mut objs, term("c"));
+        let abc = push_node(&mut objs, DenullObj::Comp(ab, c, false));
+        let two = push_node(&mut objs, DenullObj::Seq(abc));
         let out = elim_seqs(line_doc(objs, two));
         let [DenullRow::Line(root)] = out.rows[..] else {
             panic!("expected a line");

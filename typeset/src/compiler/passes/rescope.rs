@@ -113,17 +113,11 @@ fn wrap_props(b: &mut DocBuilder, props: &[Prop], term: ObjId) -> ObjId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{DObjId, DenullTerm};
+    use crate::compiler::types::{DObjId, DenullTerm, push_node};
 
     /// Far past where a native-stack recursion could survive; with flat arenas
     /// the folds are plain loops, so this now guards sizing behavior only.
     const DEEP: usize = 50_000;
-
-    fn push<'a>(objs: &mut Vec<DenullObj<'a>>, node: DenullObj<'a>) -> DObjId {
-        let id = objs.len() as DObjId;
-        objs.push(node);
-        id
-    }
 
     fn nest_term(depth: usize, text: &'static str) -> DenullObj<'static> {
         DenullObj::Term(DenullTerm {
@@ -151,7 +145,7 @@ mod tests {
     #[test]
     fn rescope_reapplies_deep_nest_props() {
         let mut objs: Vec<DenullObj> = Vec::new();
-        let root = push(&mut objs, nest_term(DEEP, "x"));
+        let root = push_node(&mut objs, nest_term(DEEP, "x"));
         let out = rescope(line_doc(objs, root));
         // The stripped nests are re-applied around the text.
         let mut count = 0usize;
@@ -169,9 +163,9 @@ mod tests {
         // Both operands share a Nest^DEEP prefix: rescoping lifts all of it
         // out around the composition.
         let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push(&mut objs, nest_term(DEEP, "a"));
-        let bx = push(&mut objs, nest_term(DEEP, "b"));
-        let root = push(&mut objs, DenullObj::Comp(a, bx, false));
+        let a = push_node(&mut objs, nest_term(DEEP, "a"));
+        let bx = push_node(&mut objs, nest_term(DEEP, "b"));
+        let root = push_node(&mut objs, DenullObj::Comp(a, bx, false));
         let out = rescope(line_doc(objs, root));
         let mut count = 0usize;
         let mut cur = line_root(&out);
@@ -193,21 +187,21 @@ mod tests {
         // Left is Nest(text), right is Pack(text): no common prefix, so each
         // operand keeps its own wrapper under the composition.
         let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push(
+        let a = push_node(
             &mut objs,
             DenullObj::Term(DenullTerm {
                 props: vec![Prop::Nest],
                 text: "a",
             }),
         );
-        let bx = push(
+        let bx = push_node(
             &mut objs,
             DenullObj::Term(DenullTerm {
                 props: vec![Prop::Pack(3)],
                 text: "b",
             }),
         );
-        let root = push(&mut objs, DenullObj::Comp(a, bx, true));
+        let root = push_node(&mut objs, DenullObj::Comp(a, bx, true));
         let out = rescope(line_doc(objs, root));
         let ObjNode::Comp(left, right, pad) = out.objs()[line_root(&out) as usize] else {
             panic!("expected a comp root")
@@ -221,10 +215,10 @@ mod tests {
     fn rescope_handles_deep_comp_object() {
         // Right-nested comp of plain terms.
         let mut objs: Vec<DenullObj> = Vec::new();
-        let mut cur = push(&mut objs, nest_term(0, "z"));
+        let mut cur = push_node(&mut objs, nest_term(0, "z"));
         for _ in 0..DEEP {
-            let left = push(&mut objs, nest_term(0, "y"));
-            cur = push(&mut objs, DenullObj::Comp(left, cur, false));
+            let left = push_node(&mut objs, nest_term(0, "y"));
+            cur = push_node(&mut objs, DenullObj::Comp(left, cur, false));
         }
         let out = rescope(line_doc(objs, cur));
         let mut count = 0usize;
@@ -240,19 +234,22 @@ mod tests {
     fn rescope_fix_comp_keeps_left_props_only() {
         let mut objs: Vec<DenullObj> = Vec::new();
         let mut fixes: Vec<DenullFix> = Vec::new();
-        let fa = fixes.len() as u32;
-        fixes.push(DenullFix::Term(DenullTerm {
-            props: vec![Prop::Nest],
-            text: "a",
-        }));
-        let fb = fixes.len() as u32;
-        fixes.push(DenullFix::Term(DenullTerm {
-            props: vec![Prop::Nest],
-            text: "b",
-        }));
-        let fc = fixes.len() as u32;
-        fixes.push(DenullFix::Comp(fa, fb, false));
-        let root = push(&mut objs, DenullObj::Fix(fc));
+        let fa = push_node(
+            &mut fixes,
+            DenullFix::Term(DenullTerm {
+                props: vec![Prop::Nest],
+                text: "a",
+            }),
+        );
+        let fb = push_node(
+            &mut fixes,
+            DenullFix::Term(DenullTerm {
+                props: vec![Prop::Nest],
+                text: "b",
+            }),
+        );
+        let fc = push_node(&mut fixes, DenullFix::Comp(fa, fb, false));
+        let root = push_node(&mut objs, DenullObj::Fix(fc));
         let doc = DenullDoc {
             rows: vec![DenullRow::Line(root)],
             objs,
@@ -274,7 +271,7 @@ mod tests {
         let mut objs: Vec<DenullObj> = Vec::new();
         let mut rows: Vec<DenullRow> = Vec::new();
         for _ in 0..DEEP {
-            rows.push(DenullRow::Break(push(&mut objs, nest_term(0, "x"))));
+            rows.push(DenullRow::Break(push_node(&mut objs, nest_term(0, "x"))));
         }
         let doc = DenullDoc {
             rows,

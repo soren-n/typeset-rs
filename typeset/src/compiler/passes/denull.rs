@@ -9,7 +9,7 @@
 
 use crate::compiler::types::{
     DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, DenullTerm, Prop, RebuildDoc,
-    RebuildFix, RebuildObj, Term,
+    RebuildFix, RebuildObj, Term, push_node,
 };
 
 /// Result of denulling an object: nothing survived (`None`); an object
@@ -33,13 +33,13 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
         let res = match node {
             RebuildFix::Term(term) => match strip_term(term) {
                 None => Res::None,
-                Some(term1) => Res::Some(push(&mut fixes, DenullFix::Term(term1))),
+                Some(term1) => Res::Some(push_node(&mut fixes, DenullFix::Term(term1))),
             },
             RebuildFix::Comp(left, right, l_pad) => comp_res(
                 fix_res[*left as usize],
                 fix_res[*right as usize],
                 *l_pad,
-                |left1, right1, pad| push(&mut fixes, DenullFix::Comp(left1, right1, pad)),
+                |left1, right1, pad| push_node(&mut fixes, DenullFix::Comp(left1, right1, pad)),
             ),
         };
         fix_res.push(res);
@@ -51,12 +51,12 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
         let res = match node {
             RebuildObj::Term(term) => match strip_term(term) {
                 None => Res::None,
-                Some(term1) => Res::Some(push(&mut objs, DenullObj::Term(term1))),
+                Some(term1) => Res::Some(push_node(&mut objs, DenullObj::Term(term1))),
             },
             RebuildObj::Fix(fix) => match fix_res[*fix as usize] {
                 Res::None => Res::None,
                 Res::Some(fix1) | Res::NextNone(_, fix1) => {
-                    Res::Some(push(&mut objs, DenullObj::Fix(fix1)))
+                    Res::Some(push_node(&mut objs, DenullObj::Fix(fix1)))
                 }
             },
             RebuildObj::Grp(obj1) => wrap_obj(&mut objs, obj_res[*obj1 as usize], DenullObj::Grp),
@@ -65,7 +65,7 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
                 obj_res[*left as usize],
                 obj_res[*right as usize],
                 *l_pad,
-                |left1, right1, pad| push(&mut objs, DenullObj::Comp(left1, right1, pad)),
+                |left1, right1, pad| push_node(&mut objs, DenullObj::Comp(left1, right1, pad)),
             ),
         };
         obj_res.push(res);
@@ -95,13 +95,6 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
     }
 
     DenullDoc { rows, objs, fixes }
-}
-
-/// Append an arena node and return its index.
-fn push<T>(arena: &mut Vec<T>, node: T) -> u32 {
-    let id = arena.len() as u32;
-    arena.push(node);
-    id
 }
 
 /// The composition rule shared by the object and fix folds: a dropped left
@@ -137,7 +130,7 @@ fn wrap_obj<'a>(
 ) -> Res<DObjId> {
     match val {
         Res::None => Res::None,
-        Res::Some(obj) | Res::NextNone(_, obj) => Res::Some(push(objs, ctor(obj))),
+        Res::Some(obj) | Res::NextNone(_, obj) => Res::Some(push_node(objs, ctor(obj))),
     }
 }
 
@@ -185,10 +178,10 @@ mod tests {
         // Right-nested Comp chain: Comp(Term, Comp(Term, ... Term)). Each left
         // operand is a surviving Term, so the whole object survives.
         let mut objs: Vec<RebuildObj> = Vec::new();
-        let mut cur = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("z"))));
+        let mut cur = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("z"))));
         for _ in 0..DEEP {
-            let left = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("y"))));
-            cur = push(&mut objs, RebuildObj::Comp(left, cur, false));
+            let left = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("y"))));
+            cur = push_node(&mut objs, RebuildObj::Comp(left, cur, false));
         }
         let doc = RebuildDoc {
             lines: vec![cur],
@@ -217,7 +210,7 @@ mod tests {
             term = mem.alloc(Term::Nest(term));
         }
         let mut objs: Vec<RebuildObj> = Vec::new();
-        let root = push(&mut objs, RebuildObj::Term(term));
+        let root = push_node(&mut objs, RebuildObj::Term(term));
         let doc = RebuildDoc {
             lines: vec![root],
             objs,
@@ -241,11 +234,11 @@ mod tests {
         // Comp(Text "a", Comp(Null, Text "x", pad=true), pad=false): the null
         // vanishes and its pad merges onto the surviving composition.
         let mut objs: Vec<RebuildObj> = Vec::new();
-        let n1 = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
-        let t = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("x"))));
-        let inner = push(&mut objs, RebuildObj::Comp(n1, t, true));
-        let a = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("a"))));
-        let root = push(&mut objs, RebuildObj::Comp(a, inner, false));
+        let n1 = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
+        let t = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("x"))));
+        let inner = push_node(&mut objs, RebuildObj::Comp(n1, t, true));
+        let a = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("a"))));
+        let root = push_node(&mut objs, RebuildObj::Comp(a, inner, false));
         let doc = RebuildDoc {
             lines: vec![root],
             objs,
@@ -267,7 +260,7 @@ mod tests {
         let mut objs: Vec<RebuildObj> = Vec::new();
         let mut lines: Vec<RObjId> = Vec::new();
         for _ in 0..DEEP {
-            lines.push(push(
+            lines.push(push_node(
                 &mut objs,
                 RebuildObj::Term(mem.alloc(Term::Text("x"))),
             ));
@@ -294,9 +287,9 @@ mod tests {
         // Lines: [Text "a", Null, Null]. The first null line becomes an Empty
         // row; the trailing one is the document end and emits no row.
         let mut objs: Vec<RebuildObj> = Vec::new();
-        let a = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("a"))));
-        let n1 = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
-        let n2 = push(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
+        let a = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("a"))));
+        let n1 = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
+        let n2 = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
         let doc = RebuildDoc {
             lines: vec![a, n1, n2],
             objs,
@@ -316,10 +309,10 @@ mod tests {
         // the fix survives as its left.
         let mut objs: Vec<RebuildObj> = Vec::new();
         let mut fixes: Vec<RebuildFix> = Vec::new();
-        let fa = push(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text("a"))));
-        let fe = push(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text(""))));
-        let fc = push(&mut fixes, RebuildFix::Comp(fa, fe, true));
-        let root = push(&mut objs, RebuildObj::Fix(fc));
+        let fa = push_node(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text("a"))));
+        let fe = push_node(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text(""))));
+        let fc = push_node(&mut fixes, RebuildFix::Comp(fa, fe, true));
+        let root = push_node(&mut objs, RebuildObj::Fix(fc));
         let doc = RebuildDoc {
             lines: vec![root],
             objs,

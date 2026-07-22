@@ -102,16 +102,12 @@ impl DocBuilder {
 
     /// Append an object node and return its arena index.
     pub(crate) fn obj(&mut self, node: ObjNode) -> ObjId {
-        let id = self.objs.len() as ObjId;
-        self.objs.push(node);
-        id
+        super::push_node(&mut self.objs, node)
     }
 
     /// Append a fixed-object node and return its arena index.
     pub(crate) fn fix(&mut self, node: FixNode) -> FixId {
-        let id = self.fixes.len() as FixId;
-        self.fixes.push(node);
-        id
+        super::push_node(&mut self.fixes, node)
     }
 
     /// Assemble the finished document from the collected spine rows.
