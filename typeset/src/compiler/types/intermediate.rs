@@ -74,62 +74,48 @@ pub enum SerialComp<'a> {
     Comp(Attr, &'a [Scope], &'a [Scope]),
 }
 
-// Fourth intermediate representation: LinearDoc.
+// Fourth intermediate representation: FixedDoc.
 //
-// The document spine is a flat slice of line objects in document order. (It was
-// once a `Cons`/`Nil` cons-list, but the spine has no structural sharing — it is
-// built from a `Vec` and walked linearly — so a slice is the honest shape.) The
-// per-line term/comp chain (`LinearObj`) stays a cons-list.
-pub type LinearDoc<'a> = &'a [&'a LinearObj<'a>];
-
-#[derive(Debug)]
-pub enum LinearObj<'a> {
-    Next(&'a Term<'a>, &'a LinearComp<'a>, &'a LinearObj<'a>),
-    Last(&'a Term<'a>),
-}
-
-/// A composition: its attributes, the scopes opening here, and the scopes
-/// closing here.
-#[derive(Debug)]
-pub struct LinearComp<'a> {
-    pub attr: Attr,
-    pub opens: &'a [Scope],
-    pub closes: &'a [Scope],
-}
-
-// Fifth intermediate representation: FixedDoc.
-//
-// Like `LinearDoc`, the document spine is a flat slice of line objects in
-// document order (formerly an `Eod`/`Break` cons-list, but with no sharing:
-// `fixed` builds it from a `Vec` and `graphify` walks it once). The per-line
-// item chain (`FixedObj`) stays a cons-list.
-pub type FixedDoc<'a> = &'a [&'a FixedObj<'a>];
-
-#[derive(Debug)]
-pub enum FixedObj<'a> {
-    Next(&'a FixedItem<'a>, &'a FixedComp<'a>, &'a FixedObj<'a>),
-    Last(&'a FixedItem<'a>),
-}
-
-#[derive(Debug)]
-pub enum FixedItem<'a> {
-    Fix(&'a FixedFix<'a>),
-    Term(&'a Term<'a>),
-}
+// An owned flat structure: lines in document order, each line its items with
+// the non-fixed compositions separating them, and maximal runs of terms joined
+// by fixed compositions coalesced into single fix items. (This replaces the
+// former LinearDoc + cons-list FixedDoc pair — splitting lines and coalescing
+// fixed runs happen in one sweep over the serial entries.)
 
 /// A composition: its pad flag, the scopes opening here, and the scopes
 /// closing here.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct FixedComp<'a> {
     pub pad: bool,
     pub opens: &'a [Scope],
     pub closes: &'a [Scope],
 }
 
+/// A maximal run of terms joined by fixed compositions, coalesced into one
+/// unbreakable item. `seps[i]` sits between `terms[i]` and `terms[i + 1]`.
 #[derive(Debug)]
-pub enum FixedFix<'a> {
-    Next(&'a Term<'a>, &'a FixedComp<'a>, &'a FixedFix<'a>),
-    Last(&'a Term<'a>),
+pub struct FixRun<'a> {
+    pub terms: Vec<&'a Term<'a>>,
+    pub seps: Vec<FixedComp<'a>>,
+}
+
+#[derive(Debug)]
+pub enum FixedItem<'a> {
+    Term(&'a Term<'a>),
+    Fix(FixRun<'a>),
+}
+
+/// One line: its items and the non-fixed compositions separating them.
+/// `seps[i]` sits between `items[i]` and `items[i + 1]`.
+#[derive(Debug)]
+pub struct FixedLine<'a> {
+    pub items: Vec<FixedItem<'a>>,
+    pub seps: Vec<FixedComp<'a>>,
+}
+
+#[derive(Debug)]
+pub struct FixedDoc<'a> {
+    pub lines: Vec<FixedLine<'a>>,
 }
 
 // Sixth intermediate representation: RebuildDoc.

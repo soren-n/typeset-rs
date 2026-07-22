@@ -85,13 +85,16 @@ pub(super) struct GraphEdge<'a> {
 #[derive(Debug, Copy, Clone)]
 pub(super) enum GraphItem<'a> {
     Term(&'a Term<'a>),
-    Fix(&'a GraphFix<'a>),
+    Fix(&'a GraphFixRun<'a>),
 }
 
+/// A coalesced fixed group: its terms and the pads between adjacent terms.
+/// (The scope deltas its separators carried are replayed by `graphify` when
+/// this is built; only the pads survive into the graph.)
 #[derive(Debug)]
-pub(super) enum GraphFix<'a> {
-    Last(&'a Term<'a>),
-    Next(&'a Term<'a>, &'a GraphFix<'a>, bool),
+pub(super) struct GraphFixRun<'a> {
+    pub terms: Vec<&'a Term<'a>>,
+    pub pads: Vec<bool>,
 }
 
 /// Per-node data `rebuild` reads from the solved graph: the node's item, its

@@ -19,7 +19,7 @@
 //! iterative, so no layout is too deep to compile and there is no depth cap.
 
 use crate::compiler::{
-    passes::{broken, denull, fixed, linearize, normalize, rescope, serialize, structurize},
+    passes::{broken, denull, fixed, normalize, rescope, serialize, structurize},
     render::render_ref as render_ref_impl,
     types::{Doc, Layout},
 };
@@ -56,16 +56,12 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     let mem2 = Bump::new();
     let serial = serialize(&mem2, edsl);
 
+    let fixed_doc = fixed(serial);
+
     let mem3 = Bump::new();
-    let linear_doc = linearize(&mem3, serial);
+    let rebuild_doc = structurize(&mem3, &fixed_doc);
 
-    let mem4 = Bump::new();
-    let fixed_doc = fixed(&mem4, linear_doc);
-
-    let mem5 = Bump::new();
-    let rebuild_doc = structurize(&mem5, fixed_doc);
-
-    // The final three passes work on owned flat arenas — no bumps needed.
+    // The remaining passes work on owned flat structures — no bumps needed.
     let denull_doc = denull(&rebuild_doc);
     let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)

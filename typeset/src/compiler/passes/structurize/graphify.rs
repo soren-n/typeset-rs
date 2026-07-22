@@ -10,9 +10,9 @@
 //! O(n^2) (the old full-stack diff did). `solve` and `rebuild` are unchanged.
 
 use super::graph::{
-    GraphDoc, GraphEdge, GraphFix, GraphItem, GraphLine, GraphNode, Property, build_graph_doc,
+    GraphDoc, GraphEdge, GraphFixRun, GraphItem, GraphLine, GraphNode, Property, build_graph_doc,
 };
-use crate::compiler::types::{FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, Scope, Term};
+use crate::compiler::types::{FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Scope};
 use bumpalo::Bump;
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -113,103 +113,74 @@ fn push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
     }
 }
 
-pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> &'b GraphDoc<'b> {
-    fn visit_doc<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> &'b GraphDoc<'b> {
-        // Walk the linear FixedDoc spine, graphifying each line's object, then
-        // fold the resulting lines into a GraphDoc spine.
-        let mut breaks: Vec<GraphLine<'b>> = Vec::new();
-        for obj in doc {
-            breaks.push(visit_obj(mem, obj));
-        }
-        build_graph_doc(mem, &breaks)
+pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &FixedDoc<'a>) -> &'b GraphDoc<'b> {
+    let mut breaks: Vec<GraphLine<'b>> = Vec::new();
+    for line in &doc.lines {
+        breaks.push(visit_line(mem, line));
     }
-    fn visit_obj<'b, 'a: 'b>(
-        mem: &'b Bump,
-        obj: &'a FixedObj<'a>,
-    ) -> (&'b [&'b GraphNode<'b>], &'b [bool]) {
-        // Walk the object's item chain, assigning a node index per item and
-        // replaying each composition's scope deltas at that index. A fix item's
-        // internal comps and its trailing separator all share the item's index,
-        // exactly as document order threads them.
-        let mut nodes_vec: Vec<&'b GraphNode<'b>> = Vec::new();
-        let mut pads_vec: Vec<bool> = Vec::new();
-        let mut open: OpenScopes = BTreeMap::new();
-        let mut edges: Vec<Edge> = Vec::new();
-        let mut index: u64 = 0;
-        let mut cur = obj;
-        let last_index: u64 = loop {
-            match cur {
-                FixedObj::Next(item, comp, obj1) => {
-                    let item1 = match item {
-                        FixedItem::Term(term) => GraphItem::Term(term),
-                        FixedItem::Fix(fix) => {
-                            GraphItem::Fix(visit_fix(mem, fix, index, &mut open, &mut edges))
-                        }
-                    };
-                    nodes_vec.push(make_node(mem, index, item1));
-                    pads_vec.push(apply_comp(index, comp, &mut open, &mut edges));
-                    index += 1;
-                    cur = obj1;
-                }
-                FixedObj::Last(item) => {
-                    let item1 = match item {
-                        FixedItem::Term(term) => GraphItem::Term(term),
-                        FixedItem::Fix(fix) => {
-                            GraphItem::Fix(visit_fix(mem, fix, index, &mut open, &mut edges))
-                        }
-                    };
-                    nodes_vec.push(make_node(mem, index, item1));
-                    break index;
-                }
+    build_graph_doc(mem, &breaks)
+}
+
+/// Graphifies one line: assigns a node index per item and replays each
+/// composition's scope deltas at that index. A fix item's internal comps and
+/// its trailing separator all share the item's index, exactly as document
+/// order threads them.
+fn visit_line<'b, 'a: 'b>(mem: &'b Bump, line: &FixedLine<'a>) -> GraphLine<'b> {
+    let mut nodes_vec: Vec<&'b GraphNode<'b>> = Vec::new();
+    let mut pads_vec: Vec<bool> = Vec::new();
+    let mut open: OpenScopes = BTreeMap::new();
+    let mut edges: Vec<Edge> = Vec::new();
+    for (i, item) in line.items.iter().enumerate() {
+        let index = i as u64;
+        let item1 = match item {
+            FixedItem::Term(term) => GraphItem::Term(term),
+            FixedItem::Fix(run) => {
+                GraphItem::Fix(visit_fix(mem, run, index, &mut open, &mut edges))
             }
         };
-        // Close every scope still open at the line's last node.
-        for (index, (prop, from)) in &open {
-            edges.push((*index, *prop, *from, last_index));
+        nodes_vec.push(make_node(mem, index, item1));
+        if let Some(sep) = line.seps.get(i) {
+            pads_vec.push(apply_comp(index, sep, &mut open, &mut edges));
         }
-        // Materialize edges in scope-index order, so each node's ins/outs lists
-        // are ordered exactly as the old index-keyed map produced them (solve
-        // and rebuild depend on that order).
-        edges.sort_by_key(|(index, ..)| *index);
-        let nodes = mem.alloc_slice_copy(&nodes_vec);
-        for (_index, prop, from, to) in edges {
-            if from != to {
-                let from_node = nodes[from as usize];
-                let to_node = nodes[to as usize];
-                let edge = make_edge(mem, prop, from_node, to_node);
-                push_ins(edge, to_node);
-                push_outs(edge, from_node);
-            }
-        }
-        (nodes, mem.alloc_slice_copy(&pads_vec))
     }
-    fn visit_fix<'b, 'a: 'b>(
-        mem: &'b Bump,
-        fix: &'a FixedFix<'a>,
-        index: u64,
-        open: &mut OpenScopes,
-        edges: &mut Vec<Edge>,
-    ) -> &'b GraphFix<'b> {
-        // Walk the fix chain forward, replaying each internal comp's deltas at
-        // the fix item's node index; rebuild the GraphFix bottom-up. Terms pass
-        // through by borrow.
-        let mut recorded: Vec<(&'b Term<'b>, bool)> = Vec::new();
-        let mut cur = fix;
-        let last_term: &'b Term<'b> = loop {
-            match cur {
-                FixedFix::Next(term, comp, fix1) => {
-                    let pad = apply_comp(index, comp, open, edges);
-                    recorded.push((term, pad));
-                    cur = fix1;
-                }
-                FixedFix::Last(term) => break term,
-            }
-        };
-        let mut gfix: &'b GraphFix<'b> = mem.alloc(GraphFix::Last(last_term));
-        for &(term1, pad) in recorded.iter().rev() {
-            gfix = mem.alloc(GraphFix::Next(term1, gfix, pad));
-        }
-        gfix
+    // Close every scope still open at the line's last node.
+    let last_index = (line.items.len() - 1) as u64;
+    for (index, (prop, from)) in &open {
+        edges.push((*index, *prop, *from, last_index));
     }
-    visit_doc(mem, doc)
+    // Materialize edges in scope-index order, so each node's ins/outs lists
+    // are ordered exactly as the old index-keyed map produced them (solve
+    // and rebuild depend on that order).
+    edges.sort_by_key(|(index, ..)| *index);
+    let nodes = mem.alloc_slice_copy(&nodes_vec);
+    for (_index, prop, from, to) in edges {
+        if from != to {
+            let from_node = nodes[from as usize];
+            let to_node = nodes[to as usize];
+            let edge = make_edge(mem, prop, from_node, to_node);
+            push_ins(edge, to_node);
+            push_outs(edge, from_node);
+        }
+    }
+    (nodes, mem.alloc_slice_copy(&pads_vec))
+}
+
+/// Replays a fix run's internal scope deltas at the run's node index and keeps
+/// the pads; the terms pass through by borrow.
+fn visit_fix<'b, 'a: 'b>(
+    mem: &'b Bump,
+    run: &FixRun<'a>,
+    index: u64,
+    open: &mut OpenScopes,
+    edges: &mut Vec<Edge>,
+) -> &'b GraphFixRun<'b> {
+    let pads: Vec<bool> = run
+        .seps
+        .iter()
+        .map(|sep| apply_comp(index, sep, open, edges))
+        .collect();
+    mem.alloc(GraphFixRun {
+        terms: run.terms.clone(),
+        pads,
+    })
 }

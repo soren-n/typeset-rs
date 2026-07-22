@@ -4,8 +4,8 @@
 //! spine (grp/seq wrappers and left compositions) into the flat postorder
 //! [`RebuildDoc`] arena.
 
-use super::graph::{GraphDoc, GraphFix, GraphItem, GraphNode, NodeInfo, Property, graph_lines};
-use crate::compiler::types::{RFixId, RObjId, RebuildDoc, RebuildFix, RebuildObj, Term};
+use super::graph::{GraphDoc, GraphFixRun, GraphItem, GraphNode, NodeInfo, Property, graph_lines};
+use crate::compiler::types::{RFixId, RObjId, RebuildDoc, RebuildFix, RebuildObj};
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
 /// indices always already exist.
@@ -191,24 +191,14 @@ pub(super) fn rebuild<'a>(doc: &'a GraphDoc<'a>) -> RebuildDoc<'a> {
             i += 1;
         }
     }
-    fn visit_fix<'a>(b: &mut Builder<'a>, fix: &GraphFix<'a>) -> RFixId {
-        // Walk the fix chain, then rebuild the RebuildFix bottom-up. Terms pass
-        // through by borrow.
-        let mut recorded: Vec<(&'a Term<'a>, bool)> = Vec::new();
-        let mut cur = fix;
-        let last = loop {
-            match cur {
-                GraphFix::Last(term) => break *term,
-                GraphFix::Next(term, fix1, pad) => {
-                    recorded.push((term, *pad));
-                    cur = fix1;
-                }
-            }
-        };
+    fn visit_fix<'a>(b: &mut Builder<'a>, run: &GraphFixRun<'a>) -> RFixId {
+        // Rebuild the run as a right-nested fixed composition spine. Terms
+        // pass through by borrow.
+        let last = *run.terms.last().expect("a fix run has at least one term");
         let mut rfix = b.fix(RebuildFix::Term(last));
-        for &(term, pad) in recorded.iter().rev() {
-            let left = b.fix(RebuildFix::Term(term));
-            rfix = b.fix(RebuildFix::Comp(left, rfix, pad));
+        for k in (0..run.pads.len()).rev() {
+            let left = b.fix(RebuildFix::Term(run.terms[k]));
+            rfix = b.fix(RebuildFix::Comp(left, rfix, run.pads[k]));
         }
         rfix
     }

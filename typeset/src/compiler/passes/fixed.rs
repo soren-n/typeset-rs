@@ -1,222 +1,177 @@
-//! Pass 4: LinearDoc → FixedDoc (coalesce fixed comps)
+//! Pass 3: Serial → FixedDoc (lift newlines to spine, coalesce fixed comps)
 //!
-//! LinearDoc is a flat slice, and LinearObj (term/comp chain), LinearComp and
-//! Term are linear structures, so the original CPS recursion becomes plain
-//! iteration. The one piece of state is a run-length grouping: a maximal run
-//! of terms connected by fixed compositions is coalesced into a single
-//! `FixedItem::Fix`. This keeps the pass off the native stack, which the
-//! recursive/continuation version could exhaust on deep inputs.
+//! One sweep over the serial entries: a hard line break flushes the current
+//! line, and maximal runs of terms joined by fixed compositions coalesce into
+//! single fix items as each line is built. (Formerly two passes — `linearize`
+//! split the lines and `fixed` coalesced the runs — with a cons-list IR
+//! between them; the split and the coalescing are one forward scan.)
 
 use crate::compiler::types::{
-    FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, LinearComp, LinearDoc, LinearObj, Term,
+    FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Serial, SerialComp, SerialEntry, Term,
 };
-use bumpalo::Bump;
 
-pub fn fixed<'b, 'a: 'b>(mem: &'b Bump, doc: LinearDoc<'a>) -> FixedDoc<'b> {
-    // Walk the linear spine, coalescing each object into a flat slice of lines
-    // in document order.
-    let mut objs: Vec<&'b FixedObj<'b>> = Vec::new();
-    for obj in doc {
-        objs.push(visit_obj(mem, obj));
+pub fn fixed<'a>(serial: Serial<'a>) -> FixedDoc<'a> {
+    let mut lines: Vec<FixedLine<'a>> = Vec::new();
+    // The line currently being built.
+    let mut items: Vec<FixedItem<'a>> = Vec::new();
+    let mut seps: Vec<FixedComp<'a>> = Vec::new();
+    // The fix run currently being built (non-empty terms means a run is open).
+    let mut run_terms: Vec<&'a Term<'a>> = Vec::new();
+    let mut run_seps: Vec<FixedComp<'a>> = Vec::new();
+
+    // Appends `term` as the line's next item: as the final term of the open
+    // fix run if one is being built, else as a plain term.
+    fn push_item<'a>(
+        items: &mut Vec<FixedItem<'a>>,
+        run_terms: &mut Vec<&'a Term<'a>>,
+        run_seps: &mut Vec<FixedComp<'a>>,
+        term: &'a Term<'a>,
+    ) {
+        if run_terms.is_empty() {
+            items.push(FixedItem::Term(term));
+        } else {
+            run_terms.push(term);
+            items.push(FixedItem::Fix(FixRun {
+                terms: std::mem::take(run_terms),
+                seps: std::mem::take(run_seps),
+            }));
+        }
     }
-    mem.alloc_slice_copy(&objs)
-}
 
-/// Coalesces one object's term/comp chain. Terms connected by fixed
-/// compositions are grouped into a `FixedItem::Fix`; the remaining
-/// (non-fixed) compositions separate the resulting items.
-fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj<'b> {
-    // The resulting items and the non-fixed comps that separate them.
-    let mut items: Vec<&'b FixedItem<'b>> = Vec::new();
-    let mut seps: Vec<&'b FixedComp<'b>> = Vec::new();
-    // The (term, fixed-comp) pairs of the fix run currently being built.
-    let mut fix_run: Vec<(&'b Term<'b>, &'b FixedComp<'b>)> = Vec::new();
-    let mut in_fix = false;
-
-    let mut cur = obj;
-    loop {
-        match cur {
-            LinearObj::Next(term, comp, obj1) => {
-                let (is_fixed, comp1) = visit_comp(mem, comp);
-                if is_fixed {
-                    // A fixed composition: extend (or start) the current run.
-                    fix_run.push((term, comp1));
-                    in_fix = true;
-                } else if in_fix {
-                    // A non-fixed composition closes the run; term is its last
-                    // term, comp1 becomes the object-level separator.
-                    let fix = build_fix(mem, &fix_run, term);
-                    items.push(mem.alloc(FixedItem::Fix(fix)));
-                    seps.push(comp1);
-                    fix_run.clear();
-                    in_fix = false;
-                } else {
-                    // A plain term separated by a non-fixed composition.
-                    items.push(mem.alloc(FixedItem::Term(term)));
-                    seps.push(comp1);
-                }
-                cur = obj1;
+    for entry in serial {
+        match entry {
+            // A hard line break ends the current line: this entry's term is
+            // the line's last item.
+            SerialEntry::Next(term, SerialComp::Line) => {
+                push_item(&mut items, &mut run_terms, &mut run_seps, term);
+                lines.push(FixedLine {
+                    items: std::mem::take(&mut items),
+                    seps: std::mem::take(&mut seps),
+                });
             }
-            LinearObj::Last(term) => {
-                if in_fix {
-                    let fix = build_fix(mem, &fix_run, term);
-                    items.push(mem.alloc(FixedItem::Fix(fix)));
+            SerialEntry::Next(term, SerialComp::Comp(attr, opens, closes)) => {
+                let comp = FixedComp {
+                    pad: attr.pad,
+                    opens,
+                    closes,
+                };
+                if attr.fix {
+                    // A fixed composition: extend (or start) the current run.
+                    run_terms.push(term);
+                    run_seps.push(comp);
                 } else {
-                    items.push(mem.alloc(FixedItem::Term(term)));
+                    // A non-fixed composition separates items (closing the
+                    // open run, if any).
+                    push_item(&mut items, &mut run_terms, &mut run_seps, term);
+                    seps.push(comp);
                 }
-                break;
+            }
+            // The document's final term: flush the last line.
+            SerialEntry::Last(term) => {
+                push_item(&mut items, &mut run_terms, &mut run_seps, term);
+                lines.push(FixedLine {
+                    items: std::mem::take(&mut items),
+                    seps: std::mem::take(&mut seps),
+                });
             }
         }
     }
 
-    // Fold the items and separators into a FixedObj. Every LinearObj ends in a
-    // Last, which pushes an item, so `items` is non-empty and `split_last`
-    // yields the trailing item plus the `seps.len()` leading items — making the
-    // "at least one item" invariant explicit instead of a bare `len() - 1`.
-    let (&last_item, init_items) = items
-        .split_last()
-        .expect("every LinearObj ends in Last, so there is at least one item");
-    let mut fobj: &'b FixedObj<'b> = mem.alloc(FixedObj::Last(last_item));
-    for (&item, &sep) in init_items.iter().zip(seps.iter()).rev() {
-        fobj = mem.alloc(FixedObj::Next(item, sep, fobj));
-    }
-    fobj
-}
-
-/// Builds a fix group: `Next(t0, c0, Next(t1, c1, ... Last(last_term)))`, where
-/// `run` holds the `(term, fixed-comp)` pairs in order and `last_term` is the
-/// group's final term.
-fn build_fix<'b>(
-    mem: &'b Bump,
-    run: &[(&'b Term<'b>, &'b FixedComp<'b>)],
-    last_term: &'b Term<'b>,
-) -> &'b FixedFix<'b> {
-    let mut fix: &'b FixedFix<'b> = mem.alloc(FixedFix::Last(last_term));
-    for (term, comp) in run.iter().rev() {
-        fix = mem.alloc(FixedFix::Next(term, comp, fix));
-    }
-    fix
-}
-
-/// Maps a comp to its `FixedComp`, reporting whether its composition is fixed.
-/// The scope delta slices pass through by borrow (`Copy`, outlive this arena).
-fn visit_comp<'b, 'a: 'b>(mem: &'b Bump, comp: &'a LinearComp<'a>) -> (bool, &'b FixedComp<'b>) {
-    let LinearComp {
-        attr,
-        opens,
-        closes,
-    } = comp;
-    (
-        attr.fix,
-        mem.alloc(FixedComp {
-            pad: attr.pad,
-            opens,
-            closes,
-        }),
-    )
+    FixedDoc { lines }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{Attr, Term};
+    use crate::compiler::types::Attr;
+    use bumpalo::Bump;
 
-    /// Deeper than a native-stack recursion could survive (~hundreds of levels
-    /// on a 2 MB stack). Reaching it without aborting proves iteration.
+    /// Far past where a native-stack recursion could survive; the pass is a
+    /// plain scan, so this now guards sizing behavior only.
     const DEEP: usize = 50_000;
 
-    fn linear_obj_chain<'b>(mem: &'b Bump, len: usize, fix: bool) -> &'b LinearObj<'b> {
-        let attr = Attr { pad: false, fix };
-        let mut obj: &LinearObj = mem.alloc(LinearObj::Last(mem.alloc(Term::Text("z"))));
-        for _ in 0..len {
-            obj = mem.alloc(LinearObj::Next(
-                mem.alloc(Term::Text("y")),
-                mem.alloc(LinearComp {
-                    attr,
-                    opens: &[],
-                    closes: &[],
-                }),
-                obj,
-            ));
-        }
-        obj
+    fn comp_entry<'a>(mem: &'a Bump, text: &'a str, fix: bool) -> SerialEntry<'a> {
+        SerialEntry::Next(
+            mem.alloc(Term::Text(text)),
+            mem.alloc(SerialComp::Comp(Attr { pad: false, fix }, &[], &[])),
+        )
     }
 
     #[test]
     fn fixed_coalesces_deep_fixed_run() {
         let mem = Bump::new();
-        let obj = linear_obj_chain(&mem, DEEP, true);
-        let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
-        let out = fixed(&mem, doc);
-        // All comps fixed: the whole object collapses to one Fix item.
-        let [fobj] = out else {
+        // All comps fixed: the whole line collapses to one Fix item.
+        let mut entries: Vec<SerialEntry> = Vec::new();
+        for _ in 0..DEEP {
+            entries.push(comp_entry(&mem, "y", true));
+        }
+        entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
+        let serial: Serial = mem.alloc_slice_copy(&entries);
+        let out = fixed(serial);
+        let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
-        let FixedObj::Last(FixedItem::Fix(fix)) = fobj else {
+        let [FixedItem::Fix(run)] = &line.items[..] else {
             panic!("expected a single Fix item")
         };
-        let mut count = 0usize;
-        let mut cur: &FixedFix = fix;
-        while let FixedFix::Next(_, _, rest) = cur {
-            count += 1;
-            cur = rest;
-        }
-        assert!(matches!(cur, FixedFix::Last(_)));
-        assert_eq!(count, DEEP);
+        assert_eq!(run.terms.len(), DEEP + 1);
+        assert_eq!(run.seps.len(), DEEP);
     }
 
     #[test]
-    fn fixed_handles_deep_nonfixed_run() {
+    fn fixed_keeps_nonfixed_comps_as_separators() {
         let mem = Bump::new();
-        let obj = linear_obj_chain(&mem, DEEP, false);
-        let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
-        let out = fixed(&mem, doc);
-        // No fixed comps: DEEP Next items then a Last, all plain Terms.
-        let [fobj] = out else {
+        // No fixed comps: DEEP + 1 plain term items with DEEP separators.
+        let mut entries: Vec<SerialEntry> = Vec::new();
+        for _ in 0..DEEP {
+            entries.push(comp_entry(&mem, "y", false));
+        }
+        entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
+        let serial: Serial = mem.alloc_slice_copy(&entries);
+        let out = fixed(serial);
+        let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
-        let mut count = 0usize;
-        let mut cur: &FixedObj = fobj;
-        while let FixedObj::Next(item, _, rest) = cur {
-            assert!(matches!(item, FixedItem::Term(_)));
-            count += 1;
-            cur = rest;
-        }
-        assert!(matches!(cur, FixedObj::Last(FixedItem::Term(_))));
-        assert_eq!(count, DEEP);
+        assert_eq!(line.items.len(), DEEP + 1);
+        assert_eq!(line.seps.len(), DEEP);
+        assert!(line.items.iter().all(|i| matches!(i, FixedItem::Term(_))));
     }
 
     #[test]
-    fn fixed_handles_long_doc_spine() {
+    fn fixed_splits_lines_at_hard_breaks() {
         let mem = Bump::new();
-        let mut objs: Vec<&LinearObj> = Vec::new();
+        let mut entries: Vec<SerialEntry> = Vec::new();
         for _ in 0..DEEP {
-            objs.push(mem.alloc(LinearObj::Last(mem.alloc(Term::Text("x")))));
+            entries.push(SerialEntry::Next(
+                mem.alloc(Term::Text("x")),
+                mem.alloc(SerialComp::Line),
+            ));
         }
-        let doc: LinearDoc = mem.alloc_slice_copy(&objs);
-        let out = fixed(&mem, doc);
-        assert_eq!(out.len(), DEEP);
+        entries.push(SerialEntry::Last(mem.alloc(Term::Text("end"))));
+        let serial: Serial = mem.alloc_slice_copy(&entries);
+        let out = fixed(serial);
+        assert_eq!(out.lines.len(), DEEP + 1);
     }
 
     #[test]
-    fn fixed_handles_deep_term_chain() {
+    fn fixed_closes_run_at_nonfixed_comp() {
         let mem = Bump::new();
-        let mut term: &Term = mem.alloc(Term::Text("x"));
-        for _ in 0..DEEP {
-            term = mem.alloc(Term::Nest(term));
-        }
-        let obj: &LinearObj = mem.alloc(LinearObj::Last(term));
-        let doc: LinearDoc = mem.alloc_slice_copy(&[obj]);
-        let out = fixed(&mem, doc);
-        let [FixedObj::Last(FixedItem::Term(t))] = out else {
-            panic!("expected a single term")
+        // a !& b & c: the fixed run (a, b) closes at the non-fixed comp, which
+        // becomes the separator before the plain term c.
+        let entries = [
+            comp_entry(&mem, "a", true),
+            comp_entry(&mem, "b", false),
+            SerialEntry::Last(mem.alloc(Term::Text("c"))),
+        ];
+        let serial: Serial = mem.alloc_slice_copy(&entries);
+        let out = fixed(serial);
+        let [line] = &out.lines[..] else {
+            panic!("expected a single line")
         };
-        let mut count = 0usize;
-        let mut cur: &Term = t;
-        while let Term::Nest(inner) = cur {
-            count += 1;
-            cur = inner;
-        }
-        assert_eq!(count, DEEP);
+        let [FixedItem::Fix(run), FixedItem::Term(_)] = &line.items[..] else {
+            panic!("expected a fix run then a plain term")
+        };
+        assert_eq!(run.terms.len(), 2);
+        assert_eq!(line.seps.len(), 1);
     }
 }

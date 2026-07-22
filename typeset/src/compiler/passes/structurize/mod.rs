@@ -18,7 +18,7 @@ mod solve;
 use crate::compiler::types::{FixedDoc, RebuildDoc};
 use bumpalo::Bump;
 
-pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> RebuildDoc<'b> {
+pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &FixedDoc<'a>) -> RebuildDoc<'b> {
     let doc1 = graphify::graphify(mem, doc);
     let doc2 = solve::solve(mem, doc1);
     rebuild::rebuild(doc2)
@@ -28,13 +28,21 @@ pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> RebuildDoc<'
 mod tests {
     use super::*;
     use crate::compiler::types::{
-        FixedComp, FixedFix, FixedItem, FixedObj, RebuildFix, RebuildObj, Term,
+        FixRun, FixedComp, FixedItem, FixedLine, RebuildFix, RebuildObj, Term,
     };
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration across
     /// all three phases (graphify, solve, rebuild).
     const DEEP: usize = 50_000;
+
+    fn sep<'a>() -> FixedComp<'a> {
+        FixedComp {
+            pad: false,
+            opens: &[],
+            closes: &[],
+        }
+    }
 
     #[test]
     fn structurize_handles_deep_comp_line() {
@@ -44,22 +52,17 @@ mod tests {
         // the ~400-level native-recursion overflow threshold stays quick and
         // still proves the phases iterate rather than recurse.
         let depth = 20_000usize;
-        let mut obj: &FixedObj = mem.alloc(FixedObj::Last(
-            mem.alloc(FixedItem::Term(mem.alloc(Term::Text("z")))),
-        ));
+        let mut items: Vec<FixedItem> = Vec::new();
+        let mut seps: Vec<FixedComp> = Vec::new();
         for _ in 0..depth {
-            obj = mem.alloc(FixedObj::Next(
-                mem.alloc(FixedItem::Term(mem.alloc(Term::Text("y")))),
-                mem.alloc(FixedComp {
-                    pad: false,
-                    opens: &[],
-                    closes: &[],
-                }),
-                obj,
-            ));
+            items.push(FixedItem::Term(mem.alloc(Term::Text("y"))));
+            seps.push(sep());
         }
-        let doc: FixedDoc = mem.alloc_slice_copy(&[obj]);
-        let out = structurize(&mem, doc);
+        items.push(FixedItem::Term(mem.alloc(Term::Text("z"))));
+        let doc = FixedDoc {
+            lines: vec![FixedLine { items, seps }],
+        };
+        let out = structurize(&mem, &doc);
         // One line, rebuilt as a right-nested composition spine.
         let [root] = out.lines[..] else {
             panic!("expected one line")
@@ -81,9 +84,13 @@ mod tests {
         for _ in 0..DEEP {
             term = mem.alloc(Term::Nest(term));
         }
-        let obj: &FixedObj = mem.alloc(FixedObj::Last(mem.alloc(FixedItem::Term(term))));
-        let doc: FixedDoc = mem.alloc_slice_copy(&[obj]);
-        let out = structurize(&mem, doc);
+        let doc = FixedDoc {
+            lines: vec![FixedLine {
+                items: vec![FixedItem::Term(term)],
+                seps: Vec::new(),
+            }],
+        };
+        let out = structurize(&mem, &doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -102,22 +109,24 @@ mod tests {
     #[test]
     fn structurize_handles_deep_fix_group() {
         let mem = Bump::new();
-        // A deep fixed group exercises the fix walks in graphify/rebuild.
-        let mut fix: &FixedFix = mem.alloc(FixedFix::Last(mem.alloc(Term::Text("z"))));
+        // A deep fixed run exercises the fix walks in graphify/rebuild.
+        let mut terms: Vec<&Term> = Vec::new();
+        let mut run_seps: Vec<FixedComp> = Vec::new();
         for _ in 0..DEEP {
-            fix = mem.alloc(FixedFix::Next(
-                mem.alloc(Term::Text("y")),
-                mem.alloc(FixedComp {
-                    pad: false,
-                    opens: &[],
-                    closes: &[],
-                }),
-                fix,
-            ));
+            terms.push(mem.alloc(Term::Text("y")));
+            run_seps.push(sep());
         }
-        let obj: &FixedObj = mem.alloc(FixedObj::Last(mem.alloc(FixedItem::Fix(fix))));
-        let doc: FixedDoc = mem.alloc_slice_copy(&[obj]);
-        let out = structurize(&mem, doc);
+        terms.push(mem.alloc(Term::Text("z")));
+        let doc = FixedDoc {
+            lines: vec![FixedLine {
+                items: vec![FixedItem::Fix(FixRun {
+                    terms,
+                    seps: run_seps,
+                })],
+                seps: Vec::new(),
+            }],
+        };
+        let out = structurize(&mem, &doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -137,14 +146,14 @@ mod tests {
     fn structurize_handles_long_doc_spine() {
         let mem = Bump::new();
         // Many document rows exercise the doc-spine walks in all three phases.
-        let mut objs: Vec<&FixedObj> = Vec::new();
-        for _ in 0..DEEP {
-            objs.push(mem.alloc(FixedObj::Last(
-                mem.alloc(FixedItem::Term(mem.alloc(Term::Text("x")))),
-            )));
-        }
-        let doc: FixedDoc = mem.alloc_slice_copy(&objs);
-        let out = structurize(&mem, doc);
+        let lines: Vec<FixedLine> = (0..DEEP)
+            .map(|_| FixedLine {
+                items: vec![FixedItem::Term(mem.alloc(Term::Text("x")))],
+                seps: Vec::new(),
+            })
+            .collect();
+        let doc = FixedDoc { lines };
+        let out = structurize(&mem, &doc);
         assert_eq!(out.lines.len(), DEEP);
     }
 }
