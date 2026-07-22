@@ -30,22 +30,44 @@ API changes. Migrate per the notes in each item.
   the separate `text_str()` is removed. Migration: drop `text_str`, call `text`.
 * **`Doc` is now an opaque struct** (a flat `Vec`-backed arena) instead of a
   public enum; the `DocObj` / `DocObjFix` payload types are removed. `Doc` was
-  already opaque in use — no public constructors, payload types unexported — and
-  the `compile` / `render` / `render_ref` signatures are unchanged, so only code
-  that pattern-matched `Doc`'s variants is affected. `Debug` / `Display` output
-  is byte-identical.
+  already opaque in use — no public constructors, payload types unexported — so
+  only code that pattern-matched `Doc`'s variants is affected.
+* **`render` borrows the document and `render_ref` is removed.** Rendering only
+  reads the `Doc`, so `render(&doc, tab, width)` is the single entry point and
+  the same document renders repeatedly without cloning. Migration:
+  `render(doc, ...)` → `render(&doc, ...)`; `render_ref(&doc, ...)` →
+  `render(&doc, ...)`.
+* **The `Display` impls on `Layout` and `Doc` are removed**, along with the
+  hand-maintained `Debug` formats that reproduced the historical recursive
+  representations byte-for-byte. `Doc`'s `Debug` is now derived (it prints the
+  flat row/arena form); `Layout`'s `Debug` keeps the compact derived-style
+  format. Migration: use `{:?}` for diagnostics; render for output.
+* **`Attr` carries `Pad`/`Break` enums** instead of `pad`/`fix` booleans
+  (`Attr { pad: Pad, brk: Break }`). Only relevant to code constructing
+  `Layout::Comp` nodes directly rather than via `comp()`.
 
 ### Performance Improvements
 
 * Deeply nested `grp`/`seq` scopes now compile in **linear time** (previously
   O(n²)); e.g. a 16k-deep nested-`seq` chain dropped from ~5s to ~9ms.
+* The renderer's measuring folds are **width-bounded**: measurement stops as
+  soon as the position passes the target width, so each break decision costs at
+  most O(width) work instead of walking arbitrarily large subtrees.
+* The whole pipeline now runs on flat postorder arenas: terms and text are
+  borrowed (never copied) between passes, two passes fused
+  (`linearize` + `fixed`), and all but one per-pass bump arena eliminated.
 
 ### Changed
 
 * `compile()` no longer panics on very deep layouts (it previously aborted past
-  ~10,000 levels). The passes, heap conversion, renderer, and the `Doc`/`Layout`
-  `Clone`/`Drop`/`Debug` impls all run iteratively, so deep layouts never
-  overflow the native stack; depth shows up as O(depth) heap instead.
+  ~10,000 levels). Every intermediate representation is a flat arena folded
+  with plain loops, so deep layouts never overflow the native stack; depth
+  shows up as O(depth) heap instead.
+* The compiler passes were renamed for what they do (`broken` →
+  `resolve_breaks`, `fixed` → `split_lines`, `structurize` → `resolve_scopes`)
+  and the scope-graph solver was rewritten from intrusive `Cell`-linked lists
+  to indexed adjacency. Internal only — pass modules are not part of the public
+  API.
 
 ## [3.2.1](https://github.com/soren-n/typeset-rs/compare/v3.2.0...v3.2.1) (2026-07-21)
 

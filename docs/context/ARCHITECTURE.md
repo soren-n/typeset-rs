@@ -14,20 +14,22 @@ This is a Rust workspace containing two main crates:
 - `lib.rs`: Main public API exports (Layout, Doc, constructors, compile, render)
 - `compiler/`: Core layout compiler and renderer implementation
   - `constructors.rs`: Layout building primitives (text, composition, control, joining, wrapping, one-step formatting)
-  - `passes/`: Compilation passes (denull, normalize, linearize, serialize, etc.)
+  - `pipeline.rs`: The authoritative pass table — which pass lowers which
+    representation, in what order
+  - `passes/`: One module per pass (flatten, resolve_breaks, serialize,
+    split_lines, resolve_scopes, denull, normalize, rescope)
   - `render/`: Text rendering engine
   - `types/`: Core data structures (Layout, Doc, and the intermediate
-    representations shared between passes; an IR used by only one pass lives with
-    that pass instead — e.g. `Broken` in `passes/broken.rs` and the structurize
-    scope graph in `passes/structurize/graph.rs`)
+    representations shared between passes; an IR used by only one pass lives
+    with that pass instead — e.g. the scope graph in
+    `passes/resolve_scopes/graph.rs`)
+
 The compiler passes use standard-library collections throughout — the shared
 custom data-structure layer is gone. Sequences and LIFO working stacks are
-`Vec<T>` (or, when they must outlive a pass in the bump arena, arena slices
-`&'a [T]` built with `alloc_slice_copy`); integer-keyed maps are `HashMap` (the
-renderer's pack marks — point lookup/insert only, no ordering needed) or
-`BTreeMap` (`structurize`'s open-scope map, keyed by scope index — see below).
-The former
-custom `avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
+`Vec<T>`; integer-keyed maps are `HashMap` (the renderer's pack marks — point
+lookup/insert only, no ordering needed) or `BTreeMap` (`graphify`'s open-scope
+map, keyed by scope index — see below). The former custom
+`avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
 `cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
 used, have been removed.
 
@@ -53,17 +55,20 @@ source sits at:
 
 - `~/.opam/default/lib/typeset/Typeset.ml` — the compiler passes and renderer
 
-Ordering matters in `structurize`: each grp/seq scope becomes one graph edge,
-and the order edges are created fixes every node's incoming/outgoing edge lists,
-which `solve` and `rebuild` then consume. Scopes arrive as per-composition
-open/close deltas (computed in `serialize`); `graphify` replays them per line —
-an open records a scope's `from` node, a close pairs it with a `to` node — then
-sorts the resulting edges by scope index before materializing them, so the graph
-is always built in a deterministic, ascending-index sequence. That sort is the
-load-bearing ordering guarantee for grp/seq nesting, not just a convenience. The
-still-open scopes are held in a `BTreeMap` keyed by their small integer index;
-the map is threaded linearly (an open inserts, a close removes) and its
-iteration order does not matter, since the edges are sorted explicitly.
+Ordering matters in `resolve_scopes`: each grp/seq scope becomes one graph
+edge, and the order edges are created fixes every node's incoming/outgoing edge
+lists, which `solve` and `rebuild` then consume. Scopes arrive as
+per-composition open/close deltas (computed in `serialize`); `graphify` replays
+them per line — an open records a scope's `from` node, a close pairs it with a
+`to` node — then sorts the resulting edges by scope index before materializing
+them, so the graph is always built in a deterministic, ascending-index
+sequence. That sort is the load-bearing ordering guarantee for grp/seq nesting,
+not just a convenience. The still-open scopes are held in a `BTreeMap` keyed by
+their small integer index; the map is threaded linearly (an open inserts, a
+close removes) and its iteration order does not matter, since the edges are
+sorted explicitly. The graph itself is index-linked: nodes and edges live in
+`Vec`s per line, with in/out adjacency as ordered `Vec<EdgeId>` lists that
+`solve` rearranges with plain insert/splice operations.
 
 ### typeset-parser crate (`typeset-parser/src/`)
 
@@ -85,23 +90,28 @@ Build layout trees using constructors:
 1. **Compilation**: `compile()` applies optimization passes to layout trees
 2. **Rendering**: `render()` outputs formatted text with proper line breaks and indentation
 
-**Stack usage:** the entire pipeline runs iteratively — the eight transform
-passes in `passes/` (the last, `rescope`, builds the owned heap `Doc` directly
-from the bump-allocated `DenullDoc`) and the renderer are each a descend/ascend
-trampoline over a heap-allocated frame stack (continuation-passing passes had
-their continuation chains defunctionalized into explicit data). Every
-stage therefore uses constant native stack regardless of layout depth, so deep
-layouts never overflow the stack; depth shows up as O(depth) heap instead. The
-output `Doc` is a **flat arena** — the spine is a `Vec<Row>` and the object graph
-is two index-linked `Vec`s of shallow nodes (`ObjNode`/`FixNode`) — so its
-`Clone` and `Drop` are derived and deep-safe *structurally*: they touch only flat
-`Vec`s and cannot recurse however deeply the document nests. `Doc`'s `Display`
-and `Debug` still print the historical tree-shaped forms, walked by an explicit
-index stack so printing a deep document does not recurse either. `Layout` (the
-input AST) is still a `Box`-recursive tree, so it keeps the iterative
-`Drop`/`Clone`/`Debug` trampoline (see `types/traversal.rs`).
-`compile()` is therefore infallible and imposes no depth cap; layout depth shows
-up only as O(depth) heap, freed once compilation returns.
+**Stack usage and representation:** every intermediate representation is a
+**flat structure** — postorder index arenas (children precede parents) or plain
+vectors — so each pass is a loop over node indices: bottom-up folds run
+forward (children's results already computed), inherited context runs backward
+(parents visited first). `flatten` is the single step that walks the public
+`Box`-recursive `Layout` tree; text is moved into the layout arena there and
+borrowed through the rest of the pipeline. One bump arena remains, backing
+`serialize`'s persistent scope accumulators (see above). Every stage uses
+constant native stack regardless of layout depth, so deep layouts never
+overflow; depth shows up as O(depth) heap instead. The output `Doc` is a flat
+arena too — a `Vec<Row>` spine plus two index-linked `Vec`s of shallow nodes
+(`ObjNode`/`FixNode`) — so `Clone`, `Drop`, and `Debug` are derived and
+deep-safe *structurally*. `Layout` (the input AST) is the one `Box`-recursive
+tree, so it keeps iterative `Drop`/`Clone`/`Debug` impls (see
+`types/traversal.rs`). `compile()` is therefore infallible and imposes no depth
+cap; layout depth shows up only as O(depth) heap, freed once compilation
+returns.
+
+**Renderer:** the measuring folds are width-bounded — the position only ever
+advances while measuring, and both consumers compare against the target width,
+so measurement stops the moment it passes the width. A break decision costs at
+most O(width) regardless of subtree size.
 
 ## Key Layout Concepts
 
