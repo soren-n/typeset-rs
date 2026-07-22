@@ -177,12 +177,14 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
                     unreachable!("Invariant")
                 }
                 let applied = apply_rpartial(mem, &partial, obj);
-                return if in_deg == 0 {
-                    finalize(mem, stack, applied)
+                // With no incoming scopes there is nothing to close; otherwise
+                // close them first. Either way the line finalizes the same way.
+                let (stack1, obj2) = if in_deg == 0 {
+                    (stack, applied)
                 } else {
-                    let (stack1, obj2) = close(mem, in_deg, stack, applied);
-                    finalize(mem, stack1, obj2)
+                    close(mem, in_deg, stack, applied)
                 };
+                return finalize(mem, stack1, obj2);
             }
             let pad = pads[i];
             match (in_deg, out_props.is_empty()) {

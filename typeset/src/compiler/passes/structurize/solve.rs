@@ -122,21 +122,26 @@ fn leftmost<'a>(head: &'a GraphEdge<'a>) -> &'a GraphEdge<'a> {
 }
 fn visit_node<'a>(nodes: &'a [&'a GraphNode<'a>]) {
     for node in nodes {
-        match (
-            (node.ins_head.get(), node.ins_tail.get()),
-            (node.outs_head.get(), node.outs_tail.get()),
-        ) {
-            ((Some(ins_head), Some(ins_tail)), (Some(outs_head), Some(_outs_tail))) => {
-                let ins_first = leftmost(ins_head);
-                if let Some(outs_head1) = resolve(ins_first, outs_head) {
-                    move_ins(ins_head, ins_tail, outs_head1);
-                }
-            }
-            ((Some(_), None), _)
-            | ((None, Some(_)), _)
-            | (_, (Some(_), None))
-            | (_, (None, Some(_))) => unreachable!("Invariant"),
-            (_, _) => {}
+        let ins_head = node.ins_head.get();
+        let ins_tail = node.ins_tail.get();
+        let outs_head = node.outs_head.get();
+        let outs_tail = node.outs_tail.get();
+        // Each intrusive list sets head and tail together, so a half-set list is
+        // a broken invariant (asserted in every build, as the old match did).
+        assert!(ins_head.is_some() == ins_tail.is_some(), "Invariant");
+        assert!(outs_head.is_some() == outs_tail.is_some(), "Invariant");
+
+        // Only nodes with both incoming and outgoing edges need solving.
+        let (Some(ins_head), Some(ins_tail)) = (ins_head, ins_tail) else {
+            continue;
+        };
+        let Some(outs_head) = outs_head else {
+            continue;
+        };
+
+        let ins_first = leftmost(ins_head);
+        if let Some(outs_head1) = resolve(ins_first, outs_head) {
+            move_ins(ins_head, ins_tail, outs_head1);
         }
     }
 }

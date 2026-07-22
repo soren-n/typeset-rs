@@ -200,17 +200,14 @@ fn remove<'b>(mem: &'b Bump, layout: &'b Broken<'b>, broken: bool) -> &'b Edsl<'
                 continue 'descend;
             }
             Broken::Seq(broken1, layout1) => {
-                if *broken1 {
-                    // Already broken: drop the Seq wrapper, descend broken.
-                    cur = layout1;
-                    brk = true;
-                    continue 'descend;
-                } else {
+                // Already broken: drop the Seq wrapper and descend broken.
+                // Otherwise keep the wrapper and descend unbroken.
+                if !*broken1 {
                     stack.push(RemoveFrame::Seq);
-                    cur = layout1;
-                    brk = false;
-                    continue 'descend;
                 }
+                cur = layout1;
+                brk = *broken1;
+                continue 'descend;
             }
             Broken::Nest(layout1) => {
                 stack.push(RemoveFrame::Nest);
