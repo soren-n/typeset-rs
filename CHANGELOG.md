@@ -68,6 +68,13 @@ API changes. Migrate per the notes in each item.
   and the scope-graph solver was rewritten from intrusive `Cell`-linked lists
   to indexed adjacency. Internal only — pass modules are not part of the public
   API.
+* Legibility pass over both crates (internal only, output byte-identical): the
+  per-pass arena appenders were unified into one generic `push_node` helper;
+  the iterative tree walks (`flatten`, `Layout`'s `Clone`/`Debug`) carry unary
+  node constructors as function pointers instead of re-matching task variants;
+  `split_lines` accumulates lines through a small builder struct; and the
+  parser's alternative-combinator and DSL reification collapsed to plain
+  early-return loops and per-operator `reify` methods.
 
 ## [3.2.1](https://github.com/soren-n/typeset-rs/compare/v3.2.0...v3.2.1) (2026-07-21)
 
