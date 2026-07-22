@@ -209,6 +209,13 @@ enum Fold {
 /// [`Fold::NextComp`] returns the position of the next composition boundary
 /// reachable from `obj`. Either way, any marks inserted while folding are undone
 /// before returning, so `marks` is left exactly as the caller passed it.
+///
+/// Width-bounded: the position only ever advances while measuring (nothing a
+/// fold visits can move it backwards), and both consumers ([`will_fit`],
+/// [`should_break`]) only compare the result against the target width — so the
+/// fold stops as soon as the position passes it. This keeps the repeated
+/// look-aheads cheap: a comp decision costs at most O(width) regardless of how
+/// large the subtree beyond it is.
 fn fold(
     mode: Fold,
     arena: Arena,
@@ -220,6 +227,9 @@ fn fold(
     let mut inserted: Vec<usize> = Vec::new();
     let mut stack: Vec<MFrame> = vec![MFrame::Obj(obj)];
     while let Some(frame) = stack.pop() {
+        if st.pos > st.width {
+            break;
+        }
         match frame {
             MFrame::Obj(o) => match arena.obj(o) {
                 ObjNode::Text(data) => st = inc_pos(text_width(data), st),
