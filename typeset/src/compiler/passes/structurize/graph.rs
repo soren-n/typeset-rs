@@ -9,7 +9,7 @@
 //! — its target's incoming list (`ins_*`) and its source's outgoing list
 //! (`outs_*`) — which is what lets `solve` splice edges around in O(1).
 
-use crate::compiler::passes::term_chain::{TermChain, TermSink, TermStep};
+use crate::compiler::types::Term;
 use bumpalo::Bump;
 use std::cell::Cell;
 
@@ -61,7 +61,7 @@ pub(super) enum GraphDoc<'a> {
 #[derive(Debug)]
 pub(super) struct GraphNode<'a> {
     pub index: u64,
-    pub term: &'a GraphTerm<'a>,
+    pub item: GraphItem<'a>,
     pub ins_head: Cell<Option<&'a GraphEdge<'a>>>,
     pub ins_tail: Cell<Option<&'a GraphEdge<'a>>>,
     pub outs_head: Cell<Option<&'a GraphEdge<'a>>>,
@@ -79,56 +79,27 @@ pub(super) struct GraphEdge<'a> {
     pub target: Cell<&'a GraphNode<'a>>,
 }
 
-#[derive(Debug)]
-pub(super) enum GraphTerm<'a> {
-    Null,
-    Text(&'a str),
+/// A graph node's payload: either a plain term (borrowed from the serialize
+/// arena — terms are invariant from serialize through structurize) or a
+/// coalesced fixed group.
+#[derive(Debug, Copy, Clone)]
+pub(super) enum GraphItem<'a> {
+    Term(&'a Term<'a>),
     Fix(&'a GraphFix<'a>),
-    Nest(&'a GraphTerm<'a>),
-    Pack(u64, &'a GraphTerm<'a>),
 }
 
 #[derive(Debug)]
 pub(super) enum GraphFix<'a> {
-    Last(&'a GraphTerm<'a>),
-    Next(&'a GraphTerm<'a>, &'a GraphFix<'a>, bool),
+    Last(&'a Term<'a>),
+    Next(&'a Term<'a>, &'a GraphFix<'a>, bool),
 }
 
-/// Per-node data `rebuild` reads from the solved graph: the node's term, its
+/// Per-node data `rebuild` reads from the solved graph: the node's item, its
 /// in-degree, and its out-properties. Owned and transient, one per node in
 /// node-index order.
 #[derive(Debug)]
 pub(super) struct NodeInfo<'a> {
-    pub term: &'a GraphTerm<'a>,
+    pub item: GraphItem<'a>,
     pub in_degree: u64,
     pub outs: Vec<Property>,
-}
-
-// `GraphTerm` participates in the shared nest/pack term-chain mapping: graphify
-// builds one from a `Term` (sink), rebuild reads one back into a `Term` (chain).
-impl<'a> TermChain<'a> for GraphTerm<'a> {
-    fn step(&'a self) -> TermStep<'a, Self> {
-        match self {
-            GraphTerm::Null => TermStep::Null,
-            GraphTerm::Text(data) => TermStep::Text(data),
-            GraphTerm::Nest(term1) => TermStep::Nest(term1),
-            GraphTerm::Pack(index, term1) => TermStep::Pack(*index, term1),
-            GraphTerm::Fix(_fix) => unreachable!("Invariant"),
-        }
-    }
-}
-
-impl<'b> TermSink<'b> for GraphTerm<'b> {
-    fn null(mem: &'b Bump) -> &'b Self {
-        mem.alloc(GraphTerm::Null)
-    }
-    fn text(mem: &'b Bump, data: &'b str) -> &'b Self {
-        mem.alloc(GraphTerm::Text(data))
-    }
-    fn nest(mem: &'b Bump, inner: &'b Self) -> &'b Self {
-        mem.alloc(GraphTerm::Nest(inner))
-    }
-    fn pack(mem: &'b Bump, index: u64, inner: &'b Self) -> &'b Self {
-        mem.alloc(GraphTerm::Pack(index, inner))
-    }
 }

@@ -5,7 +5,6 @@
 //! small wrapper stacks. This keeps the pass off the native stack, which the
 //! recursive/continuation version could exhaust on deep inputs.
 
-use super::term_chain::map_term_chain;
 use crate::compiler::types::{
     LinearComp, LinearDoc, LinearObj, Serial, SerialComp, SerialEntry, Term,
 };
@@ -14,7 +13,9 @@ use bumpalo::Bump;
 pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: Serial<'a>) -> LinearDoc<'b> {
     // Completed line objects, in document order.
     let mut lines: Vec<&'b LinearObj<'b>> = Vec::new();
-    // Elements of the line currently being built, in visitation order.
+    // Elements of the line currently being built, in visitation order. Terms
+    // are invariant from here through structurize, and every pass arena
+    // outlives the pipeline, so they pass through by borrow — no rebuild.
     let mut acc: Vec<(&'b Term<'b>, &'b LinearComp<'b>)> = Vec::new();
 
     for entry in serial {
@@ -23,20 +24,16 @@ pub fn linearize<'b, 'a: 'b>(mem: &'b Bump, serial: Serial<'a>) -> LinearDoc<'b>
             // elements (with this entry's term as the final element) as one
             // object, then start a fresh line.
             SerialEntry::Next(term, SerialComp::Line) => {
-                let term1 = map_term_chain(mem, *term);
-                lines.push(build_line(mem, &acc, term1));
+                lines.push(build_line(mem, &acc, term));
                 acc.clear();
             }
             // Any other composition extends the current line.
             SerialEntry::Next(term, comp) => {
-                let term1 = map_term_chain(mem, *term);
-                let comp1 = visit_comp(mem, comp);
-                acc.push((term1, comp1));
+                acc.push((term, visit_comp(mem, comp)));
             }
             // The document's final term: flush the last line.
             SerialEntry::Last(term) => {
-                let term1 = map_term_chain(mem, *term);
-                lines.push(build_line(mem, &acc, term1));
+                lines.push(build_line(mem, &acc, term));
             }
         }
     }

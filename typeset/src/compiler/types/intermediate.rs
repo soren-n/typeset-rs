@@ -40,8 +40,9 @@ pub enum SerialEntry<'a> {
 /// This shape is invariant across the `Serial`, `LinearDoc`, `FixedDoc`, and
 /// `RebuildDoc` representations — the passes between them rewrite the
 /// surrounding composition structure but leave terms untouched — so a single
-/// type serves all four. (`GraphTerm` additionally carries `Fix`, and
-/// `DenullTerm` drops `Null` post-denulling, so those stay distinct.)
+/// type serves all four, and terms flow through those passes by borrow from
+/// the serialize arena rather than being copied. (`DenullTerm` drops `Null`
+/// post-denulling, so it stays distinct.)
 #[derive(Debug)]
 pub enum Term<'a> {
     Null,

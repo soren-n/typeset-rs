@@ -7,7 +7,6 @@
 //! `FixedItem::Fix`. This keeps the pass off the native stack, which the
 //! recursive/continuation version could exhaust on deep inputs.
 
-use super::term_chain::map_term_chain;
 use crate::compiler::types::{
     FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, LinearComp, LinearDoc, LinearObj, Term,
 };
@@ -38,34 +37,32 @@ fn visit_obj<'b, 'a: 'b>(mem: &'b Bump, obj: &'a LinearObj<'a>) -> &'b FixedObj<
     loop {
         match cur {
             LinearObj::Next(term, comp, obj1) => {
-                let term1 = map_term_chain(mem, *term);
                 let (is_fixed, comp1) = visit_comp(mem, comp);
                 if is_fixed {
                     // A fixed composition: extend (or start) the current run.
-                    fix_run.push((term1, comp1));
+                    fix_run.push((term, comp1));
                     in_fix = true;
                 } else if in_fix {
-                    // A non-fixed composition closes the run; term1 is its last
+                    // A non-fixed composition closes the run; term is its last
                     // term, comp1 becomes the object-level separator.
-                    let fix = build_fix(mem, &fix_run, term1);
+                    let fix = build_fix(mem, &fix_run, term);
                     items.push(mem.alloc(FixedItem::Fix(fix)));
                     seps.push(comp1);
                     fix_run.clear();
                     in_fix = false;
                 } else {
                     // A plain term separated by a non-fixed composition.
-                    items.push(mem.alloc(FixedItem::Term(term1)));
+                    items.push(mem.alloc(FixedItem::Term(term)));
                     seps.push(comp1);
                 }
                 cur = obj1;
             }
             LinearObj::Last(term) => {
-                let term1 = map_term_chain(mem, *term);
                 if in_fix {
-                    let fix = build_fix(mem, &fix_run, term1);
+                    let fix = build_fix(mem, &fix_run, term);
                     items.push(mem.alloc(FixedItem::Fix(fix)));
                 } else {
-                    items.push(mem.alloc(FixedItem::Term(term1)));
+                    items.push(mem.alloc(FixedItem::Term(term)));
                 }
                 break;
             }

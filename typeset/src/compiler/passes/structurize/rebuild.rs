@@ -3,8 +3,7 @@
 //! Reads the solved scope graph per line and rebuilds an explicit composition
 //! spine (grp/seq wrappers and left compositions) as a RebuildDoc.
 
-use super::graph::{GraphDoc, GraphFix, GraphNode, GraphTerm, NodeInfo, Property, graph_lines};
-use crate::compiler::passes::term_chain::map_term_chain;
+use super::graph::{GraphDoc, GraphFix, GraphItem, GraphNode, NodeInfo, Property, graph_lines};
 use crate::compiler::types::{RebuildDoc, RebuildFix, RebuildObj, Term};
 use bumpalo::Bump;
 
@@ -60,11 +59,9 @@ fn apply_rcont<'b>(
 }
 
 pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b RebuildDoc<'b> {
-    // Per-node info in node-index order. The node terms are read directly (not
-    // copied): `GraphTerm`/`GraphFix` are covariant and `'a: 'b`, so a
-    // `&'a GraphTerm<'a>` is already usable as `&'b GraphTerm<'b>`. `rebuild`
-    // only reads them to emit fresh Term nodes, so no defensive copy is
-    // needed.
+    // Per-node info in node-index order. The node items are read directly (not
+    // copied): `Term`/`GraphFix` are covariant and `'a: 'b`, so the borrows
+    // flow straight through into the rebuilt objects.
     fn topology<'b, 'a: 'b>(nodes: &'a [&'a GraphNode<'a>]) -> Vec<NodeInfo<'b>> {
         fn num_ins(node: &GraphNode) -> u64 {
             let mut num = 0u64;
@@ -87,7 +84,7 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         nodes
             .iter()
             .map(|&node| NodeInfo {
-                term: node.term,
+                item: node.item,
                 in_degree: num_ins(node),
                 outs: prop_outs(node),
             })
@@ -164,10 +161,9 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         let n = info.len();
         let mut i = 0;
         loop {
-            let term = info[i].term;
-            let obj = match term {
-                GraphTerm::Fix(fix) => mem.alloc(RebuildObj::Fix(visit_fix(mem, fix))),
-                _ => mem.alloc(RebuildObj::Term(map_term_chain(mem, term))),
+            let obj = match info[i].item {
+                GraphItem::Fix(fix) => mem.alloc(RebuildObj::Fix(visit_fix(mem, fix))),
+                GraphItem::Term(term) => mem.alloc(RebuildObj::Term(term)),
             };
             let in_deg = info[i].in_degree;
             let out_props = info[i].outs.as_slice();
@@ -210,14 +206,15 @@ pub(super) fn rebuild<'b, 'a: 'b>(mem: &'b Bump, doc: &'a GraphDoc<'a>) -> &'b R
         }
     }
     fn visit_fix<'b, 'a: 'b>(mem: &'b Bump, fix: &'a GraphFix<'a>) -> &'b RebuildFix<'b> {
-        // Walk the fix chain, then rebuild the RebuildFix bottom-up.
+        // Walk the fix chain, then rebuild the RebuildFix bottom-up. Terms pass
+        // through by borrow.
         let mut recorded: Vec<(&'b Term<'b>, bool)> = Vec::new();
         let mut cur = fix;
         let last: &'b Term<'b> = loop {
             match cur {
-                GraphFix::Last(term) => break map_term_chain(mem, *term),
+                GraphFix::Last(term) => break term,
                 GraphFix::Next(term, fix1, pad) => {
-                    recorded.push((map_term_chain(mem, *term), *pad));
+                    recorded.push((term, *pad));
                     cur = fix1;
                 }
             }

@@ -23,7 +23,6 @@ pub mod normalize;
 pub mod rescope;
 pub mod serialize;
 pub mod structurize;
-mod term_chain;
 
 // Re-export all pass functions
 pub use broken::broken;

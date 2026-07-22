@@ -10,19 +10,18 @@
 //! O(n^2) (the old full-stack diff did). `solve` and `rebuild` are unchanged.
 
 use super::graph::{
-    GraphDoc, GraphEdge, GraphFix, GraphLine, GraphNode, GraphTerm, Property, build_graph_doc,
+    GraphDoc, GraphEdge, GraphFix, GraphItem, GraphLine, GraphNode, Property, build_graph_doc,
 };
-use crate::compiler::passes::term_chain::map_term_chain;
-use crate::compiler::types::{FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, Scope};
+use crate::compiler::types::{FixedComp, FixedDoc, FixedFix, FixedItem, FixedObj, Scope, Term};
 use bumpalo::Bump;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
 // Helper function to create graph nodes
-fn make_node<'a>(mem: &'a Bump, index: u64, term: &'a GraphTerm<'a>) -> &'a GraphNode<'a> {
+fn make_node<'a>(mem: &'a Bump, index: u64, item: GraphItem<'a>) -> &'a GraphNode<'a> {
     mem.alloc(GraphNode {
         index,
-        term,
+        item,
         ins_head: Cell::new(None),
         ins_tail: Cell::new(None),
         outs_head: Cell::new(None),
@@ -141,27 +140,25 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> &'b Grap
         let last_index: u64 = loop {
             match cur {
                 FixedObj::Next(item, comp, obj1) => {
-                    let term1 = match item {
-                        FixedItem::Term(term) => map_term_chain(mem, *term),
+                    let item1 = match item {
+                        FixedItem::Term(term) => GraphItem::Term(term),
                         FixedItem::Fix(fix) => {
-                            let fix1 = visit_fix(mem, fix, index, &mut open, &mut edges);
-                            mem.alloc(GraphTerm::Fix(fix1))
+                            GraphItem::Fix(visit_fix(mem, fix, index, &mut open, &mut edges))
                         }
                     };
-                    nodes_vec.push(make_node(mem, index, term1));
+                    nodes_vec.push(make_node(mem, index, item1));
                     pads_vec.push(apply_comp(index, comp, &mut open, &mut edges));
                     index += 1;
                     cur = obj1;
                 }
                 FixedObj::Last(item) => {
-                    let term1 = match item {
-                        FixedItem::Term(term) => map_term_chain(mem, *term),
+                    let item1 = match item {
+                        FixedItem::Term(term) => GraphItem::Term(term),
                         FixedItem::Fix(fix) => {
-                            let fix1 = visit_fix(mem, fix, index, &mut open, &mut edges);
-                            mem.alloc(GraphTerm::Fix(fix1))
+                            GraphItem::Fix(visit_fix(mem, fix, index, &mut open, &mut edges))
                         }
                     };
-                    nodes_vec.push(make_node(mem, index, term1));
+                    nodes_vec.push(make_node(mem, index, item1));
                     break index;
                 }
             }
@@ -194,18 +191,18 @@ pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: FixedDoc<'a>) -> &'b Grap
         edges: &mut Vec<Edge>,
     ) -> &'b GraphFix<'b> {
         // Walk the fix chain forward, replaying each internal comp's deltas at
-        // the fix item's node index; rebuild the GraphFix bottom-up.
-        let mut recorded: Vec<(&'b GraphTerm<'b>, bool)> = Vec::new();
+        // the fix item's node index; rebuild the GraphFix bottom-up. Terms pass
+        // through by borrow.
+        let mut recorded: Vec<(&'b Term<'b>, bool)> = Vec::new();
         let mut cur = fix;
-        let last_term: &'b GraphTerm<'b> = loop {
+        let last_term: &'b Term<'b> = loop {
             match cur {
                 FixedFix::Next(term, comp, fix1) => {
-                    let term1 = map_term_chain(mem, *term);
                     let pad = apply_comp(index, comp, open, edges);
-                    recorded.push((term1, pad));
+                    recorded.push((term, pad));
                     cur = fix1;
                 }
-                FixedFix::Last(term) => break map_term_chain(mem, *term),
+                FixedFix::Last(term) => break term,
             }
         };
         let mut gfix: &'b GraphFix<'b> = mem.alloc(GraphFix::Last(last_term));
