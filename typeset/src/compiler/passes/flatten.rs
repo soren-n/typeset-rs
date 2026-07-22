@@ -7,28 +7,28 @@
 //! and text is moved out of the tree — every later representation borrows it
 //! from this arena. All subsequent passes fold flat arenas with plain loops.
 
-use crate::compiler::types::{LayId, Layout, LayoutArena, LayoutNode};
+use crate::compiler::types::{Attr, LayId, Layout, LayoutArena, LayoutNode, push_node};
 use std::mem;
 
 /// A unit of flattening work: visit a subtree, or build a parent node from
-/// already-flattened children (their ids sit on the result stack).
+/// already-flattened children (their ids sit on the result stack). A unary
+/// parent carries its arena-node constructor directly.
 enum Task {
     Visit(Box<Layout>),
-    Fix,
-    Grp,
-    Seq,
-    Nest,
-    Pack,
+    Unary(fn(LayId) -> LayoutNode),
     Line,
-    Comp(crate::compiler::types::Attr),
+    Comp(Attr),
+}
+
+/// Push a unary parent task, then its child; the child pops (and resolves)
+/// first, so by the time the parent task pops its child id is on the result
+/// stack.
+fn visit_unary(tasks: &mut Vec<Task>, ctor: fn(LayId) -> LayoutNode, child: &mut Box<Layout>) {
+    tasks.push(Task::Unary(ctor));
+    tasks.push(Task::Visit(mem::take(child)));
 }
 
 pub fn flatten(layout: Box<Layout>) -> LayoutArena {
-    fn push(nodes: &mut Vec<LayoutNode>, node: LayoutNode) -> LayId {
-        let id = nodes.len() as LayId;
-        nodes.push(node);
-        id
-    }
     let mut nodes: Vec<LayoutNode> = Vec::new();
 
     let mut tasks: Vec<Task> = vec![Task::Visit(layout)];
@@ -36,34 +36,15 @@ pub fn flatten(layout: Box<Layout>) -> LayoutArena {
     while let Some(task) = tasks.pop() {
         match task {
             Task::Visit(mut cur) => match &mut *cur {
-                Layout::Null => {
-                    let id = push(&mut nodes, LayoutNode::Null);
-                    ids.push(id);
-                }
+                Layout::Null => ids.push(push_node(&mut nodes, LayoutNode::Null)),
                 Layout::Text(data) => {
-                    let id = push(&mut nodes, LayoutNode::Text(mem::take(data)));
-                    ids.push(id);
+                    ids.push(push_node(&mut nodes, LayoutNode::Text(mem::take(data))));
                 }
-                Layout::Fix(child) => {
-                    tasks.push(Task::Fix);
-                    tasks.push(Task::Visit(mem::take(child)));
-                }
-                Layout::Grp(child) => {
-                    tasks.push(Task::Grp);
-                    tasks.push(Task::Visit(mem::take(child)));
-                }
-                Layout::Seq(child) => {
-                    tasks.push(Task::Seq);
-                    tasks.push(Task::Visit(mem::take(child)));
-                }
-                Layout::Nest(child) => {
-                    tasks.push(Task::Nest);
-                    tasks.push(Task::Visit(mem::take(child)));
-                }
-                Layout::Pack(child) => {
-                    tasks.push(Task::Pack);
-                    tasks.push(Task::Visit(mem::take(child)));
-                }
+                Layout::Fix(child) => visit_unary(&mut tasks, LayoutNode::Fix, child),
+                Layout::Grp(child) => visit_unary(&mut tasks, LayoutNode::Grp, child),
+                Layout::Seq(child) => visit_unary(&mut tasks, LayoutNode::Seq, child),
+                Layout::Nest(child) => visit_unary(&mut tasks, LayoutNode::Nest, child),
+                Layout::Pack(child) => visit_unary(&mut tasks, LayoutNode::Pack, child),
                 Layout::Line(left, right) => {
                     tasks.push(Task::Line);
                     tasks.push(Task::Visit(mem::take(right)));
@@ -75,30 +56,19 @@ pub fn flatten(layout: Box<Layout>) -> LayoutArena {
                     tasks.push(Task::Visit(mem::take(left)));
                 }
             },
-            Task::Fix | Task::Grp | Task::Seq | Task::Nest | Task::Pack => {
+            Task::Unary(ctor) => {
                 let child = ids.pop().expect("unary operand");
-                let node = match task {
-                    Task::Fix => LayoutNode::Fix(child),
-                    Task::Grp => LayoutNode::Grp(child),
-                    Task::Seq => LayoutNode::Seq(child),
-                    Task::Nest => LayoutNode::Nest(child),
-                    Task::Pack => LayoutNode::Pack(child),
-                    _ => unreachable!(),
-                };
-                let id = push(&mut nodes, node);
-                ids.push(id);
+                ids.push(push_node(&mut nodes, ctor(child)));
             }
             Task::Line => {
                 let right = ids.pop().expect("line: right operand");
                 let left = ids.pop().expect("line: left operand");
-                let id = push(&mut nodes, LayoutNode::Line(left, right));
-                ids.push(id);
+                ids.push(push_node(&mut nodes, LayoutNode::Line(left, right)));
             }
             Task::Comp(attr) => {
                 let right = ids.pop().expect("comp: right operand");
                 let left = ids.pop().expect("comp: left operand");
-                let id = push(&mut nodes, LayoutNode::Comp(left, right, attr));
-                ids.push(id);
+                ids.push(push_node(&mut nodes, LayoutNode::Comp(left, right, attr)));
             }
         }
     }

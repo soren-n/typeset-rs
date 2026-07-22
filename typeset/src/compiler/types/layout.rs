@@ -98,15 +98,23 @@ impl Drop for Layout {
 
 /// Deep-copy a layout iteratively (bottom-up build with task/result stacks).
 fn clone_layout(layout: &Layout) -> Box<Layout> {
+    /// A unit of cloning work: visit a subtree, or build a parent from
+    /// already-cloned children on the result stack. A unary parent carries its
+    /// constructor directly.
     enum Task<'a> {
         Visit(&'a Layout),
-        Fix,
-        Grp,
-        Seq,
-        Nest,
-        Pack,
+        Unary(fn(Box<Layout>) -> Layout),
         Line,
         Comp(Attr),
+    }
+    /// Push a unary parent task, then its child (which pops and clones first).
+    fn visit_unary<'a>(
+        tasks: &mut Vec<Task<'a>>,
+        ctor: fn(Box<Layout>) -> Layout,
+        child: &'a Layout,
+    ) {
+        tasks.push(Task::Unary(ctor));
+        tasks.push(Task::Visit(child));
     }
     let mut tasks: Vec<Task> = vec![Task::Visit(layout)];
     let mut out: Vec<Box<Layout>> = Vec::new();
@@ -115,26 +123,11 @@ fn clone_layout(layout: &Layout) -> Box<Layout> {
             Task::Visit(l) => match l {
                 Layout::Null => out.push(Box::new(Layout::Null)),
                 Layout::Text(data) => out.push(Box::new(Layout::Text(data.clone()))),
-                Layout::Fix(l1) => {
-                    tasks.push(Task::Fix);
-                    tasks.push(Task::Visit(l1));
-                }
-                Layout::Grp(l1) => {
-                    tasks.push(Task::Grp);
-                    tasks.push(Task::Visit(l1));
-                }
-                Layout::Seq(l1) => {
-                    tasks.push(Task::Seq);
-                    tasks.push(Task::Visit(l1));
-                }
-                Layout::Nest(l1) => {
-                    tasks.push(Task::Nest);
-                    tasks.push(Task::Visit(l1));
-                }
-                Layout::Pack(l1) => {
-                    tasks.push(Task::Pack);
-                    tasks.push(Task::Visit(l1));
-                }
+                Layout::Fix(l1) => visit_unary(&mut tasks, Layout::Fix, l1),
+                Layout::Grp(l1) => visit_unary(&mut tasks, Layout::Grp, l1),
+                Layout::Seq(l1) => visit_unary(&mut tasks, Layout::Seq, l1),
+                Layout::Nest(l1) => visit_unary(&mut tasks, Layout::Nest, l1),
+                Layout::Pack(l1) => visit_unary(&mut tasks, Layout::Pack, l1),
                 Layout::Line(left, right) => {
                     tasks.push(Task::Line);
                     tasks.push(Task::Visit(right));
@@ -146,25 +139,9 @@ fn clone_layout(layout: &Layout) -> Box<Layout> {
                     tasks.push(Task::Visit(left));
                 }
             },
-            Task::Fix => {
-                let inner = out.pop().expect("fix operand");
-                out.push(Box::new(Layout::Fix(inner)));
-            }
-            Task::Grp => {
-                let inner = out.pop().expect("grp operand");
-                out.push(Box::new(Layout::Grp(inner)));
-            }
-            Task::Seq => {
-                let inner = out.pop().expect("seq operand");
-                out.push(Box::new(Layout::Seq(inner)));
-            }
-            Task::Nest => {
-                let inner = out.pop().expect("nest operand");
-                out.push(Box::new(Layout::Nest(inner)));
-            }
-            Task::Pack => {
-                let inner = out.pop().expect("pack operand");
-                out.push(Box::new(Layout::Pack(inner)));
+            Task::Unary(ctor) => {
+                let inner = out.pop().expect("unary operand");
+                out.push(Box::new(ctor(inner)));
             }
             Task::Line => {
                 let right = out.pop().expect("line: right operand");
@@ -198,6 +175,12 @@ impl fmt::Debug for Layout {
             Lit(&'static str),
             Owned(String),
         }
+        /// Push `open` child `)` as tasks (in emit order).
+        fn visit_wrapped<'a>(stack: &mut Vec<Task<'a>>, open: &'static str, child: &'a Layout) {
+            stack.push(Task::Lit(")"));
+            stack.push(Task::Visit(child));
+            stack.push(Task::Lit(open));
+        }
         let mut stack: Vec<Task> = vec![Task::Visit(self)];
         while let Some(task) = stack.pop() {
             match task {
@@ -206,31 +189,11 @@ impl fmt::Debug for Layout {
                 Task::Visit(l) => match l {
                     Layout::Null => f.write_str("Null")?,
                     Layout::Text(data) => f.write_str(&format!("Text({:?})", data))?,
-                    Layout::Fix(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("Fix("));
-                    }
-                    Layout::Grp(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("Grp("));
-                    }
-                    Layout::Seq(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("Seq("));
-                    }
-                    Layout::Nest(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("Nest("));
-                    }
-                    Layout::Pack(l1) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(l1));
-                        stack.push(Task::Lit("Pack("));
-                    }
+                    Layout::Fix(l1) => visit_wrapped(&mut stack, "Fix(", l1),
+                    Layout::Grp(l1) => visit_wrapped(&mut stack, "Grp(", l1),
+                    Layout::Seq(l1) => visit_wrapped(&mut stack, "Seq(", l1),
+                    Layout::Nest(l1) => visit_wrapped(&mut stack, "Nest(", l1),
+                    Layout::Pack(l1) => visit_wrapped(&mut stack, "Pack(", l1),
                     Layout::Line(left, right) => {
                         stack.push(Task::Lit(")"));
                         stack.push(Task::Visit(right));
