@@ -56,12 +56,9 @@ fn run_passes(layout: Box<Layout>) -> Box<Doc> {
     let mem2 = Bump::new();
     let serial = serialize(&mem2, edsl);
 
-    let fixed_doc = fixed(serial);
-
-    let mem3 = Bump::new();
-    let rebuild_doc = structurize(&mem3, &fixed_doc);
-
     // The remaining passes work on owned flat structures — no bumps needed.
+    let fixed_doc = fixed(serial);
+    let rebuild_doc = structurize(&fixed_doc);
     let denull_doc = denull(&rebuild_doc);
     let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)

@@ -4,7 +4,7 @@
 //! spine (grp/seq wrappers and left compositions) into the flat postorder
 //! [`RebuildDoc`] arena.
 
-use super::graph::{GraphDoc, GraphFixRun, GraphItem, GraphNode, NodeInfo, Property, graph_lines};
+use super::graph::{GraphDoc, GraphFixRun, LineGraph, NodeItem, Property};
 use crate::compiler::types::{RFixId, RObjId, RebuildDoc, RebuildFix, RebuildObj};
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
@@ -71,150 +71,113 @@ fn apply_rcont(b: &mut Builder, cont: &[RStep], obj: RObjId) -> RObjId {
     result
 }
 
-pub(super) fn rebuild<'a>(doc: &'a GraphDoc<'a>) -> RebuildDoc<'a> {
-    // Per-node info in node-index order. The node items are read directly (not
-    // copied): the term borrows flow straight through into the rebuilt objects.
-    fn topology<'a>(nodes: &[&GraphNode<'a>]) -> Vec<NodeInfo<'a>> {
-        fn num_ins(node: &GraphNode) -> u64 {
-            let mut num = 0u64;
-            let mut cur = node.ins_head.get();
-            while let Some(edge) = cur {
-                num += 1;
-                cur = edge.ins_next.get();
-            }
-            num
-        }
-        fn prop_outs(node: &GraphNode) -> Vec<Property> {
-            let mut props: Vec<Property> = Vec::new();
-            let mut cur = node.outs_head.get();
-            while let Some(edge) = cur {
-                props.push(edge.prop);
-                cur = edge.outs_next.get();
-            }
-            props
-        }
-        nodes
-            .iter()
-            .map(|&node| NodeInfo {
-                item: node.item,
-                in_degree: num_ins(node),
-                outs: prop_outs(node),
-            })
-            .collect()
+// Composes `partial` into the top continuation, then pushes a grp/seq
+// continuation for each property.
+fn open(props: &[Property], stack: &mut RStack, partial: RPartial) {
+    // Prepend a Partial step onto the current top continuation (a `push` in
+    // the reversed-storage convention), then push a fresh single-step
+    // continuation per property.
+    stack
+        .last_mut()
+        .expect("Invariant")
+        .push(RStep::Partial(partial));
+    for prop in props {
+        stack.push(match prop {
+            Property::Grp => vec![RStep::Grp],
+            Property::Seq => vec![RStep::Seq],
+        });
     }
-    // Composes `partial` into the top continuation, then pushes a grp/seq
-    // continuation for each property.
-    fn open(props: &[Property], mut stack: RStack, partial: RPartial) -> RStack {
-        // Prepend a Partial step onto the current top continuation (a `push`
-        // in the reversed-storage convention), then push a fresh single-step
-        // continuation per property.
-        let mut top = stack.pop().expect("Invariant");
-        top.push(RStep::Partial(partial));
-        stack.push(top);
-        for prop in props {
-            stack.push(match prop {
-                Property::Grp => vec![RStep::Grp],
-                Property::Seq => vec![RStep::Seq],
-            });
-        }
-        stack
-    }
-    // Pops `count` continuations, applying each to the accumulating object.
-    fn close(b: &mut Builder, count: u64, mut stack: RStack, term: RObjId) -> (RStack, RObjId) {
-        let mut result = term;
-        for _ in 0..count {
-            let top = stack.pop().expect("Invariant");
-            result = apply_rcont(b, &top, result);
-        }
-        (stack, result)
-    }
-    fn finalize(b: &mut Builder, stack: RStack, term: RObjId) -> RObjId {
-        match stack.as_slice() {
-            [last] => apply_rcont(b, last, term),
-            _ => unreachable!("Invariant"),
-        }
-    }
-    fn visit_line<'a>(b: &mut Builder<'a>, info: &[NodeInfo<'a>], pads: &[bool]) -> RObjId {
-        // Walk the per-node info, threading the continuation stack and the left
-        // composition spine (partial). `pads` has one fewer element: `pads[i]`
-        // is the pad between `info[i]` and `info[i + 1]`. The initial stack
-        // holds one identity continuation (an empty step list).
-        let mut stack: RStack = vec![Vec::new()];
-        let mut partial: RPartial = Vec::new();
-        let n = info.len();
-        let mut i = 0;
-        loop {
-            let obj = match info[i].item {
-                GraphItem::Fix(fix) => {
-                    let fix1 = visit_fix(b, fix);
-                    b.obj(RebuildObj::Fix(fix1))
-                }
-                GraphItem::Term(term) => b.obj(RebuildObj::Term(term)),
-            };
-            let in_deg = info[i].in_degree;
-            let out_props = info[i].outs.as_slice();
-            if i + 1 == n {
-                // Final term of the line: it never has out-properties.
-                if !out_props.is_empty() {
-                    unreachable!("Invariant")
-                }
-                let applied = apply_rpartial(b, &partial, obj);
-                // With no incoming scopes there is nothing to close; otherwise
-                // close them first. Either way the line finalizes the same way.
-                let (stack1, obj2) = if in_deg == 0 {
-                    (stack, applied)
-                } else {
-                    close(b, in_deg, stack, applied)
-                };
-                return finalize(b, stack1, obj2);
-            }
-            let pad = pads[i];
-            match (in_deg, out_props.is_empty()) {
-                // In-degree 0, no out-properties: extend the partial spine.
-                (0, true) => partial.push((obj, pad)),
-                // In-degree > 0, no out-properties: close the incoming scopes,
-                // then start a fresh partial from the closed object.
-                (_, true) => {
-                    let applied = apply_rpartial(b, &partial, obj);
-                    let (stack1, obj2) = close(b, in_deg, stack, applied);
-                    stack = stack1;
-                    partial = vec![(obj2, pad)];
-                }
-                // In-degree 0, has out-properties: open new scopes, then
-                // start a fresh partial from this object.
-                (0, false) => {
-                    stack = open(out_props, stack, partial);
-                    partial = vec![(obj, pad)];
-                }
-                (_, false) => unreachable!("Invariant"),
-            }
-            i += 1;
-        }
-    }
-    fn visit_fix<'a>(b: &mut Builder<'a>, run: &GraphFixRun<'a>) -> RFixId {
-        // Rebuild the run as a right-nested fixed composition spine. Terms
-        // pass through by borrow.
-        let last = *run.terms.last().expect("a fix run has at least one term");
-        let mut rfix = b.fix(RebuildFix::Term(last));
-        for k in (0..run.pads.len()).rev() {
-            let left = b.fix(RebuildFix::Term(run.terms[k]));
-            rfix = b.fix(RebuildFix::Comp(left, rfix, run.pads[k]));
-        }
-        rfix
-    }
+}
 
+// Pops `count` continuations, applying each to the accumulating object.
+fn close(b: &mut Builder, count: usize, stack: &mut RStack, term: RObjId) -> RObjId {
+    let mut result = term;
+    for _ in 0..count {
+        let top = stack.pop().expect("Invariant");
+        result = apply_rcont(b, &top, result);
+    }
+    result
+}
+
+pub(super) fn rebuild<'a>(doc: &GraphDoc<'a>) -> RebuildDoc<'a> {
     let mut b = Builder {
         objs: Vec::new(),
         fixes: Vec::new(),
     };
-    let mut lines: Vec<RObjId> = Vec::new();
-    for (nodes, pads) in graph_lines(doc) {
-        let info = topology(nodes);
-        lines.push(visit_line(&mut b, &info, pads));
-    }
+    let lines: Vec<RObjId> = doc.iter().map(|line| visit_line(&mut b, line)).collect();
     RebuildDoc {
         lines,
         objs: b.objs,
         fixes: b.fixes,
     }
+}
+
+fn visit_line<'a>(b: &mut Builder<'a>, g: &LineGraph<'a>) -> RObjId {
+    // Walk the nodes in order, threading the continuation stack and the left
+    // composition spine (partial). `g.pads[i]` is the pad between node `i` and
+    // `i + 1`. The initial stack holds one identity continuation.
+    let mut stack: RStack = vec![Vec::new()];
+    let mut partial: RPartial = Vec::new();
+    let n = g.nodes.len();
+    for (i, node) in g.nodes.iter().enumerate() {
+        let obj = match &node.item {
+            NodeItem::Fix(run) => {
+                let fix1 = visit_fix(b, run);
+                b.obj(RebuildObj::Fix(fix1))
+            }
+            NodeItem::Term(term) => b.obj(RebuildObj::Term(term)),
+        };
+        let in_deg = node.ins.len();
+        if i + 1 == n {
+            // Final node of the line: it never has out-properties.
+            if !node.outs.is_empty() {
+                unreachable!("Invariant")
+            }
+            let applied = apply_rpartial(b, &partial, obj);
+            // With no incoming scopes there is nothing to close; otherwise
+            // close them first. Either way the line finalizes the same way.
+            let obj2 = close(b, in_deg, &mut stack, applied);
+            let [last] = &stack[..] else {
+                unreachable!("Invariant")
+            };
+            return apply_rcont(b, last, obj2);
+        }
+        let pad = g.pads[i];
+        match (in_deg, node.outs.is_empty()) {
+            // In-degree 0, no out-properties: extend the partial spine.
+            (0, true) => partial.push((obj, pad)),
+            // In-degree > 0, no out-properties: close the incoming scopes,
+            // then start a fresh partial from the closed object.
+            (_, true) => {
+                let applied = apply_rpartial(b, &partial, obj);
+                let obj2 = close(b, in_deg, &mut stack, applied);
+                partial = vec![(obj2, pad)];
+            }
+            // In-degree 0, has out-properties: open new scopes, then
+            // start a fresh partial from this object.
+            (0, false) => {
+                let props: Vec<Property> = node
+                    .outs
+                    .iter()
+                    .map(|&e| g.edges[e as usize].prop)
+                    .collect();
+                open(&props, &mut stack, std::mem::take(&mut partial));
+                partial = vec![(obj, pad)];
+            }
+            (_, false) => unreachable!("Invariant"),
+        }
+    }
+    unreachable!("every line has at least one node")
+}
+
+fn visit_fix<'a>(b: &mut Builder<'a>, run: &GraphFixRun<'a>) -> RFixId {
+    // Rebuild the run as a right-nested fixed composition spine. Terms pass
+    // through by borrow.
+    let last = *run.terms.last().expect("a fix run has at least one term");
+    let mut rfix = b.fix(RebuildFix::Term(last));
+    for k in (0..run.pads.len()).rev() {
+        let left = b.fix(RebuildFix::Term(run.terms[k]));
+        rfix = b.fix(RebuildFix::Comp(left, rfix, run.pads[k]));
+    }
+    rfix
 }

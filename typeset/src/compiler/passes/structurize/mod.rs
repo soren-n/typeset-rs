@@ -1,8 +1,8 @@
-//! Pass 5: FixedDoc → RebuildDoc (rebuild with graph structure)
+//! Pass 4: FixedDoc → RebuildDoc (rebuild with graph structure)
 //!
 //! The pass runs in three phases, one per submodule:
 //! 1. [`graphify`] — FixedDoc → GraphDoc: build the grp/seq scope graph.
-//! 2. [`solve`]    — GraphDoc → GraphDoc: resolve the scope graph in place.
+//! 2. [`solve`]    — resolve the scope graph in place.
 //! 3. [`rebuild`]  — GraphDoc → RebuildDoc: rebuild the composition spine.
 //!
 //! Each composition arrives carrying the scopes that open and close at it (the
@@ -16,12 +16,11 @@ mod rebuild;
 mod solve;
 
 use crate::compiler::types::{FixedDoc, RebuildDoc};
-use bumpalo::Bump;
 
-pub fn structurize<'b, 'a: 'b>(mem: &'b Bump, doc: &FixedDoc<'a>) -> RebuildDoc<'b> {
-    let doc1 = graphify::graphify(mem, doc);
-    let doc2 = solve::solve(mem, doc1);
-    rebuild::rebuild(doc2)
+pub fn structurize<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
+    let mut graph = graphify::graphify(doc);
+    solve::solve(&mut graph);
+    rebuild::rebuild(&graph)
 }
 
 #[cfg(test)]
@@ -30,6 +29,7 @@ mod tests {
     use crate::compiler::types::{
         FixRun, FixedComp, FixedItem, FixedLine, RebuildFix, RebuildObj, Term,
     };
+    use bumpalo::Bump;
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration across
@@ -62,7 +62,7 @@ mod tests {
         let doc = FixedDoc {
             lines: vec![FixedLine { items, seps }],
         };
-        let out = structurize(&mem, &doc);
+        let out = structurize(&doc);
         // One line, rebuilt as a right-nested composition spine.
         let [root] = out.lines[..] else {
             panic!("expected one line")
@@ -90,7 +90,7 @@ mod tests {
                 seps: Vec::new(),
             }],
         };
-        let out = structurize(&mem, &doc);
+        let out = structurize(&doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -126,7 +126,7 @@ mod tests {
                 seps: Vec::new(),
             }],
         };
-        let out = structurize(&mem, &doc);
+        let out = structurize(&doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -153,7 +153,7 @@ mod tests {
             })
             .collect();
         let doc = FixedDoc { lines };
-        let out = structurize(&mem, &doc);
+        let out = structurize(&doc);
         assert_eq!(out.lines.len(), DEEP);
     }
 }

@@ -4,44 +4,19 @@
 //! `rebuild` reads it back into a `RebuildDoc`. Nothing outside structurize
 //! touches these types, so they live here rather than in the shared IR module.
 //!
-//! Each line is an array of [`GraphNode`]s in index order. Grp/seq scopes are
-//! [`GraphEdge`]s; every edge sits on two intrusive doubly-linked lists at once
-//! — its target's incoming list (`ins_*`) and its source's outgoing list
-//! (`outs_*`) — which is what lets `solve` splice edges around in O(1).
+//! Each line is its own graph: nodes in document order, grp/seq scopes as
+//! edges. Everything is index-linked — an edge lives in its source's `outs`
+//! and its target's `ins` list, both ordered `Vec`s of edge ids — so `solve`
+//! moves edges around with plain vector operations and the whole structure is
+//! owned (no arena, no interior mutability).
 
 use crate::compiler::types::Term;
-use bumpalo::Bump;
-use std::cell::Cell;
 
-/// One line of the graph spine: its nodes in index order and the pad flags
-/// between adjacent nodes (`pads[i]` is the pad between node `i` and `i + 1`).
-pub(super) type GraphLine<'a> = (&'a [&'a GraphNode<'a>], &'a [bool]);
+/// Index of a node within its line (document order).
+pub(super) type NodeId = u32;
 
-/// Collect the lines of a `GraphDoc` spine, in order, into a `Vec`.
-///
-/// The `Eod`/`Break` spine is linear, so this is a plain loop — the shared
-/// counterpart to [`build_graph_doc`], used by `solve` and `rebuild` to walk the
-/// spine without recursing.
-pub(super) fn graph_lines<'a>(doc: &'a GraphDoc<'a>) -> Vec<GraphLine<'a>> {
-    let mut lines: Vec<GraphLine<'a>> = Vec::new();
-    let mut cur = doc;
-    while let GraphDoc::Break(nodes, pads, rest) = cur {
-        lines.push((nodes, pads));
-        cur = rest;
-    }
-    lines
-}
-
-/// Fold a slice of lines (document order) onto a fresh `Eod` terminal to build a
-/// `GraphDoc` spine. The shared counterpart to [`graph_lines`], used by
-/// `graphify` and `solve` to assemble their output spine.
-pub(super) fn build_graph_doc<'a>(mem: &'a Bump, lines: &[GraphLine<'a>]) -> &'a GraphDoc<'a> {
-    let mut gdoc: &'a GraphDoc<'a> = mem.alloc(GraphDoc::Eod);
-    for &(nodes, pads) in lines.iter().rev() {
-        gdoc = mem.alloc(GraphDoc::Break(nodes, pads, gdoc));
-    }
-    gdoc
-}
+/// Index into a [`LineGraph`]'s edge list.
+pub(super) type EdgeId = u32;
 
 /// The kind of a grp or seq scope edge. (`graphify` tracks scope *indices*
 /// while building the graph via the separate `Scope` type from the shared IR;
@@ -50,42 +25,6 @@ pub(super) fn build_graph_doc<'a>(mem: &'a Bump, lines: &[GraphLine<'a>]) -> &'a
 pub(super) enum Property {
     Grp,
     Seq,
-}
-
-#[derive(Debug)]
-pub(super) enum GraphDoc<'a> {
-    Eod,
-    Break(&'a [&'a GraphNode<'a>], &'a [bool], &'a GraphDoc<'a>),
-}
-
-#[derive(Debug)]
-pub(super) struct GraphNode<'a> {
-    pub index: u64,
-    pub item: GraphItem<'a>,
-    pub ins_head: Cell<Option<&'a GraphEdge<'a>>>,
-    pub ins_tail: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_head: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_tail: Cell<Option<&'a GraphEdge<'a>>>,
-}
-
-#[derive(Debug)]
-pub(super) struct GraphEdge<'a> {
-    pub prop: Property,
-    pub ins_next: Cell<Option<&'a GraphEdge<'a>>>,
-    pub ins_prev: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_next: Cell<Option<&'a GraphEdge<'a>>>,
-    pub outs_prev: Cell<Option<&'a GraphEdge<'a>>>,
-    pub source: Cell<&'a GraphNode<'a>>,
-    pub target: Cell<&'a GraphNode<'a>>,
-}
-
-/// A graph node's payload: either a plain term (borrowed from the serialize
-/// arena — terms are invariant from serialize through structurize) or a
-/// coalesced fixed group.
-#[derive(Debug, Copy, Clone)]
-pub(super) enum GraphItem<'a> {
-    Term(&'a Term<'a>),
-    Fix(&'a GraphFixRun<'a>),
 }
 
 /// A coalesced fixed group: its terms and the pads between adjacent terms.
@@ -97,12 +36,40 @@ pub(super) struct GraphFixRun<'a> {
     pub pads: Vec<bool>,
 }
 
-/// Per-node data `rebuild` reads from the solved graph: the node's item, its
-/// in-degree, and its out-properties. Owned and transient, one per node in
-/// node-index order.
+/// A graph node's payload: either a plain term (borrowed from the serialize
+/// arena — terms are invariant from serialize through structurize) or a
+/// coalesced fixed group.
 #[derive(Debug)]
-pub(super) struct NodeInfo<'a> {
-    pub item: GraphItem<'a>,
-    pub in_degree: u64,
-    pub outs: Vec<Property>,
+pub(super) enum NodeItem<'a> {
+    Term(&'a Term<'a>),
+    Fix(GraphFixRun<'a>),
 }
+
+#[derive(Debug)]
+pub(super) struct NodeData<'a> {
+    pub item: NodeItem<'a>,
+    /// Edges targeting this node, in list order (solve depends on the order).
+    pub ins: Vec<EdgeId>,
+    /// Edges sourced at this node, in list order (solve and rebuild depend on
+    /// the order).
+    pub outs: Vec<EdgeId>,
+}
+
+#[derive(Debug)]
+pub(super) struct EdgeData {
+    pub prop: Property,
+    pub source: NodeId,
+    pub target: NodeId,
+}
+
+/// One line's scope graph, plus the pads between adjacent nodes
+/// (`pads[i]` is the pad between node `i` and `i + 1`).
+#[derive(Debug)]
+pub(super) struct LineGraph<'a> {
+    pub nodes: Vec<NodeData<'a>>,
+    pub edges: Vec<EdgeData>,
+    pub pads: Vec<bool>,
+}
+
+/// The whole document's scope graph: one [`LineGraph`] per line, in order.
+pub(super) type GraphDoc<'a> = Vec<LineGraph<'a>>;

@@ -1,51 +1,17 @@
 //! Phase 1 of structurize: FixedDoc → GraphDoc.
 //!
-//! Walks the fixed spine, assigns a node index per item, and materializes the
+//! Walks each line, assigns a node index per item, and materializes the
 //! grp/seq scopes as graph edges (the scope graph that `solve` then resolves).
 //!
 //! Each composition carries the scopes that *open* and *close* at it (computed
 //! back in `serialize`). Replaying those deltas per line — open records a
 //! scope's `from` node, close pairs it with a `to` node and emits an edge — is
 //! linear in the number of scopes, so deeply nested grp/seq no longer cost
-//! O(n^2) (the old full-stack diff did). `solve` and `rebuild` are unchanged.
+//! O(n^2) (the old full-stack diff did).
 
-use super::graph::{
-    GraphDoc, GraphEdge, GraphFixRun, GraphItem, GraphLine, GraphNode, Property, build_graph_doc,
-};
+use super::graph::{EdgeData, GraphDoc, GraphFixRun, LineGraph, NodeData, NodeItem, Property};
 use crate::compiler::types::{FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Scope};
-use bumpalo::Bump;
-use std::cell::Cell;
 use std::collections::BTreeMap;
-
-// Helper function to create graph nodes
-fn make_node<'a>(mem: &'a Bump, index: u64, item: GraphItem<'a>) -> &'a GraphNode<'a> {
-    mem.alloc(GraphNode {
-        index,
-        item,
-        ins_head: Cell::new(None),
-        ins_tail: Cell::new(None),
-        outs_head: Cell::new(None),
-        outs_tail: Cell::new(None),
-    })
-}
-
-// Helper function to create graph edges
-fn make_edge<'a>(
-    mem: &'a Bump,
-    prop: Property,
-    source: &'a GraphNode<'a>,
-    target: &'a GraphNode<'a>,
-) -> &'a GraphEdge<'a> {
-    mem.alloc(GraphEdge {
-        prop,
-        ins_next: Cell::new(None),
-        ins_prev: Cell::new(None),
-        outs_next: Cell::new(None),
-        outs_prev: Cell::new(None),
-        source: Cell::new(source),
-        target: Cell::new(target),
-    })
-}
 
 fn scope_index(scope: &Scope) -> u64 {
     match scope {
@@ -62,15 +28,15 @@ fn scope_prop(scope: &Scope) -> Property {
 
 // The scopes open across the current point of a line, keyed by scope index:
 // each records the scope's kind and the node it opened at.
-type OpenScopes = BTreeMap<u64, (Property, u64)>;
+type OpenScopes = BTreeMap<u64, (Property, u32)>;
 // A resolved scope edge: (scope index, kind, from node, to node). Collected per
 // line, then materialized in scope-index order.
-type Edge = (u64, Property, u64, u64);
+type Edge = (u64, Property, u32, u32);
 
 // Applies one composition's scope deltas at `node`: close each scope that ends
 // here (pairing it with its recorded open into an edge), then open each scope
 // that begins here. Returns the composition's pad flag.
-fn apply_comp(node: u64, comp: &FixedComp, open: &mut OpenScopes, edges: &mut Vec<Edge>) -> bool {
+fn apply_comp(node: u32, comp: &FixedComp, open: &mut OpenScopes, edges: &mut Vec<Edge>) -> bool {
     let FixedComp { pad, opens, closes } = comp;
     for scope in closes.iter() {
         let index = scope_index(scope);
@@ -85,66 +51,36 @@ fn apply_comp(node: u64, comp: &FixedComp, open: &mut OpenScopes, edges: &mut Ve
     *pad
 }
 
-fn push_ins<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
-    match node.ins_tail.get() {
-        None => {
-            node.ins_head.set(Some(edge));
-            node.ins_tail.set(Some(edge))
-        }
-        Some(tail) => {
-            edge.ins_prev.set(Some(tail));
-            tail.ins_next.set(Some(edge));
-            node.ins_tail.set(Some(edge))
-        }
-    }
-}
-
-fn push_outs<'a>(edge: &'a GraphEdge<'a>, node: &'a GraphNode<'a>) {
-    match node.outs_tail.get() {
-        None => {
-            node.outs_head.set(Some(edge));
-            node.outs_tail.set(Some(edge))
-        }
-        Some(tail) => {
-            edge.outs_prev.set(Some(tail));
-            tail.outs_next.set(Some(edge));
-            node.outs_tail.set(Some(edge))
-        }
-    }
-}
-
-pub(super) fn graphify<'b, 'a: 'b>(mem: &'b Bump, doc: &FixedDoc<'a>) -> &'b GraphDoc<'b> {
-    let mut breaks: Vec<GraphLine<'b>> = Vec::new();
-    for line in &doc.lines {
-        breaks.push(visit_line(mem, line));
-    }
-    build_graph_doc(mem, &breaks)
+pub(super) fn graphify<'a>(doc: &FixedDoc<'a>) -> GraphDoc<'a> {
+    doc.lines.iter().map(visit_line).collect()
 }
 
 /// Graphifies one line: assigns a node index per item and replays each
 /// composition's scope deltas at that index. A fix item's internal comps and
 /// its trailing separator all share the item's index, exactly as document
 /// order threads them.
-fn visit_line<'b, 'a: 'b>(mem: &'b Bump, line: &FixedLine<'a>) -> GraphLine<'b> {
-    let mut nodes_vec: Vec<&'b GraphNode<'b>> = Vec::new();
-    let mut pads_vec: Vec<bool> = Vec::new();
+fn visit_line<'a>(line: &FixedLine<'a>) -> LineGraph<'a> {
+    let mut nodes: Vec<NodeData<'a>> = Vec::with_capacity(line.items.len());
+    let mut pads: Vec<bool> = Vec::with_capacity(line.seps.len());
     let mut open: OpenScopes = BTreeMap::new();
     let mut edges: Vec<Edge> = Vec::new();
     for (i, item) in line.items.iter().enumerate() {
-        let index = i as u64;
+        let index = i as u32;
         let item1 = match item {
-            FixedItem::Term(term) => GraphItem::Term(term),
-            FixedItem::Fix(run) => {
-                GraphItem::Fix(visit_fix(mem, run, index, &mut open, &mut edges))
-            }
+            FixedItem::Term(term) => NodeItem::Term(term),
+            FixedItem::Fix(run) => NodeItem::Fix(visit_fix(run, index, &mut open, &mut edges)),
         };
-        nodes_vec.push(make_node(mem, index, item1));
+        nodes.push(NodeData {
+            item: item1,
+            ins: Vec::new(),
+            outs: Vec::new(),
+        });
         if let Some(sep) = line.seps.get(i) {
-            pads_vec.push(apply_comp(index, sep, &mut open, &mut edges));
+            pads.push(apply_comp(index, sep, &mut open, &mut edges));
         }
     }
     // Close every scope still open at the line's last node.
-    let last_index = (line.items.len() - 1) as u64;
+    let last_index = (line.items.len() - 1) as u32;
     for (index, (prop, from)) in &open {
         edges.push((*index, *prop, *from, last_index));
     }
@@ -152,35 +88,41 @@ fn visit_line<'b, 'a: 'b>(mem: &'b Bump, line: &FixedLine<'a>) -> GraphLine<'b> 
     // are ordered exactly as the old index-keyed map produced them (solve
     // and rebuild depend on that order).
     edges.sort_by_key(|(index, ..)| *index);
-    let nodes = mem.alloc_slice_copy(&nodes_vec);
+    let mut edge_data: Vec<EdgeData> = Vec::new();
     for (_index, prop, from, to) in edges {
         if from != to {
-            let from_node = nodes[from as usize];
-            let to_node = nodes[to as usize];
-            let edge = make_edge(mem, prop, from_node, to_node);
-            push_ins(edge, to_node);
-            push_outs(edge, from_node);
+            let id = edge_data.len() as u32;
+            edge_data.push(EdgeData {
+                prop,
+                source: from,
+                target: to,
+            });
+            nodes[from as usize].outs.push(id);
+            nodes[to as usize].ins.push(id);
         }
     }
-    (nodes, mem.alloc_slice_copy(&pads_vec))
+    LineGraph {
+        nodes,
+        edges: edge_data,
+        pads,
+    }
 }
 
 /// Replays a fix run's internal scope deltas at the run's node index and keeps
 /// the pads; the terms pass through by borrow.
-fn visit_fix<'b, 'a: 'b>(
-    mem: &'b Bump,
+fn visit_fix<'a>(
     run: &FixRun<'a>,
-    index: u64,
+    index: u32,
     open: &mut OpenScopes,
     edges: &mut Vec<Edge>,
-) -> &'b GraphFixRun<'b> {
+) -> GraphFixRun<'a> {
     let pads: Vec<bool> = run
         .seps
         .iter()
         .map(|sep| apply_comp(index, sep, open, edges))
         .collect();
-    mem.alloc(GraphFixRun {
+    GraphFixRun {
         terms: run.terms.clone(),
         pads,
-    })
+    }
 }
