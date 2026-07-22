@@ -108,7 +108,17 @@ fn get_offset(state: State) -> usize {
     if !state.head {
         return 0;
     }
-    max(0, state.lvl - state.pos)
+    // At the head of a line the position never passes the indentation level:
+    // every head-path step either leaves `pos` alone or advances it exactly to
+    // `lvl`. A violation would mean a real layout bug, so fail loudly instead
+    // of clamping it away.
+    debug_assert!(
+        state.pos <= state.lvl,
+        "head position {} past indentation level {}",
+        state.pos,
+        state.lvl
+    );
+    state.lvl - state.pos
 }
 
 /// Append `n` spaces to `result` (iterative `push_spaces`).
