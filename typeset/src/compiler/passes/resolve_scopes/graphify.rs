@@ -1,4 +1,4 @@
-//! Phase 1 of structurize: FixedDoc → GraphDoc.
+//! Phase 1 of resolve_scopes: FixedDoc → GraphDoc.
 //!
 //! Walks each line, assigns a node index per item, and materializes the
 //! grp/seq scopes as graph edges (the scope graph that `solve` then resolves).

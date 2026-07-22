@@ -1,6 +1,6 @@
 use super::layout::Attr;
 
-// Zeroth intermediate representation: the flat layout arena.
+// The flat layout arena.
 //
 // `flatten` lowers the public `Box`-recursive [`Layout`](super::layout::Layout)
 // tree into this postorder arena (children precede parents) as the pipeline's
@@ -30,7 +30,7 @@ pub struct LayoutArena {
     pub root: LayId,
 }
 
-// First intermediate representation: Edsl.
+// Edsl.
 //
 // Like the layout arena, but with hard line breaks resolved: compositions
 // inside a broken sequence have become `Line`s and already-broken seq wrappers
@@ -59,7 +59,7 @@ pub struct EdslDoc<'a> {
     pub root: EdslId,
 }
 
-// Third intermediate representation: Serial.
+// Serial.
 //
 // A flat list of leaf entries in document order; each entry is a term plus how
 // it glues to what follows. The list is always non-empty and its final entry
@@ -78,12 +78,12 @@ pub enum SerialEntry<'a> {
 
 /// A layout term: a chain of `Nest`/`Pack` wrappers over a `Null`/`Text` leaf.
 ///
-/// This shape is invariant across the `Serial`, `LinearDoc`, `FixedDoc`, and
-/// `RebuildDoc` representations — the passes between them rewrite the
-/// surrounding composition structure but leave terms untouched — so a single
-/// type serves all four, and terms flow through those passes by borrow from
-/// the serialize arena rather than being copied. (`DenullTerm` drops `Null`
-/// post-denulling, so it stays distinct.)
+/// This shape is invariant across the `Serial`, `FixedDoc`, and `RebuildDoc`
+/// representations — the passes between them rewrite the surrounding
+/// composition structure but leave terms untouched — so a single type serves
+/// all three, and terms flow through those passes by borrow from the serialize
+/// arena rather than being copied. (`DenullTerm` drops `Null` post-denulling,
+/// so it stays distinct.)
 #[derive(Debug)]
 pub enum Term<'a> {
     Null,
@@ -95,11 +95,11 @@ pub enum Term<'a> {
 /// A grp or seq scope, identified by the index `serialize` assigns it in
 /// document pre-order. Each composition point records which scopes *open* and
 /// which *close* at it, relative to the previous composition on the same line;
-/// `structurize` replays those deltas to rebuild the scope graph.
+/// `resolve_scopes` replays those deltas to rebuild the scope graph.
 ///
 /// Carrying open/close deltas (total size O(number of scopes)) rather than each
 /// composition's full enclosing scope stack (O(depth) per composition) is what
-/// keeps the grp/seq passes — serialize, linearize, fixed, structurize — linear
+/// keeps the grp/seq passes — serialize, split_lines, resolve_scopes — linear
 /// on deeply nested scopes instead of O(n^2).
 #[derive(Debug, Copy, Clone)]
 pub enum Scope {
@@ -115,7 +115,7 @@ pub enum SerialComp<'a> {
     Comp(Attr, &'a [Scope], &'a [Scope]),
 }
 
-// Fourth intermediate representation: FixedDoc.
+// FixedDoc.
 //
 // An owned flat structure: lines in document order, each line its items with
 // the non-fixed compositions separating them, and maximal runs of terms joined
@@ -159,7 +159,7 @@ pub struct FixedDoc<'a> {
     pub lines: Vec<FixedLine<'a>>,
 }
 
-// Sixth intermediate representation: RebuildDoc.
+// RebuildDoc.
 //
 // A flat postorder arena, like the final `Doc`: objects and fixed objects live
 // in index-linked `Vec`s where children always precede their parents, and the
@@ -198,7 +198,7 @@ pub struct RebuildDoc<'a> {
     pub fixes: Vec<RebuildFix<'a>>,
 }
 
-// Seventh intermediate representation: DenullDoc.
+// DenullDoc.
 //
 // A flat postorder arena like `RebuildDoc`, but owned (no bump arena backs
 // it): nulls are gone, so terms are a stripped `(props, text)` pair rather

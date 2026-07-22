@@ -1,4 +1,4 @@
-//! Phase 2 of structurize: resolve the scope graph in place.
+//! Phase 2 of resolve_scopes: resolve the scope graph in place.
 //!
 //! For each node with both incoming and outgoing scope edges, the outgoing seq
 //! edges are moved out of the way (re-sourced onto the incoming side) and the

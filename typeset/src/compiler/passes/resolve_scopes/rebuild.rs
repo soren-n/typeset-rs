@@ -1,4 +1,4 @@
-//! Phase 3 of structurize: GraphDoc → RebuildDoc.
+//! Phase 3 of resolve_scopes: GraphDoc → RebuildDoc.
 //!
 //! Reads the solved scope graph per line and rebuilds an explicit composition
 //! spine (grp/seq wrappers and left compositions) into the flat postorder

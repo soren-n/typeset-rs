@@ -1,7 +1,7 @@
-//! The scope graph that the three structurize phases share.
+//! The scope graph that the three resolve_scopes phases share.
 //!
 //! `graphify` builds it from a `FixedDoc`, `solve` resolves it in place, and
-//! `rebuild` reads it back into a `RebuildDoc`. Nothing outside structurize
+//! `rebuild` reads it back into a `RebuildDoc`. Nothing outside resolve_scopes
 //! touches these types, so they live here rather than in the shared IR module.
 //!
 //! Each line is its own graph: nodes in document order, grp/seq scopes as
@@ -37,7 +37,7 @@ pub(super) struct GraphFixRun<'a> {
 }
 
 /// A graph node's payload: either a plain term (borrowed from the serialize
-/// arena — terms are invariant from serialize through structurize) or a
+/// arena — terms are invariant from serialize through resolve_scopes) or a
 /// coalesced fixed group.
 #[derive(Debug)]
 pub(super) enum NodeItem<'a> {

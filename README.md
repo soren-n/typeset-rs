@@ -31,7 +31,7 @@ let layout = comp(
 
 // Compile and render with indent width 2, buffer width 40
 let doc = compile(layout);
-let output = render(doc, 2, 40);
+let output = render(&doc, 2, 40);
 println!("{}", output);
 ```
 
@@ -48,7 +48,7 @@ let my_layout = layout! {
 };
 
 let doc = compile(my_layout);
-let result = render(doc, 2, 80);
+let result = render(&doc, 2, 80);
 ```
 
 ## Crates

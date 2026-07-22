@@ -92,12 +92,14 @@ cargo check --all-targets --all-features  # Type checking
 
 - Use existing code style and conventions
 - Follow Rust naming conventions (snake_case for functions, PascalCase for types)
-- Traverse recursive trees iteratively with explicit heap worklists rather than
-  native recursion, so arbitrarily deep inputs cannot overflow the stack (this
-  is why the passes, renderer, `Layout`'s `Clone`/`Drop`/`Debug`, and `Doc`'s
-  `Display`/`Debug` are all hand-written as loops). Prefer eliminating the
-  recursion structurally where possible: the output `Doc` is a flat arena
-  (`Vec`-backed), so its `Clone`/`Drop` are derived and deep-safe with no
-  hand-written loop at all
-- Use bump allocation for the intermediate representations during compilation
+- Never recurse on the native stack over user-controlled depth. Prefer
+  eliminating the recursion structurally: intermediate representations are flat
+  postorder arenas (children precede parents), so bottom-up folds are forward
+  loops and inherited context is a backward loop — no frame stacks at all. The
+  output `Doc` is a flat arena too, so `Clone`/`Drop`/`Debug` are derived and
+  deep-safe. The one `Box`-recursive tree is the public `Layout` input, which
+  keeps hand-written iterative `Clone`/`Drop`/`Debug` and is walked exactly
+  once, by the `flatten` pass
+- Keep new intermediate state flat and owned; the single bump arena backs
+  `serialize`'s persistent scope accumulators and should stay the only one
 - Maintain separation between layout construction and compilation phases

@@ -1,6 +1,6 @@
 //! serialize: EdslDoc → Serial (serialize in order to normalize)
 //!
-//! Flattens the Edsl tree into a flat Serial slice. The original threaded
+//! Flattens the Edsl arena into the flat Serial entry list. The original threaded
 //! four accumulator closures (terms, comps, glue, result) plus counters
 //! through a CPS recursion on the native stack, which aborts on deep inputs.
 //!
@@ -15,7 +15,7 @@
 //!   Comp separator) is carried per work item.
 //!
 //! Each leaf emits one `(glue, term)` entry; a final forward pass resolves the
-//! entries (in leaf order) into the `SerialEntry` slice, computing each
+//! entries (in leaf order) into the `SerialEntry` list, computing each
 //! composition's scope open/close deltas in the same sweep — byte-identical to
 //! the recursive version.
 
@@ -231,7 +231,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
     // composition's scope open/close deltas in the same forward pass. `prev` is
     // the previous composition's enclosing scope list *on the same line*; it
     // resets at every line break (Line/Last), because grp/seq scopes never cross
-    // a hard line — structurize resolves each line independently. Diffing the
+    // a hard line — resolve_scopes resolves each line independently. Diffing the
     // shared-tail `CompList`s is O(delta), so this whole pass stays linear even
     // when scopes nest n deep.
     let mut items: Vec<SerialEntry<'b>> = Vec::with_capacity(entries.len());
@@ -265,7 +265,7 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
 /// Diffs two enclosing-scope lists (innermost-first, sharing an outer tail by
 /// pointer) into the scopes that *open* (in `cur`, not `prev`) and *close* (in
 /// `prev`, not `cur`) at this composition. Order within each list is irrelevant:
-/// structurize keys scopes by index. O(number of scopes that differ).
+/// resolve_scopes keys scopes by index. O(number of scopes that differ).
 fn diff_comps<'b>(
     prev: Option<&'b CompList<'b>>,
     cur: Option<&'b CompList<'b>>,
