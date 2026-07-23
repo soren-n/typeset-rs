@@ -69,8 +69,9 @@
 //! Typeset is designed for high performance:
 //!
 //! - Flat, loop-based compilation: every intermediate representation is a
-//!   flat arena folded with plain loops, and text is borrowed through every
-//!   pass, copied exactly once into the [`Doc`]'s shared text buffer
+//!   flat arena folded with plain loops, and text is concatenated into one
+//!   buffer up front, then borrowed (never re-copied) through every pass until
+//!   it is materialized into the [`Doc`]'s shared text buffer at the end
 //! - Constant-time line-breaking decisions: compilation precomputes each
 //!   node's flat extent, so rendering decides breaks by arithmetic instead of
 //!   re-measuring subtrees — render cost does not grow with the target width
