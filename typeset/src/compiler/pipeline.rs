@@ -65,9 +65,9 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     let mem = Bump::new();
     let serial = serialize(&mem, &edsl);
 
-    let line_doc = split_lines(&serial);
+    let line_doc = split_lines(&serial.entries);
     let scoped_doc = resolve_scopes(&line_doc);
-    let denull_doc = denull(&scoped_doc);
+    let denull_doc = denull(&scoped_doc, &serial.paths);
     let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)
 }

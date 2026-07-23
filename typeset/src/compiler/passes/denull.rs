@@ -8,8 +8,8 @@
 //! no bump arena backs it.
 
 use crate::compiler::types::{
-    DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, DenullTerm, Prop, Props,
-    RebuildDoc, RebuildFix, RebuildObj, Term, push_node,
+    DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, DenullTerm, NO_PATH, PathNode,
+    Prop, Props, RebuildDoc, RebuildFix, RebuildObj, Term, TermLeaf, push_node,
 };
 
 /// Result of denulling an object: nothing survived (`None`); an object
@@ -23,19 +23,23 @@ enum Res<Id> {
 }
 
 /// Remove null identities.
-pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
+pub fn denull<'a>(doc: &RebuildDoc<'a>, paths: &[PathNode]) -> DenullDoc<'a> {
     // Every input node yields at most one output node, so the input sizes are
     // exact capacity bounds.
     let mut objs: Vec<DenullObj<'a>> = Vec::with_capacity(doc.objs.len());
     let mut fixes: Vec<DenullFix<'a>> = Vec::with_capacity(doc.fixes.len());
-    // The shared prop buffer every surviving term's props range indexes.
+    // The shared prop buffer every surviving term's props range indexes, and
+    // the memo of already-materialized paths: terms sharing a path (sibling
+    // leaves under the same wrappers) share one materialization, so the
+    // buffer is O(path arena), not O(terms × depth).
     let mut props: Vec<Prop> = Vec::new();
+    let mut memo: Vec<Option<Props>> = vec![None; paths.len()];
 
     // Fold the fixed-object arena bottom-up (forward, children first).
     let mut fix_res: Vec<Res<DFixId>> = Vec::with_capacity(doc.fixes.len());
     for node in &doc.fixes {
         let res = match node {
-            RebuildFix::Term(term) => match strip_term(&mut props, term) {
+            RebuildFix::Term(term) => match strip_term(&mut props, &mut memo, paths, *term) {
                 None => Res::None,
                 Some(term1) => Res::Some(push_node(&mut fixes, DenullFix::Term(term1))),
             },
@@ -53,7 +57,7 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
     let mut obj_res: Vec<Res<DObjId>> = Vec::with_capacity(doc.objs.len());
     for node in &doc.objs {
         let res = match node {
-            RebuildObj::Term(term) => match strip_term(&mut props, term) {
+            RebuildObj::Term(term) => match strip_term(&mut props, &mut memo, paths, *term) {
                 None => Res::None,
                 Some(term1) => Res::Some(push_node(&mut objs, DenullObj::Term(term1))),
             },
@@ -143,50 +147,61 @@ fn wrap_obj<'a>(
     }
 }
 
-/// Denulls a term chain: `Null` and empty text vanish (wrappers and all);
-/// otherwise the nest/pack wrappers are collected outermost-first into the
-/// shared prop buffer and the term records the range they landed in. A term
-/// that vanishes rolls its wrappers back off the buffer.
-fn strip_term<'a>(props: &mut Vec<Prop>, term: &Term<'a>) -> Option<DenullTerm<'a>> {
-    let start = props.len();
-    let mut cur = term;
-    loop {
-        match cur {
-            Term::Null => {
-                props.truncate(start);
-                break None;
-            }
-            Term::Text(data) => {
-                break if data.is_empty() {
-                    props.truncate(start);
-                    None
-                } else {
-                    Some(DenullTerm {
-                        props: Props {
-                            start: start as u32,
-                            end: props.len() as u32,
-                        },
-                        text: data,
-                    })
-                };
-            }
-            Term::Nest(term1) => {
-                props.push(Prop::Nest);
-                cur = term1;
-            }
-            Term::Pack(index, term1) => {
-                props.push(Prop::Pack(*index));
-                cur = term1;
-            }
+/// Denulls a term: `Null` and empty text vanish (wrappers and all); otherwise
+/// the term's wrapper path is materialized outermost-first into the shared
+/// prop buffer (memoized per path id — sibling terms under the same wrappers
+/// share one materialization) and the term records the range.
+fn strip_term<'a>(
+    props: &mut Vec<Prop>,
+    memo: &mut [Option<Props>],
+    paths: &[PathNode],
+    term: Term<'a>,
+) -> Option<DenullTerm<'a>> {
+    let text = match term.leaf {
+        TermLeaf::Null | TermLeaf::Text("") => return None,
+        TermLeaf::Text(data) => data,
+    };
+    let range = if term.path == NO_PATH {
+        Props { start: 0, end: 0 }
+    } else if let Some(range) = memo[term.path as usize] {
+        range
+    } else {
+        let start = props.len();
+        let mut cur = term.path;
+        while cur != NO_PATH {
+            props.push(paths[cur as usize].prop);
+            cur = paths[cur as usize].parent;
         }
-    }
+        // The path walk yields innermost-first; prop lists are outermost-first.
+        props[start..].reverse();
+        let range = Props {
+            start: start as u32,
+            end: props.len() as u32,
+        };
+        memo[term.path as usize] = Some(range);
+        range
+    };
+    Some(DenullTerm { props: range, text })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::compiler::types::RObjId;
-    use bumpalo::Bump;
+
+    fn text_term(text: &'static str) -> Term<'static> {
+        Term {
+            path: NO_PATH,
+            leaf: TermLeaf::Text(text),
+        }
+    }
+
+    fn null_term() -> Term<'static> {
+        Term {
+            path: NO_PATH,
+            leaf: TermLeaf::Null,
+        }
+    }
 
     /// Far past where a native-stack recursion could survive; with flat arenas
     /// the folds are plain loops, so this now guards the row/term walks only.
@@ -194,13 +209,12 @@ mod tests {
 
     #[test]
     fn denull_handles_deep_comp_object() {
-        let mem = Bump::new();
         // Right-nested Comp chain: Comp(Term, Comp(Term, ... Term)). Each left
         // operand is a surviving Term, so the whole object survives.
         let mut objs: Vec<RebuildObj> = Vec::new();
-        let mut cur = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("z"))));
+        let mut cur = push_node(&mut objs, RebuildObj::Term(text_term("z")));
         for _ in 0..DEEP {
-            let left = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("y"))));
+            let left = push_node(&mut objs, RebuildObj::Term(text_term("y")));
             cur = push_node(&mut objs, RebuildObj::Comp(left, cur, false));
         }
         let doc = RebuildDoc {
@@ -208,7 +222,7 @@ mod tests {
             objs,
             fixes: Vec::new(),
         };
-        let out = denull(&doc);
+        let out = denull(&doc, &[]);
         // Count the surviving comps in the single line.
         let [DenullRow::Line(root)] = out.rows[..] else {
             panic!("expected a single line");
@@ -224,11 +238,20 @@ mod tests {
 
     #[test]
     fn denull_strips_deep_nest_term_to_props() {
-        let mem = Bump::new();
-        let mut term: &Term = mem.alloc(Term::Text("x"));
+        let mut paths: Vec<PathNode> = Vec::new();
+        let mut path = NO_PATH;
         for _ in 0..DEEP {
-            term = mem.alloc(Term::Nest(term));
+            let id = paths.len() as u32;
+            paths.push(PathNode {
+                prop: Prop::Nest,
+                parent: path,
+            });
+            path = id;
         }
+        let term = Term {
+            path,
+            leaf: TermLeaf::Text("x"),
+        };
         let mut objs: Vec<RebuildObj> = Vec::new();
         let root = push_node(&mut objs, RebuildObj::Term(term));
         let doc = RebuildDoc {
@@ -236,7 +259,7 @@ mod tests {
             objs,
             fixes: Vec::new(),
         };
-        let out = denull(&doc);
+        let out = denull(&doc, &paths);
         let [DenullRow::Line(root)] = out.rows[..] else {
             panic!("expected a single line");
         };
@@ -251,21 +274,20 @@ mod tests {
 
     #[test]
     fn denull_drops_null_left_and_merges_pads() {
-        let mem = Bump::new();
         // Comp(Text "a", Comp(Null, Text "x", pad=true), pad=false): the null
         // vanishes and its pad merges onto the surviving composition.
         let mut objs: Vec<RebuildObj> = Vec::new();
-        let n1 = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
-        let t = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("x"))));
+        let n1 = push_node(&mut objs, RebuildObj::Term(null_term()));
+        let t = push_node(&mut objs, RebuildObj::Term(text_term("x")));
         let inner = push_node(&mut objs, RebuildObj::Comp(n1, t, true));
-        let a = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("a"))));
+        let a = push_node(&mut objs, RebuildObj::Term(text_term("a")));
         let root = push_node(&mut objs, RebuildObj::Comp(a, inner, false));
         let doc = RebuildDoc {
             lines: vec![root],
             objs,
             fixes: Vec::new(),
         };
-        let out = denull(&doc);
+        let out = denull(&doc, &[]);
         let [DenullRow::Line(root)] = out.rows[..] else {
             panic!("expected a single line");
         };
@@ -277,21 +299,17 @@ mod tests {
 
     #[test]
     fn denull_handles_long_doc_spine() {
-        let mem = Bump::new();
         let mut objs: Vec<RebuildObj> = Vec::new();
         let mut lines: Vec<RObjId> = Vec::new();
         for _ in 0..DEEP {
-            lines.push(push_node(
-                &mut objs,
-                RebuildObj::Term(mem.alloc(Term::Text("x"))),
-            ));
+            lines.push(push_node(&mut objs, RebuildObj::Term(text_term("x"))));
         }
         let doc = RebuildDoc {
             lines,
             objs,
             fixes: Vec::new(),
         };
-        let out = denull(&doc);
+        let out = denull(&doc, &[]);
         assert_eq!(out.rows.len(), DEEP);
         assert!(matches!(out.rows.last(), Some(DenullRow::Line(_))));
         let breaks = out
@@ -304,19 +322,18 @@ mod tests {
 
     #[test]
     fn denull_emptied_lines_become_empty_rows_and_a_trailing_one_ends_the_doc() {
-        let mem = Bump::new();
         // Lines: [Text "a", Null, Null]. The first null line becomes an Empty
         // row; the trailing one is the document end and emits no row.
         let mut objs: Vec<RebuildObj> = Vec::new();
-        let a = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Text("a"))));
-        let n1 = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
-        let n2 = push_node(&mut objs, RebuildObj::Term(mem.alloc(Term::Null)));
+        let a = push_node(&mut objs, RebuildObj::Term(text_term("a")));
+        let n1 = push_node(&mut objs, RebuildObj::Term(null_term()));
+        let n2 = push_node(&mut objs, RebuildObj::Term(null_term()));
         let doc = RebuildDoc {
             lines: vec![a, n1, n2],
             objs,
             fixes: Vec::new(),
         };
-        let out = denull(&doc);
+        let out = denull(&doc, &[]);
         assert!(matches!(
             out.rows[..],
             [DenullRow::Break(_), DenullRow::Empty]
@@ -325,13 +342,12 @@ mod tests {
 
     #[test]
     fn denull_fix_arena_folds_bottom_up() {
-        let mem = Bump::new();
         // Fix(Comp(Text "a", Text "", pad=true)): the empty right vanishes and
         // the fix survives as its left.
         let mut objs: Vec<RebuildObj> = Vec::new();
         let mut fixes: Vec<RebuildFix> = Vec::new();
-        let fa = push_node(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text("a"))));
-        let fe = push_node(&mut fixes, RebuildFix::Term(mem.alloc(Term::Text(""))));
+        let fa = push_node(&mut fixes, RebuildFix::Term(text_term("a")));
+        let fe = push_node(&mut fixes, RebuildFix::Term(text_term("")));
         let fc = push_node(&mut fixes, RebuildFix::Comp(fa, fe, true));
         let root = push_node(&mut objs, RebuildObj::Fix(fc));
         let doc = RebuildDoc {
@@ -339,7 +355,7 @@ mod tests {
             objs,
             fixes,
         };
-        let out = denull(&doc);
+        let out = denull(&doc, &[]);
         let [DenullRow::Line(root)] = out.rows[..] else {
             panic!("expected a single line");
         };

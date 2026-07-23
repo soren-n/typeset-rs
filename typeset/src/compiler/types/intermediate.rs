@@ -62,34 +62,62 @@ pub struct EdslDoc<'a> {
 // Serial.
 //
 // A flat list of leaf entries in document order; each entry is a term plus how
-// it glues to what follows. The list is always non-empty and its final entry
-// is always `Last`. (The load-bearing persistent lists are `serialize`'s
-// internal `TermList`/`CompList` scope accumulators, not this output.)
-pub type Serial<'a> = Vec<SerialEntry<'a>>;
+// it glues to what follows. The entry list is always non-empty and its final
+// entry is always `Last`. The document also owns the path arena the entries'
+// terms point into. (The load-bearing persistent lists are `serialize`'s
+// internal `CompList` scope accumulators, not this output.)
+#[derive(Debug)]
+pub struct SerialDoc<'a> {
+    pub entries: Vec<SerialEntry<'a>>,
+    /// The shared nest/pack path arena every [`Term`]'s `path` points into.
+    pub paths: Vec<PathNode>,
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum SerialEntry<'a> {
     /// A term followed by a composition — a hard line break
     /// (`SerialComp::Line`) or a composition separator (`SerialComp::Comp`).
-    Next(&'a Term<'a>, &'a SerialComp<'a>),
+    Next(Term<'a>, &'a SerialComp<'a>),
     /// The document's final term, with nothing following.
-    Last(&'a Term<'a>),
+    Last(Term<'a>),
 }
 
-/// A layout term: a chain of `Nest`/`Pack` wrappers over a `Null`/`Text` leaf.
+/// Index into a [`SerialDoc`]'s path arena.
+pub type PathId = u32;
+
+/// Sentinel for the empty path (no nest/pack wrappers).
+pub const NO_PATH: PathId = u32::MAX;
+
+/// One nest/pack wrapper on the DFS path to a leaf. `serialize` pushes one
+/// node per `Nest`/`Pack` layout node it descends through, so sibling leaves
+/// under the same wrappers *share* their path spine: total path storage is
+/// O(input tree), not O(leaves × depth) as the old per-leaf wrapper chains
+/// were.
+#[derive(Debug, Copy, Clone)]
+pub struct PathNode {
+    pub prop: Prop,
+    /// The enclosing (next-outer) wrapper, or [`NO_PATH`] at the outermost.
+    pub parent: PathId,
+}
+
+/// A layout term: its innermost nest/pack wrapper (a path into the shared
+/// path arena, [`NO_PATH`] for none) over a `Null`/`Text` leaf.
 ///
-/// This shape is invariant across the `Serial`, `FixedDoc`, and `RebuildDoc`
-/// representations — the passes between them rewrite the surrounding
-/// composition structure but leave terms untouched — so a single type serves
-/// all three, and terms flow through those passes by borrow from the serialize
-/// arena rather than being copied. (`DenullTerm` drops `Null` post-denulling,
-/// so it stays distinct.)
-#[derive(Debug)]
-pub enum Term<'a> {
+/// This shape is invariant across the `SerialDoc`, `FixedDoc`, and
+/// `RebuildDoc` representations — the passes between them rewrite the
+/// surrounding composition structure but leave terms untouched — so a single
+/// type serves all three, and terms flow through those passes by value.
+/// (`DenullTerm` drops `Null` post-denulling, so it stays distinct.)
+#[derive(Debug, Copy, Clone)]
+pub struct Term<'a> {
+    pub path: PathId,
+    pub leaf: TermLeaf<'a>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum TermLeaf<'a> {
     Null,
     Text(&'a str),
-    Nest(&'a Term<'a>),
-    Pack(u64, &'a Term<'a>),
 }
 
 /// A grp or seq scope, identified by the index `serialize` assigns it in
@@ -136,13 +164,13 @@ pub struct FixedComp<'a> {
 /// unbreakable item. `seps[i]` sits between `terms[i]` and `terms[i + 1]`.
 #[derive(Debug)]
 pub struct FixRun<'a> {
-    pub terms: Vec<&'a Term<'a>>,
+    pub terms: Vec<Term<'a>>,
     pub seps: Vec<FixedComp<'a>>,
 }
 
 #[derive(Debug)]
 pub enum FixedItem<'a> {
-    Term(&'a Term<'a>),
+    Term(Term<'a>),
     Fix(FixRun<'a>),
 }
 
@@ -175,7 +203,7 @@ pub type RFixId = u32;
 
 #[derive(Debug, Copy, Clone)]
 pub enum RebuildObj<'a> {
-    Term(&'a Term<'a>),
+    Term(Term<'a>),
     Fix(RFixId),
     Grp(RObjId),
     Seq(RObjId),
@@ -184,7 +212,7 @@ pub enum RebuildObj<'a> {
 
 #[derive(Debug, Copy, Clone)]
 pub enum RebuildFix<'a> {
-    Term(&'a Term<'a>),
+    Term(Term<'a>),
     Comp(RFixId, RFixId, bool),
 }
 

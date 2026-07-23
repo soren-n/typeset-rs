@@ -7,7 +7,7 @@
 //! between them; the split and the coalescing are one forward scan.)
 
 use crate::compiler::types::{
-    FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Serial, SerialComp, SerialEntry, Term,
+    FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, SerialComp, SerialEntry, Term,
 };
 
 /// Accumulates the line currently being built, plus the fix run currently
@@ -17,14 +17,14 @@ struct LineAccum<'a> {
     lines: Vec<FixedLine<'a>>,
     items: Vec<FixedItem<'a>>,
     seps: Vec<FixedComp<'a>>,
-    run_terms: Vec<&'a Term<'a>>,
+    run_terms: Vec<Term<'a>>,
     run_seps: Vec<FixedComp<'a>>,
 }
 
 impl<'a> LineAccum<'a> {
     /// Appends `term` as the line's next item: as the final term of the open
     /// fix run if one is being built, else as a plain term.
-    fn push_item(&mut self, term: &'a Term<'a>) {
+    fn push_item(&mut self, term: Term<'a>) {
         if self.run_terms.is_empty() {
             self.items.push(FixedItem::Term(term));
             return;
@@ -37,7 +37,7 @@ impl<'a> LineAccum<'a> {
     }
 
     /// Ends the current line with `term` as its last item.
-    fn flush_line(&mut self, term: &'a Term<'a>) {
+    fn flush_line(&mut self, term: Term<'a>) {
         self.push_item(term);
         self.lines.push(FixedLine {
             items: std::mem::take(&mut self.items),
@@ -46,14 +46,14 @@ impl<'a> LineAccum<'a> {
     }
 }
 
-pub fn split_lines<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
+pub fn split_lines<'a>(entries: &[SerialEntry<'a>]) -> FixedDoc<'a> {
     let mut acc = LineAccum::default();
-    for entry in serial {
+    for entry in entries {
         match entry {
             // A hard line break ends the current line, as does the document's
             // final term: either way this entry's term is the line's last item.
             SerialEntry::Next(term, SerialComp::Line) | SerialEntry::Last(term) => {
-                acc.flush_line(term);
+                acc.flush_line(*term);
             }
             SerialEntry::Next(term, SerialComp::Comp(attr, opens, closes)) => {
                 let comp = FixedComp {
@@ -63,12 +63,12 @@ pub fn split_lines<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
                 };
                 if attr.brk.is_fixed() {
                     // A fixed composition: extend (or start) the current run.
-                    acc.run_terms.push(term);
+                    acc.run_terms.push(*term);
                     acc.run_seps.push(comp);
                 } else {
                     // A non-fixed composition separates items (closing the
                     // open run, if any).
-                    acc.push_item(term);
+                    acc.push_item(*term);
                     acc.seps.push(comp);
                 }
             }
@@ -80,16 +80,23 @@ pub fn split_lines<'a>(serial: &Serial<'a>) -> FixedDoc<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{Attr, Break, Pad};
+    use crate::compiler::types::{Attr, Break, NO_PATH, Pad, TermLeaf};
     use bumpalo::Bump;
 
     /// Far past where a native-stack recursion could survive; the pass is a
     /// plain scan, so this now guards sizing behavior only.
     const DEEP: usize = 50_000;
 
+    fn text_term(text: &str) -> Term<'_> {
+        Term {
+            path: NO_PATH,
+            leaf: TermLeaf::Text(text),
+        }
+    }
+
     fn comp_entry<'a>(mem: &'a Bump, text: &'a str, fix: bool) -> SerialEntry<'a> {
         SerialEntry::Next(
-            mem.alloc(Term::Text(text)),
+            text_term(text),
             mem.alloc(SerialComp::Comp(
                 Attr {
                     pad: Pad::Unpadded,
@@ -109,9 +116,8 @@ mod tests {
         for _ in 0..DEEP {
             entries.push(comp_entry(&mem, "y", true));
         }
-        entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
-        let serial: Serial = entries;
-        let out = split_lines(&serial);
+        entries.push(SerialEntry::Last(text_term("z")));
+        let out = split_lines(&entries);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
@@ -130,9 +136,8 @@ mod tests {
         for _ in 0..DEEP {
             entries.push(comp_entry(&mem, "y", false));
         }
-        entries.push(SerialEntry::Last(mem.alloc(Term::Text("z"))));
-        let serial: Serial = entries;
-        let out = split_lines(&serial);
+        entries.push(SerialEntry::Last(text_term("z")));
+        let out = split_lines(&entries);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
@@ -147,13 +152,12 @@ mod tests {
         let mut entries: Vec<SerialEntry> = Vec::new();
         for _ in 0..DEEP {
             entries.push(SerialEntry::Next(
-                mem.alloc(Term::Text("x")),
+                text_term("x"),
                 mem.alloc(SerialComp::Line),
             ));
         }
-        entries.push(SerialEntry::Last(mem.alloc(Term::Text("end"))));
-        let serial: Serial = entries;
-        let out = split_lines(&serial);
+        entries.push(SerialEntry::Last(text_term("end")));
+        let out = split_lines(&entries);
         assert_eq!(out.lines.len(), DEEP + 1);
     }
 
@@ -162,12 +166,12 @@ mod tests {
         let mem = Bump::new();
         // a !& b & c: the fixed run (a, b) closes at the non-fixed comp, which
         // becomes the separator before the plain term c.
-        let serial: Serial = vec![
+        let entries = vec![
             comp_entry(&mem, "a", true),
             comp_entry(&mem, "b", false),
-            SerialEntry::Last(mem.alloc(Term::Text("c"))),
+            SerialEntry::Last(text_term("c")),
         ];
-        let out = split_lines(&serial);
+        let out = split_lines(&entries);
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };

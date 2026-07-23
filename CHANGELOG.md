@@ -36,6 +36,15 @@ by the previous automated release tooling.
   it is reused across lines — threading continuations allocates nothing per
   scope (`json`: 0.55 to 0.42 compile allocs per input node; compile-phase
   reallocations drop from ~23k to ~170).
+* **Terms are flat (path, leaf) values over a shared path arena.** `serialize`
+  materialized every leaf's accumulated nest/pack wrappers as a bump-allocated
+  chain — O(leaves × depth) memory. It now pushes one path-arena node per
+  `Nest`/`Pack` it descends through, so sibling leaves share their wrapper
+  path and a term is a copyable `(path id, leaf)` pair; `denull` materializes
+  each distinct path into the prop buffer once (memoized) instead of once per
+  term. Wrapper storage drops from O(leaves × depth) to O(input tree):
+  compiling 1000 words under 1024 nests is ~8x faster and peak memory falls
+  from 87 MB to 8 MB; `json` peak memory drops ~22% and compile ~10% more.
 * **Line-break decisions are O(1).** `compile` now precomputes two per-object
   tables in the `Doc`: the flat mid-line extent (neither nest nor pack
   advances the position mid-line, so it is an exact sum) and the mid-line

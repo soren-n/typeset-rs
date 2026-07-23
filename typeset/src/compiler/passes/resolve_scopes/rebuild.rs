@@ -142,7 +142,7 @@ fn visit_item<'a>(b: &mut Builder<'a>, item: &FixedItem<'a>) -> RObjId {
             let fix1 = visit_fix(b, run);
             b.obj(RebuildObj::Fix(fix1))
         }
-        FixedItem::Term(term) => b.obj(RebuildObj::Term(term)),
+        FixedItem::Term(term) => b.obj(RebuildObj::Term(*term)),
     }
 }
 

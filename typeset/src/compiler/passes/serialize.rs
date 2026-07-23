@@ -1,6 +1,6 @@
-//! serialize: EdslDoc → Serial (serialize in order to normalize)
+//! serialize: EdslDoc → SerialDoc (serialize in order to normalize)
 //!
-//! Flattens the Edsl arena into the flat Serial entry list. The original threaded
+//! Flattens the Edsl arena into the flat serial entry list. The original threaded
 //! four accumulator closures (terms, comps, glue, result) plus counters
 //! through a CPS recursion on the native stack, which aborts on deep inputs.
 //!
@@ -8,9 +8,12 @@
 //!
 //! - `i`/`j` (group/seq and pack indices) are mutable counters advanced in DFS
 //!   pre-order, exactly as the recursion threaded them.
-//! - The scoped path accumulators `terms` (nest/pack) and `comps` (grp/seq)
-//!   are bump-allocated persistent lists — pushing a wrapper is O(1) and
-//!   snapshots (captured by a composition's glue) share structure.
+//! - The nest/pack path accumulator `terms` is an id into the output's shared
+//!   path arena — descending through a wrapper pushes one arena node, so
+//!   sibling leaves share their path spine and a term is just (path id, leaf).
+//! - The scope accumulator `comps` (grp/seq) is a bump-allocated persistent
+//!   list — pushing a wrapper is O(1) and snapshots (captured by a
+//!   composition's glue) share structure.
 //! - `glue` (how a leaf's term attaches to what follows: Last, Line, or a
 //!   Comp separator) is carried per work item.
 //!
@@ -20,29 +23,16 @@
 //! the recursive version.
 
 use crate::compiler::types::{
-    Attr, Break, EdslDoc, EdslId, EdslNode, Scope, Serial, SerialComp, SerialEntry, Term,
+    Attr, Break, EdslDoc, EdslId, EdslNode, NO_PATH, PathId, PathNode, Prop, Scope, SerialComp,
+    SerialDoc, SerialEntry, Term, TermLeaf,
 };
 use bumpalo::Bump;
-
-/// A nest/pack wrapper accumulated on the path to a term.
-#[derive(Copy, Clone)]
-enum TermWrap {
-    Nest,
-    Pack(u64),
-}
 
 /// A grp/seq wrapper accumulated on the path to a composition.
 #[derive(Copy, Clone)]
 enum CompWrap {
     Grp(u64),
     Seq(u64),
-}
-
-/// Persistent list of term wrappers; head is the most recently pushed
-/// (innermost) wrapper.
-struct TermList<'b> {
-    wrap: TermWrap,
-    next: Option<&'b TermList<'b>>,
 }
 
 /// Persistent list of comp wrappers; head is the innermost wrapper. `depth` is
@@ -73,30 +63,31 @@ enum Glue<'b> {
 /// One emitted leaf: its term and how it glues to what follows.
 struct Entry<'b> {
     glue: Glue<'b>,
-    term: &'b Term<'b>,
+    term: Term<'b>,
 }
 
 /// A pending subtree to visit, with its scoped path state. `i`/`j` are global
 /// counters and deliberately not carried here.
 struct Work<'b> {
     node: EdslId,
-    terms: Option<&'b TermList<'b>>,
+    terms: PathId,
     comps: Option<&'b CompList<'b>>,
     glue: Glue<'b>,
     fixed: bool,
 }
 
-pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> {
+pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> SerialDoc<'b> {
     let mut i: u64 = 0;
     let mut j: u64 = 0;
     let mut entries: Vec<Entry<'b>> = Vec::new();
+    let mut paths: Vec<PathNode> = Vec::new();
 
     // Right-to-left visitation is achieved by a stack: pushing the right child
     // before the left makes the left pop (and fully process) first, so the
     // counters thread left-to-right just as the recursion did.
     let mut stack: Vec<Work<'b>> = vec![Work {
         node: doc.root,
-        terms: None,
+        terms: NO_PATH,
         comps: None,
         glue: Glue::Last,
         fixed: false,
@@ -111,15 +102,15 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
             fixed,
         } = work;
         match &doc.nodes[node as usize] {
-            // A leaf: emit its term with the accumulated wrappers applied.
+            // A leaf: emit its term under the accumulated wrapper path.
             leaf @ (EdslNode::Null | EdslNode::Text(_)) => {
-                let base = match leaf {
-                    EdslNode::Text(data) => Term::Text(data),
-                    _ => Term::Null,
+                let leaf = match leaf {
+                    EdslNode::Text(data) => TermLeaf::Text(data),
+                    _ => TermLeaf::Null,
                 };
                 entries.push(Entry {
                     glue,
-                    term: apply_terms(mem, terms, mem.alloc(base)),
+                    term: Term { path: terms, leaf },
                 });
             }
             EdslNode::Fix(child) => stack.push(Work {
@@ -150,20 +141,25 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
                     fixed,
                 });
             }
-            // A nest/pack wrapper: push it onto the term accumulator (pack
-            // assigning the next pack index in DFS pre-order) and descend.
+            // A nest/pack wrapper: push it onto the path arena (pack assigning
+            // the next pack index in DFS pre-order) and descend.
             wrapper @ (EdslNode::Nest(child) | EdslNode::Pack(child)) => {
-                let wrap = match wrapper {
-                    EdslNode::Nest(_) => TermWrap::Nest,
+                let prop = match wrapper {
+                    EdslNode::Nest(_) => Prop::Nest,
                     _ => {
                         let index = j;
                         j += 1;
-                        TermWrap::Pack(index)
+                        Prop::Pack(index)
                     }
                 };
+                let path = paths.len() as PathId;
+                paths.push(PathNode {
+                    prop,
+                    parent: terms,
+                });
                 stack.push(Work {
                     node: *child,
-                    terms: Some(mem.alloc(TermList { wrap, next: terms })),
+                    terms: path,
                     comps,
                     glue,
                     fixed,
@@ -244,7 +240,10 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> Serial<'b> 
         };
         items.push(item);
     }
-    items
+    SerialDoc {
+        entries: items,
+        paths,
+    }
 }
 
 /// Diffs two enclosing-scope lists (innermost-first, sharing an outer tail by
@@ -300,25 +299,6 @@ fn diff_comps<'b>(
     (opens, closes)
 }
 
-/// Applies the accumulated term wrappers to a base term. The list head is the
-/// innermost wrapper, so folding head-to-tail wraps from the inside out.
-fn apply_terms<'b>(
-    mem: &'b Bump,
-    list: Option<&'b TermList<'b>>,
-    base: &'b Term<'b>,
-) -> &'b Term<'b> {
-    let mut term = base;
-    let mut cur = list;
-    while let Some(node) = cur {
-        term = match node.wrap {
-            TermWrap::Nest => mem.alloc(Term::Nest(term)),
-            TermWrap::Pack(index) => mem.alloc(Term::Pack(index, term)),
-        };
-        cur = node.next;
-    }
-    term
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,11 +336,12 @@ mod tests {
         let serial = serialize(&mem, &doc);
         // DEEP Next entries, then a final Last entry.
         let count = serial
+            .entries
             .iter()
             .filter(|e| matches!(e, SerialEntry::Next(..)))
             .count();
         assert_eq!(count, DEEP);
-        assert!(matches!(serial.last(), Some(SerialEntry::Last(_))));
+        assert!(matches!(serial.entries.last(), Some(SerialEntry::Last(_))));
     }
 
     #[test]
@@ -368,15 +349,16 @@ mod tests {
         let doc = deep_unary("x", EdslNode::Nest);
         let mem = Bump::new();
         let serial = serialize(&mem, &doc);
-        // Single leaf: one Last carrying a Nest^DEEP term.
-        let [SerialEntry::Last(term)] = serial[..] else {
+        // Single leaf: one Last whose term sits under a Nest^DEEP path.
+        let [SerialEntry::Last(term)] = serial.entries[..] else {
             panic!("expected a single Last")
         };
         let mut count = 0usize;
-        let mut cur: &Term = term;
-        while let Term::Nest(inner) = cur {
+        let mut cur = term.path;
+        while cur != NO_PATH {
+            assert!(matches!(serial.paths[cur as usize].prop, Prop::Nest));
             count += 1;
-            cur = inner;
+            cur = serial.paths[cur as usize].parent;
         }
         assert_eq!(count, DEEP);
     }
@@ -386,19 +368,27 @@ mod tests {
         let doc = deep_unary("x", EdslNode::Pack);
         let mem = Bump::new();
         let serial = serialize(&mem, &doc);
-        let [SerialEntry::Last(term)] = serial[..] else {
+        let [SerialEntry::Last(term)] = serial.entries[..] else {
             panic!("expected a single Last")
         };
         // The outermost Pack is entered first and gets index 0; indices then
-        // increase inward.
-        let mut expected = 0u64;
-        let mut cur: &Term = term;
-        while let Term::Pack(index, inner) = cur {
-            assert_eq!(*index, expected);
-            expected += 1;
-            cur = inner;
+        // increase inward. The term's path starts at the innermost wrapper, so
+        // walking outward counts back down to 0.
+        let mut expected = DEEP as u64;
+        let mut cur = term.path;
+        while cur != NO_PATH {
+            let PathNode {
+                prop: Prop::Pack(index),
+                parent,
+            } = serial.paths[cur as usize]
+            else {
+                panic!("expected a pack wrapper")
+            };
+            expected -= 1;
+            assert_eq!(index, expected);
+            cur = parent;
         }
-        assert_eq!(expected as usize, DEEP);
+        assert_eq!(expected, 0);
     }
 
     #[test]
@@ -408,6 +398,6 @@ mod tests {
         let mem = Bump::new();
         // Should not overflow; a single leaf yields a trivial one-Last serial.
         let serial = serialize(&mem, &doc);
-        assert!(matches!(serial[..], [SerialEntry::Last(_)]));
+        assert!(matches!(serial.entries[..], [SerialEntry::Last(_)]));
     }
 }

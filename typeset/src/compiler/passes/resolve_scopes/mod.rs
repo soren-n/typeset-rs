@@ -27,9 +27,16 @@ pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
 mod tests {
     use super::*;
     use crate::compiler::types::{
-        FixRun, FixedComp, FixedItem, FixedLine, RebuildFix, RebuildObj, Term,
+        FixRun, FixedComp, FixedItem, FixedLine, NO_PATH, PathNode, Prop, RebuildFix, RebuildObj,
+        Term, TermLeaf,
     };
-    use bumpalo::Bump;
+
+    fn text_term(text: &'static str) -> Term<'static> {
+        Term {
+            path: NO_PATH,
+            leaf: TermLeaf::Text(text),
+        }
+    }
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration across
@@ -46,7 +53,6 @@ mod tests {
 
     #[test]
     fn resolve_scopes_handles_deep_comp_line() {
-        let mem = Bump::new();
         // A single line of many plain compositions (no grp/seq scopes). This
         // path is linear (no scope stacks to carry), so a large depth well past
         // the ~400-level native-recursion overflow threshold stays quick and
@@ -55,10 +61,10 @@ mod tests {
         let mut items: Vec<FixedItem> = Vec::new();
         let mut seps: Vec<FixedComp> = Vec::new();
         for _ in 0..depth {
-            items.push(FixedItem::Term(mem.alloc(Term::Text("y"))));
+            items.push(FixedItem::Term(text_term("y")));
             seps.push(sep());
         }
-        items.push(FixedItem::Term(mem.alloc(Term::Text("z"))));
+        items.push(FixedItem::Term(text_term("z")));
         let doc = FixedDoc {
             lines: vec![FixedLine { items, seps }],
         };
@@ -78,12 +84,21 @@ mod tests {
 
     #[test]
     fn resolve_scopes_handles_deep_nest_term() {
-        let mem = Bump::new();
-        // A deep Nest term passes through graphify/rebuild by borrow.
-        let mut term: &Term = mem.alloc(Term::Text("x"));
+        // A deep Nest path passes through graphify/rebuild by value.
+        let mut paths: Vec<PathNode> = Vec::new();
+        let mut path = NO_PATH;
         for _ in 0..DEEP {
-            term = mem.alloc(Term::Nest(term));
+            let id = paths.len() as u32;
+            paths.push(PathNode {
+                prop: Prop::Nest,
+                parent: path,
+            });
+            path = id;
         }
+        let term = Term {
+            path,
+            leaf: TermLeaf::Text("x"),
+        };
         let doc = FixedDoc {
             lines: vec![FixedLine {
                 items: vec![FixedItem::Term(term)],
@@ -98,25 +113,25 @@ mod tests {
             panic!("expected a single term")
         };
         let mut count = 0usize;
-        let mut cur: &Term = t;
-        while let Term::Nest(inner) = cur {
+        let mut cur = t.path;
+        while cur != NO_PATH {
+            assert!(matches!(paths[cur as usize].prop, Prop::Nest));
             count += 1;
-            cur = inner;
+            cur = paths[cur as usize].parent;
         }
         assert_eq!(count, DEEP);
     }
 
     #[test]
     fn resolve_scopes_handles_deep_fix_group() {
-        let mem = Bump::new();
         // A deep fixed run exercises the fix walks in graphify/rebuild.
-        let mut terms: Vec<&Term> = Vec::new();
+        let mut terms: Vec<Term> = Vec::new();
         let mut run_seps: Vec<FixedComp> = Vec::new();
         for _ in 0..DEEP {
-            terms.push(mem.alloc(Term::Text("y")));
+            terms.push(text_term("y"));
             run_seps.push(sep());
         }
-        terms.push(mem.alloc(Term::Text("z")));
+        terms.push(text_term("z"));
         let doc = FixedDoc {
             lines: vec![FixedLine {
                 items: vec![FixedItem::Fix(FixRun {
@@ -144,11 +159,10 @@ mod tests {
 
     #[test]
     fn resolve_scopes_handles_long_doc_spine() {
-        let mem = Bump::new();
         // Many document rows exercise the doc-spine walks in all three phases.
         let lines: Vec<FixedLine> = (0..DEEP)
             .map(|_| FixedLine {
-                items: vec![FixedItem::Term(mem.alloc(Term::Text("x")))],
+                items: vec![FixedItem::Term(text_term("x"))],
                 seps: Vec::new(),
             })
             .collect();

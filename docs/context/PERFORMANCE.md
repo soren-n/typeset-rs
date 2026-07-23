@@ -80,8 +80,9 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
 - Peak native stack is constant everywhere (flat arenas); depth costs heap.
 - Compiling a plain (no grp/seq/nest) document performs a constant number of
   heap allocations (~57 for a 128k-node chain) — the arenas amortize
-  everything; scope-heavy documents add ~1.6 allocs/node in satellite
-  structures (see remaining candidates).
+  everything; scope-heavy documents add ~0.4 allocs/node (was ~1.6 before the
+  satellite flattening landed; the remainder is serialize's term chains and
+  graphify's BTreeMap, see remaining candidates).
 
 ### Costs to know about
 
@@ -92,20 +93,22 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   `flatten`, and each dismantled node's own drop grew a fresh worklist —
   ~2.5 extra alloc/free pairs per node. Fixed 2026-07 (move the `Layout` value
   out of the box instead; skip leaf children): compile got 19-28% faster.
-  With the text-span rework also landed, plain documents now compile with a
-  constant number of heap allocations and grp/seq/nest-heavy ones with ~1.6
-  per node (the remaining satellite `Vec`s in graphify/rebuild/denull). The
-  node arenas themselves are amortized by `Vec` growth — the flat-arena
-  design was never the source of the traffic.
+  With the text-span and satellite-flattening reworks also landed, plain
+  documents now compile with a constant number of heap allocations and
+  grp/seq/nest-heavy ones with ~0.4 per node (serialize's bump-allocated term
+  chains and graphify's BTreeMap of open scopes). The node arenas themselves
+  are amortized by `Vec` growth — the flat-arena design was never the source
+  of the traffic.
 - **Was dropping the bump arenas a mistake? No — measured.** The flat `Vec`
   arenas do the same amortization job for node storage that bumpalo did, with
   better locality and eager frees (bumpalo is grow-only, so peak memory would
   be higher). What the bump removal genuinely re-introduced is per-object
   malloc for the small per-node satellite collections on scope-heavy inputs
-  (~1.6 allocs/node on `json`); the better-than-bump fix is flattening those
-  into shared side arrays with ranges (remaining candidate 1). `serialize`
-  keeps its bump because its persistent accumulators share structure — the one
-  place bump semantics are load-bearing.
+  (~1.6 allocs/node on `json` at audit time); the better-than-bump fix —
+  flattening those into shared side arrays with ranges and intrusive lists —
+  landed 2026-07 (see landed optimization 7). `serialize` keeps its bump
+  because its persistent accumulators share structure — the one place bump
+  semantics are load-bearing.
 - **Compile dominates render** by roughly 15-25x at width 80. A layout
   compiled once and rendered at several widths amortizes well; per-keystroke
   recompiles pay the full pipeline each time.
@@ -142,29 +145,33 @@ plain-document compile down to a constant number of heap allocations.
 6. Text spans — `Doc` text nodes are 8-byte spans into one shared `String`;
    the renderer's per-row frame stack is reused (many-row rendering 2.25x
    faster; text nodes a quarter of their former size).
+7. Satellite collection flattening (the former remaining candidate 1), in
+   three steps: denull term props as ranges into one shared buffer
+   (`DenullTerm` is `Copy`); the scope graph as intrusive linked edge lists
+   over one shared node array and edge pool, borrowing the `FixedDoc` line
+   items instead of cloning fix runs (solve's list surgery became O(1)
+   pointer rewiring with no position scans); rebuild's continuation stack as
+   one flat step vector plus a bounds stack with partial spines as ranges
+   into a shared buffer, all reused across lines. Cumulative on `json 8 d=5`:
+   compile allocs 1.57 → 0.42 per input node, compile ~22% faster.
 
 ### Remaining candidates
 
-1. **Flatten the remaining satellite collections.** graphify's `ins`/`outs`,
-   denull's props lists, and rebuild's continuation vectors still cost ~1.6
-   allocs/node on scope-heavy documents; CSR-style ranges into shared side
-   arrays would finish the job (solve's in-place list surgery is the hard
-   part).
-2. **Flat term representation from `serialize` onward.** The bump-allocated
+1. **Flat term representation from `serialize` onward.** The bump-allocated
    `Term` wrapper chains are the last pointer-linked IR and the source of the
    O(leaves × depth) memory above; `(props-range, text)` terms would delete
    `strip_term` and likely retire the remaining `Bump`.
-3. **Break the borrow chain to drop IRs early.** Text moving through the
+2. **Break the borrow chain to drop IRs early.** Text moving through the
    pipeline (rather than being borrowed from the `LayoutArena`) would let
    early IRs drop mid-compile; estimated 30-50% peak-memory cut.
-4. **Selective pass fusion.** The two normalize elimination folds have nearly
+3. **Selective pass fusion.** The two normalize elimination folds have nearly
    identical shapes; fusing them saves one full arena rebuild. Fuse further
    only with care — the pass-per-file structure is a deliberate legibility
    choice.
-5. **Arena-native construction** (builder API or macro-emitted arenas) to
+4. **Arena-native construction** (builder API or macro-emitted arenas) to
    skip the `Box` tree entirely; public-API surface, only worth it if
    compile-per-keystroke latency becomes a use case.
-6. **CI regression gating** — run the `scaling` bench (or instruction counts
+5. **CI regression gating** — run the `scaling` bench (or instruction counts
    via iai-callgrind/CodSpeed on a Linux runner) automatically.
 
 Benchmark any of these with `scaling` baselines before/after.
