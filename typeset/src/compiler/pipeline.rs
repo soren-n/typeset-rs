@@ -46,13 +46,17 @@ use crate::compiler::{
 /// let doc = compile(text("Hello, world!"));
 /// assert_eq!(render(&doc, 2, 80), "Hello, world!");
 /// ```
+// The public API composes `Box<Layout>` end to end (every constructor returns
+// one), so `compile` keeps the boxed parameter even though it immediately
+// moves the layout out.
+#[allow(clippy::boxed_local)]
 pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     use bumpalo::Bump;
 
     // Flattening is the one step that walks the owning `Box` tree; every later
     // pass folds flat structures. Text lives in the layout arena and is
     // borrowed all the way down the pipeline.
-    let arena = flatten(layout);
+    let arena = flatten(*layout);
     let edsl = resolve_breaks(&arena);
 
     // serialize's persistent scope accumulators share structure, so it keeps

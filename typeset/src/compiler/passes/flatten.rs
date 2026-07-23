@@ -13,8 +13,12 @@ use std::mem;
 /// A unit of flattening work: visit a subtree, or build a parent node from
 /// already-flattened children (their ids sit on the result stack). A unary
 /// parent carries its arena-node constructor directly.
+///
+/// `Visit` carries the `Layout` by value (moved out of its box with `Null`
+/// left behind): taking the `Box` itself would allocate a placeholder box per
+/// child (`Box::default()`), doubling the tree-teardown allocator traffic.
 enum Task {
-    Visit(Box<Layout>),
+    Visit(Layout),
     Unary(fn(LayId) -> LayoutNode),
     Line,
     Comp(Attr),
@@ -23,19 +27,19 @@ enum Task {
 /// Push a unary parent task, then its child; the child pops (and resolves)
 /// first, so by the time the parent task pops its child id is on the result
 /// stack.
-fn visit_unary(tasks: &mut Vec<Task>, ctor: fn(LayId) -> LayoutNode, child: &mut Box<Layout>) {
+fn visit_unary(tasks: &mut Vec<Task>, ctor: fn(LayId) -> LayoutNode, child: &mut Layout) {
     tasks.push(Task::Unary(ctor));
-    tasks.push(Task::Visit(mem::take(child)));
+    tasks.push(Task::Visit(mem::replace(child, Layout::Null)));
 }
 
-pub fn flatten(layout: Box<Layout>) -> LayoutArena {
+pub fn flatten(layout: Layout) -> LayoutArena {
     let mut nodes: Vec<LayoutNode> = Vec::new();
 
     let mut tasks: Vec<Task> = vec![Task::Visit(layout)];
     let mut ids: Vec<LayId> = Vec::new();
     while let Some(task) = tasks.pop() {
         match task {
-            Task::Visit(mut cur) => match &mut *cur {
+            Task::Visit(mut cur) => match &mut cur {
                 Layout::Null => ids.push(push_node(&mut nodes, LayoutNode::Null)),
                 Layout::Text(data) => {
                     ids.push(push_node(&mut nodes, LayoutNode::Text(mem::take(data))));
@@ -47,13 +51,13 @@ pub fn flatten(layout: Box<Layout>) -> LayoutArena {
                 Layout::Pack(child) => visit_unary(&mut tasks, LayoutNode::Pack, child),
                 Layout::Line(left, right) => {
                     tasks.push(Task::Line);
-                    tasks.push(Task::Visit(mem::take(right)));
-                    tasks.push(Task::Visit(mem::take(left)));
+                    tasks.push(Task::Visit(mem::replace(&mut **right, Layout::Null)));
+                    tasks.push(Task::Visit(mem::replace(&mut **left, Layout::Null)));
                 }
                 Layout::Comp(left, right, attr) => {
                     tasks.push(Task::Comp(*attr));
-                    tasks.push(Task::Visit(mem::take(right)));
-                    tasks.push(Task::Visit(mem::take(left)));
+                    tasks.push(Task::Visit(mem::replace(&mut **right, Layout::Null)));
+                    tasks.push(Task::Visit(mem::replace(&mut **left, Layout::Null)));
                 }
             },
             Task::Unary(ctor) => {
@@ -89,7 +93,7 @@ mod tests {
     #[test]
     fn flatten_is_postorder() {
         let layout = comp(text("a"), nest(text("b")), Pad::Padded, Break::Breakable);
-        let arena = flatten(layout);
+        let arena = flatten(*layout);
         // Postorder: a, b, Nest(b), Comp — the root is last.
         assert_eq!(arena.root as usize, arena.nodes.len() - 1);
         assert!(matches!(arena.nodes[0], LayoutNode::Text(ref s) if s == "a"));
@@ -104,7 +108,7 @@ mod tests {
         for _ in 0..DEEP {
             layout = comp(layout, text("y"), Pad::Unpadded, Break::Breakable);
         }
-        let arena = flatten(layout);
+        let arena = flatten(*layout);
         assert_eq!(arena.nodes.len(), 2 * DEEP + 1);
         assert_eq!(arena.root as usize, arena.nodes.len() - 1);
     }

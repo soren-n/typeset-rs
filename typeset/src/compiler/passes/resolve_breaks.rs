@@ -114,7 +114,7 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let arena = flatten(layout);
+        let arena = flatten(*layout);
         let edsl = resolve_breaks(&arena);
         let EdslNode::Line(l, _) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the comp to become a line");
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn unbroken_seq_keeps_wrapper_and_comps() {
         let layout = seq(comp(text("a"), text("b"), Pad::Padded, Break::Breakable));
-        let arena = flatten(layout);
+        let arena = flatten(*layout);
         let edsl = resolve_breaks(&arena);
         let EdslNode::Seq(c) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the seq wrapper to survive");
@@ -143,7 +143,7 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let arena = flatten(layout);
+        let arena = flatten(*layout);
         let edsl = resolve_breaks(&arena);
         // Root is the outer comp turned line; its left is the fixed comp.
         let EdslNode::Line(l, _) = edsl.nodes[edsl.root as usize] else {

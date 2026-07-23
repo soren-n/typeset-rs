@@ -67,24 +67,37 @@ pub enum Layout {
     Comp(Box<Layout>, Box<Layout>, Attr),
 }
 
-/// Move a node's children onto the worklist (taking them out of their `Box` and
-/// leaving a `Null` placeholder), so the recursive drop of each box terminates
-/// in O(1) and the tree is freed with a heap-allocated stack instead of the
-/// native one. See [`DismantleTree`] for the shared driver.
+/// Move a node's children onto the worklist (moving each `Layout` value out of
+/// its `Box` and leaving `Null` in the box), so the recursive drop of each box
+/// terminates in O(1) and the tree is freed with a heap-allocated stack instead
+/// of the native one. See [`DismantleTree`] for the shared driver.
+///
+/// The value is moved out of the box (`mem::replace` on the pointee) rather
+/// than the box being taken whole: `mem::take` on a `Box` allocates a fresh
+/// placeholder box per child, which doubled teardown's allocator traffic.
 impl DismantleTree for Layout {
     fn dismantle(&mut self, stack: &mut Vec<Self>) {
+        /// Move `child` onto the worklist unless it needs no dismantling: a
+        /// `Null`/`Text` leaf drops trivially, and skipping it keeps the drop
+        /// of an already-dismantled node (whose children are all `Null`
+        /// placeholders) from ever growing — and thus allocating — the
+        /// worklist.
+        fn push_child(stack: &mut Vec<Layout>, child: &mut Layout) {
+            if matches!(child, Layout::Null | Layout::Text(_)) {
+                return;
+            }
+            stack.push(mem::replace(child, Layout::Null));
+        }
         match self {
             Layout::Null | Layout::Text(_) => {}
             Layout::Fix(l)
             | Layout::Grp(l)
             | Layout::Seq(l)
             | Layout::Nest(l)
-            | Layout::Pack(l) => {
-                stack.push(*mem::take(l));
-            }
+            | Layout::Pack(l) => push_child(stack, l),
             Layout::Line(left, right) | Layout::Comp(left, right, _) => {
-                stack.push(*mem::take(left));
-                stack.push(*mem::take(right));
+                push_child(stack, left);
+                push_child(stack, right);
             }
         }
     }

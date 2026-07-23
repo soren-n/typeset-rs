@@ -13,10 +13,11 @@
 //! renderer only ever looks a mark up by index or inserts one, never iterating
 //! in key order, so an unordered map is the right fit. In the real output pass
 //! (`render_obj`) marks accumulate forward and are never rolled back. The
-//! look-ahead measuring passes (`measure`/`next_comp`) must not leak their
-//! marks into the caller, so each records the indices it inserts and removes
-//! them before returning — measurement only ever inserts a mark when the index
-//! is absent, so removing exactly those keys restores the caller's map.
+//! look-ahead measuring folds (`will_fit`/`should_break`, via `fold`) must not
+//! leak their marks into the caller, so each records the indices it inserts and
+//! removes them before returning — measurement only ever inserts a mark when
+//! the index is absent, so removing exactly those keys restores the caller's
+//! map.
 
 use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row};
 use std::cmp::max;
@@ -175,7 +176,7 @@ fn resolve_pack(marks: &mut HashMap<usize, usize>, index: usize, state: State) -
     }
 }
 
-/// Frame for the state-only measuring traversals (`measure`, `next_comp`).
+/// Frame for the state-only measuring traversals ([`fold`], in either mode).
 ///
 /// These fold a document object into a single position without producing any
 /// output, so a frame only needs to describe the remaining work and any state
@@ -203,6 +204,25 @@ enum Fold {
     NextComp,
 }
 
+/// Reusable buffers for one nesting level of [`fold`].
+///
+/// The measuring folds run once per line-break decision, so allocating their
+/// work stacks fresh each call dominates rendering cost; instead the renderer
+/// owns two levels of buffers (the [`Fold::NextComp`] fold calls a
+/// [`Fold::Measure`] fold for an opaque group, and `Measure` never recurses,
+/// so two levels are exactly enough) and every fold call reuses them.
+#[derive(Default)]
+struct FoldBufs {
+    stack: Vec<MFrame>,
+    inserted: Vec<usize>,
+}
+
+/// The renderer's reusable fold buffers: one [`FoldBufs`] per nesting level.
+#[derive(Default)]
+struct Scratch {
+    levels: [FoldBufs; 2],
+}
+
 /// Folds `obj` into a single ending position without emitting output (iterative).
 ///
 /// [`Fold::Measure`] returns where `obj` finishes if laid out from `state`;
@@ -222,10 +242,16 @@ fn fold(
     obj: ObjId,
     state: State,
     marks: &mut HashMap<usize, usize>,
+    bufs: &mut [FoldBufs],
 ) -> usize {
+    let (cur, rest) = bufs
+        .split_first_mut()
+        .expect("a fold level has its buffers");
+    let (stack, inserted) = (&mut cur.stack, &mut cur.inserted);
+    stack.clear();
+    inserted.clear();
     let mut st = state;
-    let mut inserted: Vec<usize> = Vec::new();
-    let mut stack: Vec<MFrame> = vec![MFrame::Obj(obj)];
+    stack.push(MFrame::Obj(obj));
     while let Some(frame) = stack.pop() {
         if st.pos > st.width {
             break;
@@ -243,7 +269,7 @@ fn fold(
                     if mode != Fold::NextComp || st.head {
                         stack.push(MFrame::Obj(*obj1));
                     } else {
-                        let end = fold(Fold::Measure, arena, *obj1, st, marks);
+                        let end = fold(Fold::Measure, arena, *obj1, st, marks, rest);
                         st = State { pos: end, ..st };
                     }
                 }
@@ -301,28 +327,41 @@ fn fold(
             }
         }
     }
-    for index in inserted {
+    for index in inserted.drain(..) {
         marks.remove(&index);
     }
     st.pos
 }
 
-/// Position at which `obj` finishes if laid out from `state`.
-fn measure(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> usize {
-    fold(Fold::Measure, arena, obj, state, marks)
+/// Whether `obj` fits within the width if laid out from `state`.
+fn will_fit(
+    arena: Arena,
+    obj: ObjId,
+    state: State,
+    marks: &mut HashMap<usize, usize>,
+    scratch: &mut Scratch,
+) -> bool {
+    fold(Fold::Measure, arena, obj, state, marks, &mut scratch.levels) <= state.width
 }
 
-/// Position of the next composition boundary reachable from `obj`.
-fn next_comp(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> usize {
-    fold(Fold::NextComp, arena, obj, state, marks)
-}
-
-fn will_fit(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> bool {
-    measure(arena, obj, state, marks) <= state.width
-}
-
-fn should_break(arena: Arena, obj: ObjId, state: State, marks: &mut HashMap<usize, usize>) -> bool {
-    state.broken || state.width < next_comp(arena, obj, state, marks)
+/// Whether the next composition boundary reachable from `obj` passes the width.
+fn should_break(
+    arena: Arena,
+    obj: ObjId,
+    state: State,
+    marks: &mut HashMap<usize, usize>,
+    scratch: &mut Scratch,
+) -> bool {
+    state.broken
+        || state.width
+            < fold(
+                Fold::NextComp,
+                arena,
+                obj,
+                state,
+                marks,
+                &mut scratch.levels,
+            )
 }
 
 /// Frame for the output-producing object traversal.
@@ -352,6 +391,7 @@ fn render_obj(
     obj: ObjId,
     state: &mut State,
     marks: &mut HashMap<usize, usize>,
+    scratch: &mut Scratch,
     result: &mut String,
 ) {
     let mut st = *state;
@@ -375,7 +415,7 @@ fn render_obj(
                 ObjNode::Seq(obj1) => {
                     // A sequence that doesn't fit renders broken; either way
                     // the child renders next.
-                    if !will_fit(arena, *obj1, st, marks) {
+                    if !will_fit(arena, *obj1, st, marks, scratch) {
                         stack.push(RFrame::RestoreBreak(st.broken));
                         st = State { broken: true, ..st };
                     }
@@ -426,7 +466,7 @@ fn render_obj(
                     head: false,
                     ..inc_pos(usize::from(pad), state1)
                 };
-                if should_break(arena, right, state3, marks) {
+                if should_break(arena, right, state3, marks, scratch) {
                     let state2 = newline(state1);
                     let offset = get_offset(state2);
                     st = inc_pos(offset, state2);
@@ -480,6 +520,7 @@ pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
     };
     let mut st = make_state(width, tab);
     let mut marks: HashMap<usize, usize> = HashMap::new();
+    let mut scratch = Scratch::default();
     let mut result = String::new();
     // The document spine is a linear `Vec<Row>` in document order, so it is
     // walked with a plain loop. `marks` and `lvl` survive `reset`, so they carry
@@ -490,11 +531,11 @@ pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
         match row {
             Row::Empty => result.push('\n'),
             Row::Break(obj) => {
-                render_obj(arena, *obj, &mut st, &mut marks, &mut result);
+                render_obj(arena, *obj, &mut st, &mut marks, &mut scratch, &mut result);
                 result.push('\n');
             }
             Row::Line(obj) => {
-                render_obj(arena, *obj, &mut st, &mut marks, &mut result);
+                render_obj(arena, *obj, &mut st, &mut marks, &mut scratch, &mut result);
                 break;
             }
         }
