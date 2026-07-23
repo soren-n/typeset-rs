@@ -8,6 +8,8 @@ by the previous automated release tooling.
 
 ## [Unreleased]
 
+## [4.1.0](https://github.com/soren-n/typeset-rs/compare/v4.0.0...v4.1.0) (2026-07-23)
+
 ### Performance
 
 * **`FixedDoc` is flat: no per-line or per-run allocation.** `split_lines`
