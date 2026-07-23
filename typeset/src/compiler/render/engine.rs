@@ -10,10 +10,10 @@
 //! native stack, so arbitrarily deep layouts render with a constant native stack.
 //!
 //! Pack marks live in a dense `Vec<usize>` threaded as `&mut`, indexed by pack
-//! index (compilation assigns them as dense DFS counters; [`Doc::packs`] is the
+//! index (compilation assigns them as dense DFS counters; `Doc::packs` is the
 //! slot count) with `NO_MARK` as the empty sentinel. In the real output pass
 //! (`render_obj`) marks accumulate forward and are never rolled back. The
-//! head-of-line measuring fold ([`will_fit`] via [`fold`]) must not leak its
+//! head-of-line measuring fold (`will_fit` via `fold`) must not leak its
 //! marks into the caller, so it records the indices it inserts and clears them
 //! before returning — measurement only ever inserts a mark when the slot is
 //! empty, so clearing exactly those slots restores the caller's marks.
