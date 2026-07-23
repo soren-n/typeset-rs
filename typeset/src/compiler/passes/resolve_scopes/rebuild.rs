@@ -5,7 +5,7 @@
 //! [`RebuildDoc`] arena. Node payloads and pads are read straight from the
 //! borrowed `FixedDoc` line (nodes are index-aligned with the line's items).
 
-use super::graph::{GraphDoc, GraphLine, NONE, NodeData, Property};
+use super::graph::{GraphDoc, GraphLine, NONE, Property};
 use crate::compiler::types::{
     FixRun, FixedItem, RFixId, RObjId, RebuildDoc, RebuildFix, RebuildObj, push_node,
 };
@@ -28,25 +28,51 @@ impl<'a> Builder<'a> {
 }
 
 // Defunctionalized rebuild continuations (replacing the `partial` closure and
-// the RebuildCont closure stack used by `visit_line`).
+// the RebuildCont closure stack used by `visit_line`), flattened into shared
+// buffers so threading them allocates nothing per scope.
 //
-// A partial is a left composition spine. It is stored so `push` appends the
-// innermost (most recently added) element, i.e. the tail is `[.., (xk,pk)]` with
-// `(xk,pk)` innermost; `apply_rpartial` folds from the end, yielding
-// `Comp(x0, Comp(x1, .. Comp(xk, obj, pk) .., p1), p0)`.
-type RPartial = Vec<(RObjId, bool)>;
+// A partial is a left composition spine, stored innermost-last (the tail is
+// `[.., (xk,pk)]` with `(xk,pk)` innermost); `apply_rpartial` folds from the
+// end, yielding `Comp(x0, Comp(x1, .. Comp(xk, obj, pk) .., p1), p0)`.
+//
+// A continuation is a stack of steps stored innermost-last; applying folds
+// from the end. The stack of continuations is one flat step vector delimited
+// by `bounds` (each entry the start of one continuation, top's start last).
 
-// A continuation step. A continuation is a stack of steps stored so `push`
-// appends the head (the step applied first / innermost); `apply_rcont` folds
-// from the end. RStack is the stack of continuations, top at the end.
-#[derive(Debug)]
+/// A continuation step. A captured partial is a range into the shared
+/// partials buffer.
+#[derive(Debug, Copy, Clone)]
 enum RStep {
     Grp,
     Seq,
-    Partial(RPartial),
+    Partial(u32, u32),
 }
-type RCont = Vec<RStep>;
-type RStack = Vec<RCont>;
+
+/// The flat continuation state, reused across lines: cleared per line, so its
+/// buffers amortize across the whole document.
+struct ContState {
+    /// All live continuations' steps, concatenated in stack order.
+    steps: Vec<RStep>,
+    /// Start index in `steps` of each continuation, top's last. The first
+    /// entry is always 0: the line's identity continuation.
+    bounds: Vec<u32>,
+    /// Partial spines: captured regions below `cur_start` (addressed by
+    /// `RStep::Partial` ranges), the live partial from `cur_start` on.
+    partials: Vec<(RObjId, bool)>,
+    /// Start of the live partial region in `partials`.
+    cur_start: u32,
+}
+
+impl ContState {
+    /// Resets to one empty identity continuation and an empty live partial.
+    fn reset(&mut self) {
+        self.steps.clear();
+        self.bounds.clear();
+        self.bounds.push(0);
+        self.partials.clear();
+        self.cur_start = 0;
+    }
+}
 
 // Applies a partial spine to an object (innermost element first).
 fn apply_rpartial(b: &mut Builder, partial: &[(RObjId, bool)], obj: RObjId) -> RObjId {
@@ -57,45 +83,28 @@ fn apply_rpartial(b: &mut Builder, partial: &[(RObjId, bool)], obj: RObjId) -> R
     result
 }
 
-// Applies a continuation (stack of steps) to an object (head step first).
-fn apply_rcont(b: &mut Builder, cont: &[RStep], obj: RObjId) -> RObjId {
+// Applies the steps from `start` to the end of the step vector to an object
+// (innermost step first) and truncates them away — one continuation applied
+// and popped, or the final identity continuation for `start` 0.
+fn apply_steps(b: &mut Builder, st: &mut ContState, start: usize, obj: RObjId) -> RObjId {
     let mut result = obj;
-    for step in cont.iter().rev() {
-        result = match step {
+    for i in (start..st.steps.len()).rev() {
+        result = match st.steps[i] {
             RStep::Grp => b.obj(RebuildObj::Grp(result)),
             RStep::Seq => b.obj(RebuildObj::Seq(result)),
-            RStep::Partial(partial) => apply_rpartial(b, partial, result),
+            RStep::Partial(s, e) => apply_rpartial(b, &st.partials[s as usize..e as usize], result),
         };
     }
+    st.steps.truncate(start);
     result
 }
 
-// Composes `partial` into the top continuation, then pushes a grp/seq
-// continuation for each of the node's out-edge properties (in list order).
-fn open(g: &GraphDoc<'_, '_>, node: &NodeData, stack: &mut RStack, partial: RPartial) {
-    // Prepend a Partial step onto the current top continuation (a `push` in
-    // the reversed-storage convention), then push a fresh single-step
-    // continuation per property.
-    stack
-        .last_mut()
-        .expect("Invariant")
-        .push(RStep::Partial(partial));
-    let mut e = node.outs_head;
-    while e != NONE {
-        stack.push(match g.edges[e as usize].prop {
-            Property::Grp => vec![RStep::Grp],
-            Property::Seq => vec![RStep::Seq],
-        });
-        e = g.edges[e as usize].next_out;
-    }
-}
-
 // Pops `count` continuations, applying each to the accumulating object.
-fn close(b: &mut Builder, count: usize, stack: &mut RStack, term: RObjId) -> RObjId {
+fn close(b: &mut Builder, st: &mut ContState, count: usize, term: RObjId) -> RObjId {
     let mut result = term;
     for _ in 0..count {
-        let top = stack.pop().expect("Invariant");
-        result = apply_rcont(b, &top, result);
+        let start = st.bounds.pop().expect("Invariant") as usize;
+        result = apply_steps(b, st, start, result);
     }
     result
 }
@@ -107,10 +116,16 @@ pub(super) fn rebuild<'a>(doc: &GraphDoc<'_, 'a>) -> RebuildDoc<'a> {
         objs: Vec::with_capacity(doc.nodes.len()),
         fixes: Vec::new(),
     };
+    let mut st = ContState {
+        steps: Vec::new(),
+        bounds: Vec::new(),
+        partials: Vec::new(),
+        cur_start: 0,
+    };
     let lines: Vec<RObjId> = doc
         .lines
         .iter()
-        .map(|line| visit_line(&mut b, doc, line))
+        .map(|line| visit_line(&mut b, doc, line, &mut st))
         .collect();
     RebuildDoc {
         lines,
@@ -131,12 +146,16 @@ fn visit_item<'a>(b: &mut Builder<'a>, item: &FixedItem<'a>) -> RObjId {
     }
 }
 
-fn visit_line<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, gl: &GraphLine<'_, 'a>) -> RObjId {
-    // Walk the nodes in order, threading the continuation stack and the left
-    // composition spine (partial). `line.seps[i].pad` is the pad between node
-    // `i` and `i + 1`. The initial stack holds one identity continuation.
-    let mut stack: RStack = vec![Vec::new()];
-    let mut partial: RPartial = Vec::new();
+fn visit_line<'a>(
+    b: &mut Builder<'a>,
+    g: &GraphDoc<'_, 'a>,
+    gl: &GraphLine<'_, 'a>,
+    st: &mut ContState,
+) -> RObjId {
+    // Walk the nodes in order, threading the continuation stack and the live
+    // partial spine. `line.seps[i].pad` is the pad between node `i` and
+    // `i + 1`.
+    st.reset();
     let (last_item, rest) = gl
         .line
         .items
@@ -148,20 +167,34 @@ fn visit_line<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, gl: &GraphLine<'_, 
         let in_deg = node.ins_len as usize;
         let pad = gl.line.seps[i].pad;
         match (in_deg, node.outs_head == NONE) {
-            // In-degree 0, no out-properties: extend the partial spine.
-            (0, true) => partial.push((obj, pad)),
+            // In-degree 0, no out-properties: extend the live partial spine.
+            (0, true) => st.partials.push((obj, pad)),
             // In-degree > 0, no out-properties: close the incoming scopes,
             // then start a fresh partial from the closed object.
             (_, true) => {
-                let applied = apply_rpartial(b, &partial, obj);
-                let obj2 = close(b, in_deg, &mut stack, applied);
-                partial = vec![(obj2, pad)];
+                let applied = apply_rpartial(b, &st.partials[st.cur_start as usize..], obj);
+                let obj2 = close(b, st, in_deg, applied);
+                st.partials.truncate(st.cur_start as usize);
+                st.partials.push((obj2, pad));
             }
-            // In-degree 0, has out-properties: open new scopes, then
-            // start a fresh partial from this object.
+            // In-degree 0, has out-properties: capture the live partial onto
+            // the top continuation, push a grp/seq continuation per out-edge
+            // property (in list order), then start a fresh partial from this
+            // object.
             (0, false) => {
-                open(g, node, &mut stack, std::mem::take(&mut partial));
-                partial = vec![(obj, pad)];
+                let end = st.partials.len() as u32;
+                st.steps.push(RStep::Partial(st.cur_start, end));
+                st.cur_start = end;
+                let mut e = node.outs_head;
+                while e != NONE {
+                    st.bounds.push(st.steps.len() as u32);
+                    st.steps.push(match g.edges[e as usize].prop {
+                        Property::Grp => RStep::Grp,
+                        Property::Seq => RStep::Seq,
+                    });
+                    e = g.edges[e as usize].next_out;
+                }
+                st.partials.push((obj, pad));
             }
             (_, false) => unreachable!("Invariant"),
         }
@@ -174,12 +207,12 @@ fn visit_line<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, gl: &GraphLine<'_, 
         "Invariant: line ends without open scopes"
     );
     let obj = visit_item(b, last_item);
-    let applied = apply_rpartial(b, &partial, obj);
-    let obj2 = close(b, last_node.ins_len as usize, &mut stack, applied);
-    let [cont] = &stack[..] else {
+    let applied = apply_rpartial(b, &st.partials[st.cur_start as usize..], obj);
+    let obj2 = close(b, st, last_node.ins_len as usize, applied);
+    if st.bounds[..] != [0] {
         unreachable!("Invariant")
-    };
-    apply_rcont(b, cont, obj2)
+    }
+    apply_steps(b, st, 0, obj2)
 }
 
 fn visit_fix<'a>(b: &mut Builder<'a>, run: &FixRun<'a>) -> RFixId {

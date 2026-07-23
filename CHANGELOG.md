@@ -28,6 +28,14 @@ by the previous automated release tooling.
   vector surgery needed. Building the graph allocates nothing per node or
   edge (`json`: 1.01 to 0.55 compile allocs per input node, compile another
   ~13% faster).
+* **The rebuild continuations are flat reused buffers.** Reading the solved
+  scope graph back into a composition spine allocated a fresh `Vec` per
+  opened scope (one continuation vector each, plus a partial-spine vector per
+  close). The continuation stack is now one flat step vector delimited by a
+  bounds stack, partial spines are ranges into one shared buffer, and all of
+  it is reused across lines — threading continuations allocates nothing per
+  scope (`json`: 0.55 to 0.42 compile allocs per input node; compile-phase
+  reallocations drop from ~23k to ~170).
 * **Line-break decisions are O(1).** `compile` now precomputes two per-object
   tables in the `Doc`: the flat mid-line extent (neither nest nor pack
   advances the position mid-line, so it is an exact sum) and the mid-line
