@@ -16,9 +16,9 @@ use crate::compiler::types::{
 struct LineAccum<'a> {
     lines: Vec<FixedLine<'a>>,
     items: Vec<FixedItem<'a>>,
-    seps: Vec<FixedComp<'a>>,
+    seps: Vec<FixedComp>,
     run_terms: Vec<Term<'a>>,
-    run_seps: Vec<FixedComp<'a>>,
+    run_seps: Vec<FixedComp>,
 }
 
 impl<'a> LineAccum<'a> {
@@ -58,8 +58,8 @@ pub fn split_lines<'a>(entries: &[SerialEntry<'a>]) -> FixedDoc<'a> {
             SerialEntry::Next(term, SerialComp::Comp(attr, opens, closes)) => {
                 let comp = FixedComp {
                     pad: attr.pad.is_padded(),
-                    opens,
-                    closes,
+                    opens: *opens,
+                    closes: *closes,
                 };
                 if attr.brk.is_fixed() {
                     // A fixed composition: extend (or start) the current run.
@@ -80,8 +80,7 @@ pub fn split_lines<'a>(entries: &[SerialEntry<'a>]) -> FixedDoc<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{Attr, Break, NO_PATH, Pad, TermLeaf};
-    use bumpalo::Bump;
+    use crate::compiler::types::{Attr, Break, NO_PATH, Pad, ScopeRange, TermLeaf};
 
     /// Far past where a native-stack recursion could survive; the pass is a
     /// plain scan, so this now guards sizing behavior only.
@@ -94,27 +93,28 @@ mod tests {
         }
     }
 
-    fn comp_entry<'a>(mem: &'a Bump, text: &'a str, fix: bool) -> SerialEntry<'a> {
+    const NO_SCOPES: ScopeRange = ScopeRange { start: 0, end: 0 };
+
+    fn comp_entry(text: &str, fix: bool) -> SerialEntry<'_> {
         SerialEntry::Next(
             text_term(text),
-            mem.alloc(SerialComp::Comp(
+            SerialComp::Comp(
                 Attr {
                     pad: Pad::Unpadded,
                     brk: if fix { Break::Fixed } else { Break::Breakable },
                 },
-                &[],
-                &[],
-            )),
+                NO_SCOPES,
+                NO_SCOPES,
+            ),
         )
     }
 
     #[test]
     fn split_lines_coalesces_deep_fixed_run() {
-        let mem = Bump::new();
         // All comps fixed: the whole line collapses to one Fix item.
         let mut entries: Vec<SerialEntry> = Vec::new();
         for _ in 0..DEEP {
-            entries.push(comp_entry(&mem, "y", true));
+            entries.push(comp_entry("y", true));
         }
         entries.push(SerialEntry::Last(text_term("z")));
         let out = split_lines(&entries);
@@ -130,11 +130,10 @@ mod tests {
 
     #[test]
     fn split_lines_keeps_nonfixed_comps_as_separators() {
-        let mem = Bump::new();
         // No fixed comps: DEEP + 1 plain term items with DEEP separators.
         let mut entries: Vec<SerialEntry> = Vec::new();
         for _ in 0..DEEP {
-            entries.push(comp_entry(&mem, "y", false));
+            entries.push(comp_entry("y", false));
         }
         entries.push(SerialEntry::Last(text_term("z")));
         let out = split_lines(&entries);
@@ -148,13 +147,9 @@ mod tests {
 
     #[test]
     fn split_lines_splits_lines_at_hard_breaks() {
-        let mem = Bump::new();
         let mut entries: Vec<SerialEntry> = Vec::new();
         for _ in 0..DEEP {
-            entries.push(SerialEntry::Next(
-                text_term("x"),
-                mem.alloc(SerialComp::Line),
-            ));
+            entries.push(SerialEntry::Next(text_term("x"), SerialComp::Line));
         }
         entries.push(SerialEntry::Last(text_term("end")));
         let out = split_lines(&entries);
@@ -163,12 +158,11 @@ mod tests {
 
     #[test]
     fn split_lines_closes_run_at_nonfixed_comp() {
-        let mem = Bump::new();
         // a !& b & c: the fixed run (a, b) closes at the non-fixed comp, which
         // becomes the separator before the plain term c.
         let entries = vec![
-            comp_entry(&mem, "a", true),
-            comp_entry(&mem, "b", false),
+            comp_entry("a", true),
+            comp_entry("b", false),
             SerialEntry::Last(text_term("c")),
         ];
         let out = split_lines(&entries);

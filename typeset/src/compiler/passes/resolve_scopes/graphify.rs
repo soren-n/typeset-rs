@@ -37,22 +37,28 @@ type Edge = (u64, Property, u32, u32);
 
 // Applies one composition's scope deltas at `node`: close each scope that ends
 // here (pairing it with its recorded open into an edge), then open each scope
-// that begins here.
-fn apply_comp(node: u32, comp: &FixedComp, open: &mut OpenScopes, edges: &mut Vec<Edge>) {
-    let FixedComp { opens, closes, .. } = comp;
-    for scope in closes.iter() {
+// that begins here. The deltas are ranges into the serial document's shared
+// scope buffer.
+fn apply_comp(
+    node: u32,
+    comp: &FixedComp,
+    scopes: &[Scope],
+    open: &mut OpenScopes,
+    edges: &mut Vec<Edge>,
+) {
+    for scope in comp.closes.slice(scopes) {
         let index = scope_index(scope);
         let (prop, from) = open
             .remove(&index)
             .expect("Invariant: scope closed without a matching open");
         edges.push((index, prop, from, node));
     }
-    for scope in opens.iter() {
+    for scope in comp.opens.slice(scopes) {
         open.insert(scope_index(scope), (scope_prop(scope), node));
     }
 }
 
-pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>) -> GraphDoc<'b, 'a> {
+pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>, scopes: &[Scope]) -> GraphDoc<'b, 'a> {
     let node_total: usize = doc.lines.iter().map(|line| line.items.len()).sum();
     let mut g = GraphDoc {
         lines: Vec::with_capacity(doc.lines.len()),
@@ -62,7 +68,7 @@ pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>) -> GraphDoc<'b, 'a> {
     // Per-line edge scratch, reused across lines.
     let mut edges: Vec<Edge> = Vec::new();
     for line in &doc.lines {
-        visit_line(&mut g, line, &mut edges);
+        visit_line(&mut g, line, scopes, &mut edges);
     }
     g
 }
@@ -71,7 +77,12 @@ pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>) -> GraphDoc<'b, 'a> {
 /// composition's scope deltas at that index. A fix item's internal comps and
 /// its trailing separator all share the item's index, exactly as document
 /// order threads them.
-fn visit_line<'b, 'a>(g: &mut GraphDoc<'b, 'a>, line: &'b FixedLine<'a>, edges: &mut Vec<Edge>) {
+fn visit_line<'b, 'a>(
+    g: &mut GraphDoc<'b, 'a>,
+    line: &'b FixedLine<'a>,
+    scopes: &[Scope],
+    edges: &mut Vec<Edge>,
+) {
     let start = g.nodes.len() as u32;
     let mut open: OpenScopes = BTreeMap::new();
     edges.clear();
@@ -80,11 +91,11 @@ fn visit_line<'b, 'a>(g: &mut GraphDoc<'b, 'a>, line: &'b FixedLine<'a>, edges: 
         g.nodes.push(NodeData::new());
         if let FixedItem::Fix(run) = item {
             for sep in &run.seps {
-                apply_comp(index, sep, &mut open, edges);
+                apply_comp(index, sep, scopes, &mut open, edges);
             }
         }
         if let Some(sep) = line.seps.get(i) {
-            apply_comp(index, sep, &mut open, edges);
+            apply_comp(index, sep, scopes, &mut open, edges);
         }
     }
     // Close every scope still open at the line's last node.

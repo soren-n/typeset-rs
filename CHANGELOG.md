@@ -45,6 +45,15 @@ by the previous automated release tooling.
   term. Wrapper storage drops from O(leaves × depth) to O(input tree):
   compiling 1000 words under 1024 nests is ~8x faster and peak memory falls
   from 87 MB to 8 MB; `json` peak memory drops ~22% and compile ~10% more.
+* **Intermediate representations drop mid-compile.** The serial output now
+  owns its scope-delta buffer (ranges into one shared `Vec<Scope>` instead of
+  bump-allocated slices), so nothing downstream references `serialize`'s bump
+  and the borrow chain is broken: the bump and Edsl arena drop when
+  `serialize` returns, the line structure after the scope graph is rebuilt,
+  and the rebuilt document after denulling. Only the layout arena (the text
+  owner) lives until the heap `Doc` is built — peak memory is the largest
+  adjacent-IR window, not the sum of all IRs (512k-word chain: peak RSS 411
+  to 297 MB; `json`: another ~8% off peak, compile ~12% faster).
 * **Line-break decisions are O(1).** `compile` now precomputes two per-object
   tables in the `Doc`: the flat mid-line extent (neither nest nor pack
   advances the position mid-line, so it is an exact sum) and the mid-line

@@ -7,8 +7,8 @@
 //! |------------------|---------------------------|------|
 //! | `flatten`        | `Layout` → `LayoutArena`  | flatten the input `Box` tree into a postorder arena |
 //! | `resolve_breaks` | `LayoutArena` → `EdslDoc` | collapse broken sequences into hard lines |
-//! | `serialize`      | `EdslDoc` → `Serial`      | flatten to leaf entries, computing scope open/close deltas |
-//! | `split_lines`    | `Serial` → `FixedDoc`     | split at hard lines, coalesce fixed-composition runs |
+//! | `serialize`      | `EdslDoc` → `SerialDoc`   | flatten to leaf entries, computing scope open/close deltas |
+//! | `split_lines`    | `SerialDoc` → `FixedDoc`  | split at hard lines, coalesce fixed-composition runs |
 //! | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve, and read back the grp/seq scope graph |
 //! | `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms, strip term wrappers to prop lists |
 //! | `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq, right-associate compositions |
@@ -18,10 +18,14 @@
 //! index arenas or plain vectors — so every pass is a loop (or an explicit
 //! work-stack walk) and the whole pipeline runs in constant native stack: no
 //! layout is too deep to compile, and depth shows up as O(depth) heap instead.
-//! The one bump arena backs `serialize`'s persistent scope accumulators; text
-//! lives in the `LayoutArena` and is borrowed all the way down. The output
-//! [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop`/`Debug` are
-//! derived and non-recursive by construction.
+//! The one bump arena backs `serialize`'s persistent scope accumulators and
+//! drops when `serialize` returns. Text lives in the `LayoutArena` and is
+//! borrowed all the way down — the arena is the only early structure that
+//! outlives its consumer pass; every other intermediate drops as soon as the
+//! next representation is built, so peak memory is a narrow window around the
+//! largest pair of adjacent IRs rather than the sum of all of them. The
+//! output [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop`/`Debug`
+//! are derived and non-recursive by construction.
 //!
 //! [`compile`] is the sole entry point and is infallible.
 
@@ -55,19 +59,27 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
 
     // Flattening is the one step that walks the owning `Box` tree; every later
     // pass folds flat structures. Text lives in the layout arena and is
-    // borrowed all the way down the pipeline.
+    // borrowed all the way down the pipeline, so the arena outlives every
+    // intermediate; everything else drops as soon as its consumer pass ran.
     let arena = flatten(*layout);
-    let edsl = resolve_breaks(&arena);
 
-    // serialize's persistent scope accumulators share structure, so it keeps
-    // the pipeline's one bump arena; its terms are borrowed through every
-    // later pass.
-    let mem = Bump::new();
-    let serial = serialize(&mem, &edsl);
+    let serial = {
+        let edsl = resolve_breaks(&arena);
+        // serialize's persistent scope accumulators share structure, so it
+        // keeps the pipeline's one bump arena — its output no longer
+        // references it, so both the bump and the Edsl arena drop here.
+        let mem = Bump::new();
+        serialize(&mem, &edsl)
+    };
 
-    let line_doc = split_lines(&serial.entries);
-    let scoped_doc = resolve_scopes(&line_doc);
-    let denull_doc = denull(&scoped_doc, &serial.paths);
+    let denull_doc = {
+        let line_doc = split_lines(&serial.entries);
+        let scoped_doc = resolve_scopes(&line_doc, &serial.scopes);
+        drop(line_doc);
+        denull(&scoped_doc, &serial.paths)
+    };
+    drop(serial);
+
     let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)
 }

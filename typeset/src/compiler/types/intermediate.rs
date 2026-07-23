@@ -64,20 +64,24 @@ pub struct EdslDoc<'a> {
 // A flat list of leaf entries in document order; each entry is a term plus how
 // it glues to what follows. The entry list is always non-empty and its final
 // entry is always `Last`. The document also owns the path arena the entries'
-// terms point into. (The load-bearing persistent lists are `serialize`'s
+// terms point into and the scope buffer their deltas range into, so nothing
+// in it references `serialize`'s internal bump — the output borrows only the
+// layout arena's text. (The load-bearing persistent lists are `serialize`'s
 // internal `CompList` scope accumulators, not this output.)
 #[derive(Debug)]
 pub struct SerialDoc<'a> {
     pub entries: Vec<SerialEntry<'a>>,
     /// The shared nest/pack path arena every [`Term`]'s `path` points into.
     pub paths: Vec<PathNode>,
+    /// The shared scope buffer every delta's [`ScopeRange`] indexes.
+    pub scopes: Vec<Scope>,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum SerialEntry<'a> {
     /// A term followed by a composition — a hard line break
     /// (`SerialComp::Line`) or a composition separator (`SerialComp::Comp`).
-    Next(Term<'a>, &'a SerialComp<'a>),
+    Next(Term<'a>, SerialComp),
     /// The document's final term, with nothing following.
     Last(Term<'a>),
 }
@@ -135,12 +139,27 @@ pub enum Scope {
     Seq(u64),
 }
 
-#[derive(Debug)]
-pub enum SerialComp<'a> {
+/// A range of scopes in the document's shared scope buffer
+/// ([`SerialDoc::scopes`]).
+#[derive(Debug, Copy, Clone)]
+pub struct ScopeRange {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl ScopeRange {
+    /// The scopes this range selects from the document's shared buffer.
+    pub fn slice<'s>(&self, buf: &'s [Scope]) -> &'s [Scope] {
+        &buf[self.start as usize..self.end as usize]
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum SerialComp {
     Line,
     /// A composition: its attributes, the scopes opening here, and the scopes
-    /// closing here.
-    Comp(Attr, &'a [Scope], &'a [Scope]),
+    /// closing here (ranges into the document's shared scope buffer).
+    Comp(Attr, ScopeRange, ScopeRange),
 }
 
 // FixedDoc.
@@ -152,12 +171,12 @@ pub enum SerialComp<'a> {
 // fixed runs happen in one sweep over the serial entries.)
 
 /// A composition: its pad flag, the scopes opening here, and the scopes
-/// closing here.
+/// closing here (ranges into the serial document's shared scope buffer).
 #[derive(Debug, Copy, Clone)]
-pub struct FixedComp<'a> {
+pub struct FixedComp {
     pub pad: bool,
-    pub opens: &'a [Scope],
-    pub closes: &'a [Scope],
+    pub opens: ScopeRange,
+    pub closes: ScopeRange,
 }
 
 /// A maximal run of terms joined by fixed compositions, coalesced into one
@@ -165,7 +184,7 @@ pub struct FixedComp<'a> {
 #[derive(Debug)]
 pub struct FixRun<'a> {
     pub terms: Vec<Term<'a>>,
-    pub seps: Vec<FixedComp<'a>>,
+    pub seps: Vec<FixedComp>,
 }
 
 #[derive(Debug)]
@@ -179,7 +198,7 @@ pub enum FixedItem<'a> {
 #[derive(Debug)]
 pub struct FixedLine<'a> {
     pub items: Vec<FixedItem<'a>>,
-    pub seps: Vec<FixedComp<'a>>,
+    pub seps: Vec<FixedComp>,
 }
 
 #[derive(Debug)]

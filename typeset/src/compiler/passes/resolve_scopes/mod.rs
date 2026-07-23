@@ -15,10 +15,10 @@ mod graphify;
 mod rebuild;
 mod solve;
 
-use crate::compiler::types::{FixedDoc, RebuildDoc};
+use crate::compiler::types::{FixedDoc, RebuildDoc, Scope};
 
-pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
-    let mut graph = graphify::graphify(doc);
+pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>, scopes: &[Scope]) -> RebuildDoc<'a> {
+    let mut graph = graphify::graphify(doc, scopes);
     solve::solve(&mut graph);
     rebuild::rebuild(&graph)
 }
@@ -28,7 +28,7 @@ mod tests {
     use super::*;
     use crate::compiler::types::{
         FixRun, FixedComp, FixedItem, FixedLine, NO_PATH, PathNode, Prop, RebuildFix, RebuildObj,
-        Term, TermLeaf,
+        ScopeRange, Term, TermLeaf,
     };
 
     fn text_term(text: &'static str) -> Term<'static> {
@@ -43,11 +43,11 @@ mod tests {
     /// all three phases (graphify, solve, rebuild).
     const DEEP: usize = 50_000;
 
-    fn sep<'a>() -> FixedComp<'a> {
+    fn sep() -> FixedComp {
         FixedComp {
             pad: false,
-            opens: &[],
-            closes: &[],
+            opens: ScopeRange { start: 0, end: 0 },
+            closes: ScopeRange { start: 0, end: 0 },
         }
     }
 
@@ -68,7 +68,7 @@ mod tests {
         let doc = FixedDoc {
             lines: vec![FixedLine { items, seps }],
         };
-        let out = resolve_scopes(&doc);
+        let out = resolve_scopes(&doc, &[]);
         // One line, rebuilt as a right-nested composition spine.
         let [root] = out.lines[..] else {
             panic!("expected one line")
@@ -105,7 +105,7 @@ mod tests {
                 seps: Vec::new(),
             }],
         };
-        let out = resolve_scopes(&doc);
+        let out = resolve_scopes(&doc, &[]);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -141,7 +141,7 @@ mod tests {
                 seps: Vec::new(),
             }],
         };
-        let out = resolve_scopes(&doc);
+        let out = resolve_scopes(&doc, &[]);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -167,7 +167,7 @@ mod tests {
             })
             .collect();
         let doc = FixedDoc { lines };
-        let out = resolve_scopes(&doc);
+        let out = resolve_scopes(&doc, &[]);
         assert_eq!(out.lines.len(), DEEP);
     }
 }

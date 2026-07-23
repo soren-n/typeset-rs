@@ -23,8 +23,8 @@
 //! the recursive version.
 
 use crate::compiler::types::{
-    Attr, Break, EdslDoc, EdslId, EdslNode, NO_PATH, PathId, PathNode, Prop, Scope, SerialComp,
-    SerialDoc, SerialEntry, Term, TermLeaf,
+    Attr, Break, EdslDoc, EdslId, EdslNode, NO_PATH, PathId, PathNode, Prop, Scope, ScopeRange,
+    SerialComp, SerialDoc, SerialEntry, Term, TermLeaf,
 };
 use bumpalo::Bump;
 
@@ -60,10 +60,11 @@ enum Glue<'b> {
     },
 }
 
-/// One emitted leaf: its term and how it glues to what follows.
-struct Entry<'b> {
+/// One emitted leaf: its term (text borrowed from the layout arena, `'a`) and
+/// how it glues to what follows (scope snapshots in the bump, `'b`).
+struct Entry<'a, 'b> {
     glue: Glue<'b>,
-    term: Term<'b>,
+    term: Term<'a>,
 }
 
 /// A pending subtree to visit, with its scoped path state. `i`/`j` are global
@@ -76,10 +77,13 @@ struct Work<'b> {
     fixed: bool,
 }
 
-pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> SerialDoc<'b> {
+/// The output borrows only the layout arena's text (`'a`); the bump (`'b`)
+/// backs the internal scope accumulators alone and can drop as soon as this
+/// returns.
+pub fn serialize<'a, 'b>(mem: &'b Bump, doc: &EdslDoc<'a>) -> SerialDoc<'a> {
     let mut i: u64 = 0;
     let mut j: u64 = 0;
-    let mut entries: Vec<Entry<'b>> = Vec::new();
+    let mut entries: Vec<Entry<'a, 'b>> = Vec::new();
     let mut paths: Vec<PathNode> = Vec::new();
 
     // Right-to-left visitation is achieved by a stack: pushing the right child
@@ -215,7 +219,12 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> SerialDoc<'
     // a hard line — resolve_scopes resolves each line independently. Diffing the
     // shared-tail `CompList`s is O(delta), so this whole pass stays linear even
     // when scopes nest n deep.
-    let mut items: Vec<SerialEntry<'b>> = Vec::with_capacity(entries.len());
+    let mut items: Vec<SerialEntry<'a>> = Vec::with_capacity(entries.len());
+    let mut scopes: Vec<Scope> = Vec::new();
+    // Scratch for one composition's deltas, reused across entries; each is
+    // copied into the shared scope buffer as a range.
+    let mut opens: Vec<Scope> = Vec::new();
+    let mut closes: Vec<Scope> = Vec::new();
     let mut prev: Option<&'b CompList<'b>> = None;
     for entry in entries.iter() {
         let item = match entry.glue {
@@ -225,16 +234,18 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> SerialDoc<'
             }
             Glue::Line => {
                 prev = None;
-                SerialEntry::Next(entry.term, mem.alloc(SerialComp::Line))
+                SerialEntry::Next(entry.term, SerialComp::Line)
             }
             Glue::Comp { comps, attr } => {
-                let (opens, closes) = diff_comps(prev, comps);
+                opens.clear();
+                closes.clear();
+                diff_comps(prev, comps, &mut opens, &mut closes);
                 prev = comps;
-                let comp = mem.alloc(SerialComp::Comp(
+                let comp = SerialComp::Comp(
                     attr,
-                    mem.alloc_slice_copy(&opens),
-                    mem.alloc_slice_copy(&closes),
-                ));
+                    append_scopes(&mut scopes, &opens),
+                    append_scopes(&mut scopes, &closes),
+                );
                 SerialEntry::Next(entry.term, comp)
             }
         };
@@ -243,17 +254,31 @@ pub fn serialize<'b, 'a: 'b>(mem: &'b Bump, doc: &'a EdslDoc<'a>) -> SerialDoc<'
     SerialDoc {
         entries: items,
         paths,
+        scopes,
+    }
+}
+
+/// Appends `delta` to the shared scope buffer, returning its range.
+fn append_scopes(scopes: &mut Vec<Scope>, delta: &[Scope]) -> ScopeRange {
+    let start = scopes.len() as u32;
+    scopes.extend_from_slice(delta);
+    ScopeRange {
+        start,
+        end: scopes.len() as u32,
     }
 }
 
 /// Diffs two enclosing-scope lists (innermost-first, sharing an outer tail by
 /// pointer) into the scopes that *open* (in `cur`, not `prev`) and *close* (in
-/// `prev`, not `cur`) at this composition. Order within each list is irrelevant:
-/// resolve_scopes keys scopes by index. O(number of scopes that differ).
+/// `prev`, not `cur`) at this composition, appended to the caller's scratch.
+/// Order within each list is irrelevant: resolve_scopes keys scopes by index.
+/// O(number of scopes that differ).
 fn diff_comps<'b>(
     prev: Option<&'b CompList<'b>>,
     cur: Option<&'b CompList<'b>>,
-) -> (Vec<Scope>, Vec<Scope>) {
+    opens: &mut Vec<Scope>,
+    closes: &mut Vec<Scope>,
+) {
     fn scope_of(wrap: CompWrap) -> Scope {
         match wrap {
             CompWrap::Grp(index) => Scope::Grp(index),
@@ -263,8 +288,6 @@ fn diff_comps<'b>(
     fn depth(list: Option<&CompList>) -> usize {
         list.map_or(0, |node| node.depth)
     }
-    let mut closes: Vec<Scope> = Vec::new();
-    let mut opens: Vec<Scope> = Vec::new();
     let mut a = prev; // contributes closes
     let mut b = cur; // contributes opens
     let (mut da, mut db) = (depth(a), depth(b));
@@ -296,7 +319,6 @@ fn diff_comps<'b>(
             _ => unreachable!("equal-depth lists reach the shared tail together"),
         }
     }
-    (opens, closes)
 }
 
 #[cfg(test)]
