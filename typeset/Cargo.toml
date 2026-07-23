@@ -17,7 +17,6 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bumpalo.workspace = true
 
 [dev-dependencies]
 typeset-parser.workspace = true

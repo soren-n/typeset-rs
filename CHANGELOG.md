@@ -10,6 +10,14 @@ by the previous automated release tooling.
 
 ### Performance
 
+* **No bump arena remains.** `serialize`'s grp/seq scope accumulator was the
+  last `bumpalo` user — a persistent pointer-linked list allocated in the
+  pipeline's one bump. It is now a flat parent-linked arena (ids into a shared
+  `Vec`, `depth` field and id equality replacing `ptr::eq`, exactly like the
+  nest/pack path arena), so `serialize` owns every accumulator in a `Vec` it
+  frees on return and the `bumpalo` dependency is dropped entirely. Compile
+  work is unchanged (allocation counts identical); peak memory is marginally
+  lower now that the bump's grow-only chunk headroom is gone (~1–6% by shape).
 * **Term prop lists live in one shared buffer.** `denull` strips each term's
   nest/pack wrappers into a single document-wide prop buffer and terms carry
   `(start, end)` ranges into it, instead of one heap `Vec` per wrapped term.

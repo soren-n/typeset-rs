@@ -81,8 +81,8 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
 - Compiling a plain (no grp/seq/nest) document performs a constant number of
   heap allocations (~57 for a 128k-node chain) — the arenas amortize
   everything; scope-heavy documents add ~0.33 allocs/node (was ~1.6 before
-  the satellite/term flattening landed; the remainder is graphify's BTreeMap
-  of open scopes and serialize's CompList bump chunks).
+  the satellite/term flattening landed; the remainder is now graphify's
+  BTreeMap of open scopes, the last per-object allocator on the compile path).
 
 ### Costs to know about
 
@@ -95,10 +95,10 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   out of the box instead; skip leaf children): compile got 19-28% faster.
   With the text-span, satellite-flattening, and flat-term reworks also
   landed, plain documents now compile with a constant number of heap
-  allocations and grp/seq/nest-heavy ones with ~0.33 per node (graphify's
-  BTreeMap of open scopes and serialize's CompList bump chunks). The node
-  arenas themselves are amortized by `Vec` growth — the flat-arena design
-  was never the source of the traffic.
+  allocations and grp/seq/nest-heavy ones with ~0.33 per node (now just
+  graphify's BTreeMap of open scopes; serialize's scope accumulator became a
+  flat arena and its bump is gone). The node arenas themselves are amortized
+  by `Vec` growth — the flat-arena design was never the source of the traffic.
 - **Was dropping the bump arenas a mistake? No — measured.** The flat `Vec`
   arenas do the same amortization job for node storage that bumpalo did, with
   better locality and eager frees (bumpalo is grow-only, so peak memory would
@@ -106,9 +106,10 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   malloc for the small per-node satellite collections on scope-heavy inputs
   (~1.6 allocs/node on `json` at audit time); the better-than-bump fix —
   flattening those into shared side arrays with ranges and intrusive lists —
-  landed 2026-07 (see landed optimization 7). `serialize` keeps its bump
-  because its persistent accumulators share structure — the one place bump
-  semantics are load-bearing.
+  landed 2026-07 (see landed optimization 7). `serialize`'s persistent scope
+  accumulator, the last bump user, later became a flat parent-linked arena
+  (landed optimization 10) — the bump is gone entirely, with compile work
+  unchanged and peak memory marginally lower.
 - **Compile dominates render** by roughly 15-25x at width 80. A layout
   compiled once and rendered at several widths amortizes well; per-keystroke
   recompiles pay the full pipeline each time.
@@ -171,6 +172,18 @@ memory cut 28-90% by workload shape.
    (no bump references escape `serialize`), so each IR drops as soon as its
    consumer pass ran. 512k-word chain peak RSS 411 → 297 MB; json ~8% off
    peak and ~12% faster compile (0.33 allocs/node).
+10. Last bump retired (the former remaining candidate 2) — `serialize`'s
+    grp/seq scope accumulator, the only remaining `bumpalo` user, became a
+    flat parent-linked arena (ids into a shared `Vec`, `depth` + id equality
+    replacing `ptr::eq`, like the nest/pack path arena). The `bumpalo`
+    dependency is dropped entirely; alloc counts are unchanged (the bump
+    served its nodes from a few large chunks, the `Vec` from amortized
+    growth) and peak memory is marginally lower now the bump's grow-only
+    chunk headroom is gone (~1-6% by shape). Compile timing is unchanged —
+    isolated warmed `perf_probe` showed it flat within run-to-run noise;
+    criterion reported large (-30-44%) swings on the nest/scope-heavy
+    compile benches, but those are the code-layout artifact (removing a
+    dependency shifts every symbol address), not a real speedup.
 
 ### Remaining candidates
 
@@ -180,18 +193,14 @@ memory cut 28-90% by workload shape.
    `flatten` (spans instead of `&str`) would let the node arena drop after
    `resolve_breaks` and remove the last long-lived structure. It is the
    dominant term in the residual ~0.5 KB/node peak.
-2. **Retire the last bump.** `serialize`'s persistent `CompList` scope
-   accumulators are the only remaining bump users; a flat parent-linked
-   arena (ids instead of `ptr::eq`, like the term path arena) would drop
-   `bumpalo` entirely.
-3. **Selective pass fusion.** The two normalize elimination folds have nearly
+2. **Selective pass fusion.** The two normalize elimination folds have nearly
    identical shapes; fusing them saves one full arena rebuild. Fuse further
    only with care — the pass-per-file structure is a deliberate legibility
    choice.
-4. **Arena-native construction** (builder API or macro-emitted arenas) to
+3. **Arena-native construction** (builder API or macro-emitted arenas) to
    skip the `Box` tree entirely; public-API surface, only worth it if
    compile-per-keystroke latency becomes a use case.
-5. **CI regression gating** — run the `scaling` bench (or instruction counts
+4. **CI regression gating** — run the `scaling` bench (or instruction counts
    via iai-callgrind/CodSpeed on a Linux runner) automatically.
 
 Benchmark any of these with `scaling` baselines before/after.

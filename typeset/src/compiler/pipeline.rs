@@ -18,10 +18,11 @@
 //! index arenas or plain vectors — so every pass is a loop (or an explicit
 //! work-stack walk) and the whole pipeline runs in constant native stack: no
 //! layout is too deep to compile, and depth shows up as O(depth) heap instead.
-//! The one bump arena backs `serialize`'s persistent scope accumulators and
-//! drops when `serialize` returns. Text lives in the `LayoutArena` and is
-//! borrowed all the way down — the arena is the only early structure that
-//! outlives its consumer pass; every other intermediate drops as soon as the
+//! No bump arena remains: every pass, `serialize` included, builds its
+//! accumulators in flat `Vec`-backed arenas it owns and frees on return. Text
+//! lives in the `LayoutArena` and is borrowed all the way down — the arena is
+//! the only early structure that outlives its consumer pass; every other
+//! intermediate drops as soon as the
 //! next representation is built, so peak memory is a narrow window around the
 //! largest pair of adjacent IRs rather than the sum of all of them. The
 //! output [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop`/`Debug`
@@ -55,8 +56,6 @@ use crate::compiler::{
 // moves the layout out.
 #[allow(clippy::boxed_local)]
 pub fn compile(layout: Box<Layout>) -> Box<Doc> {
-    use bumpalo::Bump;
-
     // Flattening is the one step that walks the owning `Box` tree; every later
     // pass folds flat structures. Text lives in the layout arena and is
     // borrowed all the way down the pipeline, so the arena outlives every
@@ -65,11 +64,9 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
 
     let serial = {
         let edsl = resolve_breaks(&arena);
-        // serialize's persistent scope accumulators share structure, so it
-        // keeps the pipeline's one bump arena — its output no longer
-        // references it, so both the bump and the Edsl arena drop here.
-        let mem = Bump::new();
-        serialize(&mem, &edsl)
+        // serialize builds its scope accumulators in flat arenas it owns, so
+        // its output no longer references them — the Edsl arena drops here.
+        serialize(&edsl)
     };
 
     let denull_doc = {
