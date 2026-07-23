@@ -227,11 +227,11 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
 
     // Resolve each leaf entry into a `SerialEntry`, computing every
     // composition's scope open/close deltas in the same forward pass. `prev` is
-    // the previous composition's enclosing scope list *on the same line*; it
+    // the previous composition's enclosing scope chain *on the same line*; it
     // resets at every line break (Line/Last), because grp/seq scopes never cross
     // a hard line — resolve_scopes resolves each line independently. Diffing the
-    // shared-tail `CompList`s is O(delta), so this whole pass stays linear even
-    // when scopes nest n deep.
+    // shared-spine `CompNode` chains is O(delta), so this whole pass stays linear
+    // even when scopes nest n deep.
     let mut items: Vec<SerialEntry<'a>> = Vec::with_capacity(entries.len());
     let mut scopes: Vec<Scope> = Vec::new();
     // Scratch for one composition's deltas, reused across entries; each is
@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn serialize_handles_deep_grp_chain() {
-        // Deep grp nesting exercises the i counter and CompList/stack depth.
+        // Deep grp nesting exercises the i counter and comp-arena/stack depth.
         let doc = deep_unary("x", EdslNode::Grp);
         // Should not overflow; a single leaf yields a trivial one-Last serial.
         let serial = serialize(&doc);

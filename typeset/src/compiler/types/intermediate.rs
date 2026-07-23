@@ -4,16 +4,36 @@ use super::layout::Attr;
 //
 // `flatten` lowers the public `Box`-recursive [`Layout`](super::layout::Layout)
 // tree into this postorder arena (children precede parents) as the pipeline's
-// entry step — the one place that walks owning boxes. Text is moved out of the
-// tree here; every later representation borrows it from this arena.
+// entry step — the one place that walks owning boxes. All text is concatenated
+// into one buffer here (returned alongside the arena) and text nodes hold a
+// byte span into it; every later representation borrows from that buffer. The
+// node arena itself owns no text, so it drops as soon as `resolve_breaks` has
+// consumed it, while the small text buffer lives on down the pipeline.
 
 /// Index into a [`LayoutArena`]'s node list.
 pub type LayId = u32;
 
+/// A byte range into the layout text buffer that `flatten` concatenates and
+/// every downstream representation borrows from. Storing a span rather than an
+/// owned `String` per text node keeps the node arena text-free (so it can drop
+/// early) and puts all text in one contiguous allocation.
+#[derive(Debug, Copy, Clone)]
+pub struct TextSpan {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl TextSpan {
+    /// The slice this span selects from the layout text buffer.
+    pub fn slice<'t>(&self, text: &'t str) -> &'t str {
+        &text[self.start as usize..self.end as usize]
+    }
+}
+
 #[derive(Debug)]
 pub enum LayoutNode {
     Null,
-    Text(String),
+    Text(TextSpan),
     Fix(LayId),
     Grp(LayId),
     Seq(LayId),
@@ -34,7 +54,7 @@ pub struct LayoutArena {
 //
 // Like the layout arena, but with hard line breaks resolved: compositions
 // inside a broken sequence have become `Line`s and already-broken seq wrappers
-// are gone. Owned; text is borrowed from the layout arena.
+// are gone. Owned; text is borrowed from the layout text buffer.
 
 /// Index into an [`EdslDoc`]'s node list.
 pub type EdslId = u32;
@@ -63,11 +83,10 @@ pub struct EdslDoc<'a> {
 //
 // A flat list of leaf entries in document order; each entry is a term plus how
 // it glues to what follows. The entry list is always non-empty and its final
-// entry is always `Last`. The document also owns the path arena the entries'
-// terms point into and the scope buffer their deltas range into, so nothing
-// in it references `serialize`'s internal bump — the output borrows only the
-// layout arena's text. (The load-bearing persistent lists are `serialize`'s
-// internal `CompList` scope accumulators, not this output.)
+// entry is always `Last`. The document owns the path arena the entries' terms
+// point into and the scope buffer their deltas range into, and borrows only
+// the layout text buffer — `serialize`'s internal scope-chain arena does not
+// escape.
 #[derive(Debug)]
 pub struct SerialDoc<'a> {
     pub entries: Vec<SerialEntry<'a>>,

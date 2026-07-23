@@ -121,12 +121,14 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   storage is O(input tree). Compiling 1000 words under 1024 nests went from
   11 ms / 87 MB peak to 2 ms / 8 MB (see landed optimizations 8-9).
 - **Peak memory was the sum of all live IRs — fixed 2026-07.** Later IRs
-  borrow only the layout arena's text now (scope deltas are ranges into an
-  owned buffer, not bump slices), so `compile` drops each intermediate as
+  borrow only the layout text now (scope deltas are ranges into an owned
+  buffer, not bump slices; text is a span into one shared buffer), so
+  `compile` drops each intermediate — the layout node arena included — as
   soon as its consumer pass ran; the peak is a narrow window around the
-  largest adjacent-IR pair plus the arena and the `Doc`. 512k-word chain:
-  411 MB → 297 MB peak RSS. The residual ~0.5 KB/node peak is dominated by
-  the layout arena (one `String` per text node) plus the `Doc`.
+  largest adjacent-IR pair plus the text buffer and the `Doc`. 512k-word
+  chain: 411 MB → 297 MB → 237 MB peak RSS across the two reworks. The
+  residual peak is now dominated by the largest adjacent IR pair and the
+  `Doc` rather than any single long-lived arena.
 
 ### Landed optimizations (2026-07)
 
@@ -184,23 +186,35 @@ memory cut 28-90% by workload shape.
     criterion reported large (-30-44%) swings on the nest/scope-heavy
     compile benches, but those are the code-layout artifact (removing a
     dependency shifts every symbol address), not a real speedup.
+11. Layout text moved out of the node arena (the former remaining candidate
+    1) — `flatten` concatenates all leaf text into one buffer and text nodes
+    hold an 8-byte span into it, instead of one owned `String` per text node.
+    The buffer outlives the pipeline; the now-text-free node arena drops right
+    after `resolve_breaks` instead of living to the end (every later IR
+    borrows text from the buffer, not the arena). Peak RSS falls 8-15% on
+    text/structure-heavy documents (512k-word chain 277 → 237 MiB, 200k-node
+    pack tree 548 → 475 MiB, json 66 → 61 MiB; nestwide unchanged — its text
+    is negligible next to the path arena). Compile timing and alloc counts
+    unchanged (the one added concatenation copy is negligible). Criterion
+    again showed large swings here (+9-43% on nest/scope-heavy compile
+    benches) — the *mirror* of optimization 10's swings, and they cancel
+    across the two commits; isolated warmed `perf_probe` distributions
+    overlap, confirming flat. Trust `alloc_probe` (exact) and isolated
+    `perf_probe` over criterion %-change on binary-layout-shifting refactors.
 
 ### Remaining candidates
 
-1. **Move text out of the layout arena early.** The `LayoutArena` (one
-   `String` per text node) now outlives every other intermediate only
-   because text is borrowed from it; concatenating text into one buffer at
-   `flatten` (spans instead of `&str`) would let the node arena drop after
-   `resolve_breaks` and remove the last long-lived structure. It is the
-   dominant term in the residual ~0.5 KB/node peak.
-2. **Selective pass fusion.** The two normalize elimination folds have nearly
+1. **Selective pass fusion.** The two normalize elimination folds have nearly
    identical shapes; fusing them saves one full arena rebuild. Fuse further
    only with care — the pass-per-file structure is a deliberate legibility
    choice.
-3. **Arena-native construction** (builder API or macro-emitted arenas) to
+2. **Arena-native construction** (builder API or macro-emitted arenas) to
    skip the `Box` tree entirely; public-API surface, only worth it if
    compile-per-keystroke latency becomes a use case.
-4. **CI regression gating** — run the `scaling` bench (or instruction counts
-   via iai-callgrind/CodSpeed on a Linux runner) automatically.
+3. **CI regression gating** — run the `scaling` bench (or instruction counts
+   via iai-callgrind/CodSpeed on a Linux runner) automatically. Especially
+   worthwhile here: criterion's wall-clock %-change is dominated by
+   code-layout noise on the compile benches, so gate on instruction counts
+   (deterministic) rather than time.
 
 Benchmark any of these with `scaling` baselines before/after.

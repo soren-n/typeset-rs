@@ -12,7 +12,9 @@
 
 use crate::compiler::types::{EdslDoc, EdslId, EdslNode, LayoutArena, LayoutNode, push_node};
 
-pub fn resolve_breaks(arena: &LayoutArena) -> EdslDoc<'_> {
+/// The returned [`EdslDoc`] borrows text from `text` (the layout text buffer),
+/// not from `arena`, so the node arena is free to drop the moment this returns.
+pub fn resolve_breaks<'t>(arena: &LayoutArena, text: &'t str) -> EdslDoc<'t> {
     let n = arena.nodes.len();
 
     // 1. mark: whether each subtree contains a hard line break. Wrappers pass
@@ -54,7 +56,7 @@ pub fn resolve_breaks(arena: &LayoutArena) -> EdslDoc<'_> {
     for (i, node) in arena.nodes.iter().enumerate() {
         let id = match node {
             LayoutNode::Null => push_node(&mut nodes, EdslNode::Null),
-            LayoutNode::Text(data) => push_node(&mut nodes, EdslNode::Text(data)),
+            LayoutNode::Text(span) => push_node(&mut nodes, EdslNode::Text(span.slice(text))),
             LayoutNode::Fix(c) => push_node(&mut nodes, EdslNode::Fix(out[*c as usize])),
             LayoutNode::Grp(c) => push_node(&mut nodes, EdslNode::Grp(out[*c as usize])),
             LayoutNode::Seq(c) => {
@@ -114,8 +116,8 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let arena = flatten(*layout);
-        let edsl = resolve_breaks(&arena);
+        let (arena, text) = flatten(*layout);
+        let edsl = resolve_breaks(&arena, &text);
         let EdslNode::Line(l, _) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the comp to become a line");
         };
@@ -125,8 +127,8 @@ mod tests {
     #[test]
     fn unbroken_seq_keeps_wrapper_and_comps() {
         let layout = seq(comp(text("a"), text("b"), Pad::Padded, Break::Breakable));
-        let arena = flatten(*layout);
-        let edsl = resolve_breaks(&arena);
+        let (arena, text) = flatten(*layout);
+        let edsl = resolve_breaks(&arena, &text);
         let EdslNode::Seq(c) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the seq wrapper to survive");
         };
@@ -143,8 +145,8 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let arena = flatten(*layout);
-        let edsl = resolve_breaks(&arena);
+        let (arena, text) = flatten(*layout);
+        let edsl = resolve_breaks(&arena, &text);
         // Root is the outer comp turned line; its left is the fixed comp.
         let EdslNode::Line(l, _) = edsl.nodes[edsl.root as usize] else {
             panic!("expected the outer comp to become a line");

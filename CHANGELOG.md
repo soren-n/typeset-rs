@@ -10,6 +10,18 @@ by the previous automated release tooling.
 
 ### Performance
 
+* **Layout text lives in one buffer and the node arena drops early.**
+  `flatten` used to move each leaf's text into its own arena node (one heap
+  `String` per text), so the whole layout node arena had to live to the end of
+  compilation — every later representation borrowed its text from those nodes.
+  It now concatenates all text into one buffer returned alongside the arena;
+  node text becomes an 8-byte span into it. The buffer (small) is the only
+  early structure that outlives the pipeline, and the node arena — now
+  text-free — drops the moment `resolve_breaks` has read it. Peak memory falls
+  8–15% on text- and structure-heavy documents (512k-word chain 277 to 237
+  MiB, a 200k-node pack-heavy tree 548 to 475 MiB, `json` 66 to 61 MiB).
+  Compile time and allocation counts are unchanged (the one added
+  concatenation copy is negligible against the pipeline).
 * **No bump arena remains.** `serialize`'s grp/seq scope accumulator was the
   last `bumpalo` user — a persistent pointer-linked list allocated in the
   pipeline's one bump. It is now a flat parent-linked arena (ids into a shared

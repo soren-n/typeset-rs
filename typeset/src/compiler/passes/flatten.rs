@@ -4,10 +4,13 @@
 //! arena (children precede parents). This is the pipeline's entry step and the
 //! single place that walks owning boxes: children are taken out of their boxes
 //! (leaving `Null` placeholders, so each box's own drop terminates in O(1))
-//! and text is moved out of the tree — every later representation borrows it
-//! from this arena. All subsequent passes fold flat arenas with plain loops.
+//! and every leaf's text is concatenated into one buffer, returned alongside
+//! the arena — text nodes hold a byte span into it and every later
+//! representation borrows from that buffer. The node arena owns no text, so it
+//! drops as soon as `resolve_breaks` has read it. All subsequent passes fold
+//! flat arenas with plain loops.
 
-use crate::compiler::types::{Attr, LayId, Layout, LayoutArena, LayoutNode, push_node};
+use crate::compiler::types::{Attr, LayId, Layout, LayoutArena, LayoutNode, TextSpan, push_node};
 use std::mem;
 
 /// A unit of flattening work: visit a subtree, or build a parent node from
@@ -32,8 +35,11 @@ fn visit_unary(tasks: &mut Vec<Task>, ctor: fn(LayId) -> LayoutNode, child: &mut
     tasks.push(Task::Visit(mem::replace(child, Layout::Null)));
 }
 
-pub fn flatten(layout: Layout) -> LayoutArena {
+pub fn flatten(layout: Layout) -> (LayoutArena, String) {
     let mut nodes: Vec<LayoutNode> = Vec::new();
+    // Every leaf's text concatenated in document order; text nodes span into
+    // this buffer, which outlives the node arena and feeds the whole pipeline.
+    let mut text = String::new();
 
     let mut tasks: Vec<Task> = vec![Task::Visit(layout)];
     let mut ids: Vec<LayId> = Vec::new();
@@ -42,7 +48,13 @@ pub fn flatten(layout: Layout) -> LayoutArena {
             Task::Visit(mut cur) => match &mut cur {
                 Layout::Null => ids.push(push_node(&mut nodes, LayoutNode::Null)),
                 Layout::Text(data) => {
-                    ids.push(push_node(&mut nodes, LayoutNode::Text(mem::take(data))));
+                    let start = text.len() as u32;
+                    text.push_str(data);
+                    let end = text.len() as u32;
+                    ids.push(push_node(
+                        &mut nodes,
+                        LayoutNode::Text(TextSpan { start, end }),
+                    ));
                 }
                 Layout::Fix(child) => visit_unary(&mut tasks, LayoutNode::Fix, child),
                 Layout::Grp(child) => visit_unary(&mut tasks, LayoutNode::Grp, child),
@@ -78,7 +90,7 @@ pub fn flatten(layout: Layout) -> LayoutArena {
     }
     let root = ids.pop().expect("flatten produced a root");
     assert!(ids.is_empty(), "flatten consumed every subtree");
-    LayoutArena { nodes, root }
+    (LayoutArena { nodes, root }, text)
 }
 
 #[cfg(test)]
@@ -93,13 +105,15 @@ mod tests {
     #[test]
     fn flatten_is_postorder() {
         let layout = comp(text("a"), nest(text("b")), Pad::Padded, Break::Breakable);
-        let arena = flatten(*layout);
+        let (arena, buf) = flatten(*layout);
         // Postorder: a, b, Nest(b), Comp — the root is last.
         assert_eq!(arena.root as usize, arena.nodes.len() - 1);
-        assert!(matches!(arena.nodes[0], LayoutNode::Text(ref s) if s == "a"));
-        assert!(matches!(arena.nodes[1], LayoutNode::Text(ref s) if s == "b"));
+        assert!(matches!(arena.nodes[0], LayoutNode::Text(s) if s.slice(&buf) == "a"));
+        assert!(matches!(arena.nodes[1], LayoutNode::Text(s) if s.slice(&buf) == "b"));
         assert!(matches!(arena.nodes[2], LayoutNode::Nest(1)));
         assert!(matches!(arena.nodes[3], LayoutNode::Comp(0, 2, _)));
+        // Text is concatenated in document order.
+        assert_eq!(buf, "ab");
     }
 
     #[test]
@@ -108,8 +122,10 @@ mod tests {
         for _ in 0..DEEP {
             layout = comp(layout, text("y"), Pad::Unpadded, Break::Breakable);
         }
-        let arena = flatten(*layout);
+        let (arena, buf) = flatten(*layout);
         assert_eq!(arena.nodes.len(), 2 * DEEP + 1);
         assert_eq!(arena.root as usize, arena.nodes.len() - 1);
+        // One 'x' plus DEEP 'y's, all concatenated.
+        assert_eq!(buf.len(), DEEP + 1);
     }
 }

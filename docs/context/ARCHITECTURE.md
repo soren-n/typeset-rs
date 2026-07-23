@@ -34,24 +34,24 @@ The former custom
 `cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
 used, have been removed.
 
-The one deliberate exception is `serialize`, which keeps a small local
-cons-list struct (`CompList`) for its grp/seq scope-path accumulator. Unlike
-the removed `List`, it is genuinely persistent: at a `Comp`/`Line` node both
-operands capture the same parent accumulator, and comp accumulators are also
-captured into the emitted entries, so the tails are shared across branches. A
-`Vec` would force a clone at every branch, so the shared cons-list is the right
-structure here and stays. That sharing is also load-bearing for speed:
-`serialize` turns each composition's enclosing-scope list into scope open/close
-*deltas* by diffing it against the previous composition's list, and because the
-two lists share their outer tail by pointer the diff is a short longest-common-
-suffix walk (`CompList` carries a `depth` field for it). Carrying deltas —
-rather than each composition's full enclosing scope stack — keeps the grp/seq
-passes linear on deeply nested scopes instead of O(n^2). (The nest/pack term
-path once had a sibling `TermList` cons-list, but it is now a flat
-parent-linked arena of `PathNode`s that the emitted terms index by id, so
-sibling leaves share their wrapper spine without a per-leaf chain; converting
-`CompList` the same way to drop the last bump is a listed candidate in
-PERFORMANCE.md.)
+`serialize`'s grp/seq scope-path accumulator needs genuine persistence: at a
+`Comp`/`Line` node both operands capture the same parent accumulator, and comp
+accumulators are also captured into the emitted entries, so the spines are
+shared across branches. A `Vec` snapshot would clone at every branch. It gets
+that sharing from a flat parent-linked arena (`CompNode`): descending through a
+grp/seq pushes one node linked to its parent, an accumulator is just that
+node's id, and sibling branches share their outer spine by id — the same shape
+as the nest/pack path arena, and no bump or cons-list. That sharing is also
+load-bearing for speed:
+`serialize` turns each composition's enclosing-scope chain into scope
+open/close *deltas* by diffing it against the previous composition's chain, and
+because the two chains share their outer spine by id the diff is a short
+longest-common-suffix walk (each `CompNode` carries a `depth` field for it).
+Carrying deltas — rather than each composition's full enclosing scope stack —
+keeps the grp/seq passes linear on deeply nested scopes instead of O(n^2).
+`serialize`'s other accumulator, the nest/pack term path (`PathNode`s), works
+the same way; both are flat parent-linked arenas indexed by id, and neither
+uses a bump.
 
 ### Upstream references
 
@@ -103,9 +103,11 @@ Build layout trees using constructors:
 vectors — so each pass is a loop over node indices: bottom-up folds run
 forward (children's results already computed), inherited context runs backward
 (parents visited first). `flatten` is the single step that walks the public
-`Box`-recursive `Layout` tree; text is moved into the layout arena there and
-borrowed through the rest of the pipeline. One bump arena remains, backing
-`serialize`'s persistent scope accumulators (see above). Every stage uses
+`Box`-recursive `Layout` tree; all leaf text is concatenated into one buffer
+there and borrowed (as spans) through the rest of the pipeline, so the layout
+node arena itself owns no text and drops right after `resolve_breaks`. No bump
+arena remains — every accumulator is a flat `Vec` arena its pass owns (see
+above). Every stage uses
 constant native stack regardless of layout depth, so deep layouts never
 overflow; depth shows up as O(depth) heap instead. The output `Doc` is a flat
 arena too — a `Vec<Row>` spine plus two index-linked `Vec`s of shallow nodes

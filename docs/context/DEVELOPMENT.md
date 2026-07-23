@@ -86,7 +86,8 @@ cargo check --all-targets --all-features  # Type checking
 ## Key Dependencies
 
 ### Runtime Dependencies
-- **typeset**: `bumpalo` for bump allocation during compilation
+- **typeset**: none (the compiler is self-contained — only the standard
+  library; the former `bumpalo` bump allocator has been retired)
 - **typeset-parser**: `syn`, `quote`, `proc-macro2` for procedural macros
 
 ### Development Dependencies
@@ -105,6 +106,7 @@ cargo check --all-targets --all-features  # Type checking
   deep-safe. The one `Box`-recursive tree is the public `Layout` input, which
   keeps hand-written iterative `Clone`/`Drop`/`Debug` and is walked exactly
   once, by the `flatten` pass
-- Keep new intermediate state flat and owned; the single bump arena backs
-  `serialize`'s persistent scope accumulators and should stay the only one
+- Keep new intermediate state flat and owned: `Vec`-backed arenas indexed by
+  `u32` ids, with any persistent/shared accumulator a flat parent-linked arena
+  (ids and a `depth` field, never pointers or a bump)
 - Maintain separation between layout construction and compilation phases

@@ -19,11 +19,12 @@
 //! work-stack walk) and the whole pipeline runs in constant native stack: no
 //! layout is too deep to compile, and depth shows up as O(depth) heap instead.
 //! No bump arena remains: every pass, `serialize` included, builds its
-//! accumulators in flat `Vec`-backed arenas it owns and frees on return. Text
-//! lives in the `LayoutArena` and is borrowed all the way down — the arena is
-//! the only early structure that outlives its consumer pass; every other
-//! intermediate drops as soon as the
-//! next representation is built, so peak memory is a narrow window around the
+//! accumulators in flat `Vec`-backed arenas it owns and frees on return.
+//! `flatten` concatenates all text into one buffer and every representation
+//! borrows from it — that small buffer is the only early structure that
+//! outlives its consumer pass (the node arena owns no text and drops right
+//! after `resolve_breaks`); every intermediate drops as soon as the next
+//! representation is built, so peak memory is a narrow window around the
 //! largest pair of adjacent IRs rather than the sum of all of them. The
 //! output [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop`/`Debug`
 //! are derived and non-recursive by construction.
@@ -57,17 +58,22 @@ use crate::compiler::{
 #[allow(clippy::boxed_local)]
 pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     // Flattening is the one step that walks the owning `Box` tree; every later
-    // pass folds flat structures. Text lives in the layout arena and is
-    // borrowed all the way down the pipeline, so the arena outlives every
-    // intermediate; everything else drops as soon as its consumer pass ran.
-    let arena = flatten(*layout);
+    // pass folds flat structures. Text is concatenated into one buffer here and
+    // borrowed all the way down the pipeline; the node arena owns no text, so
+    // only the small text buffer outlives its consumer — everything else, the
+    // node arena included, drops as soon as its consumer pass ran.
+    let (arena, text) = flatten(*layout);
 
     let serial = {
-        let edsl = resolve_breaks(&arena);
-        // serialize builds its scope accumulators in flat arenas it owns, so
-        // its output no longer references them — the Edsl arena drops here.
+        // resolve_breaks reads the node arena but roots the Edsl's text in
+        // `text`, so the node arena is free after this block; serialize builds
+        // its scope accumulators in flat arenas it owns, so its output no
+        // longer references the Edsl arena, which also drops here.
+        let edsl = resolve_breaks(&arena, &text);
         serialize(&edsl)
     };
+    // The node arena is dead now; only `text` lives on to feed `rescope`.
+    drop(arena);
 
     let denull_doc = {
         let line_doc = split_lines(&serial.entries);
