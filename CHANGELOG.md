@@ -10,6 +10,15 @@ by the previous automated release tooling.
 
 ### Performance
 
+* **Line-break decisions are O(1).** `compile` now precomputes two per-object
+  tables in the `Doc`: the flat mid-line extent (neither nest nor pack
+  advances the position mid-line, so it is an exact sum) and the mid-line
+  distance to the first composition boundary. `should_break` is pure
+  arithmetic and `will_fit` only walks the document at the head of a line, so
+  rendering no longer scans up to a line-width per decision. Render cost is
+  now flat in the target width — grp/seq-heavy documents rendered at very
+  large widths ("disable wrapping") were up to 7x slower before. Output is
+  byte-identical; compile pays ~3% to build the tables once.
 * **The renderer's measuring folds reuse their work buffers.** Each line-break
   decision allocated two fresh `Vec`s (the fold's frame stack and its
   inserted-marks undo list); the renderer now owns one set of buffers and

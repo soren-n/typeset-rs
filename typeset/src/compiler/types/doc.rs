@@ -37,6 +37,15 @@ pub(crate) enum FixNode {
     Comp(FixId, FixId, bool),
 }
 
+/// Width of a literal in columns.
+///
+/// `String::len` is the UTF-8 byte length, which over-measures any non-ASCII
+/// text and breaks lines far earlier than the requested width. Layout positions
+/// are column counts, so count characters instead.
+pub(crate) fn text_width(data: &str) -> usize {
+    data.chars().count()
+}
+
 /// One row of the document spine, in document order.
 ///
 /// A `Line` row is always the last row (nothing follows a line); a document that
@@ -61,6 +70,15 @@ pub struct Doc {
     rows: Vec<Row>,
     objs: Vec<ObjNode>,
     fixes: Vec<FixNode>,
+    /// Per-object flat extent: how many columns the object advances when laid
+    /// out mid-line (`head == false`). Mid-line, `Nest`/`Pack` never emit an
+    /// offset, so this is the plain sum of text widths and pads — exact and
+    /// state-independent. See [`DocBuilder::finish`].
+    extents: Vec<usize>,
+    /// Per-object advance to the first composition boundary, mid-line: the sum
+    /// along the left spine, resolving a group as one already-laid-out block
+    /// (its full extent). Exact for the same reason as `extents`.
+    next_comps: Vec<usize>,
 }
 
 impl Doc {
@@ -77,6 +95,16 @@ impl Doc {
     /// The fixed-object arena.
     pub(crate) fn fixes(&self) -> &[FixNode] {
         &self.fixes
+    }
+
+    /// Per-object flat (mid-line) extents.
+    pub(crate) fn extents(&self) -> &[usize] {
+        &self.extents
+    }
+
+    /// Per-object mid-line advances to the first composition boundary.
+    pub(crate) fn next_comps(&self) -> &[usize] {
+        &self.next_comps
     }
 }
 
@@ -110,12 +138,67 @@ impl DocBuilder {
         super::push_node(&mut self.fixes, node)
     }
 
-    /// Assemble the finished document from the collected spine rows.
+    /// Assemble the finished document from the collected spine rows, computing
+    /// the mid-line extent tables the renderer's break decisions read.
+    ///
+    /// Mid-line (`head == false`) neither `Nest` nor `Pack` advances the
+    /// position (their offsets only apply at the head of a line), so an
+    /// object's extent — and its distance to the first composition boundary —
+    /// is a plain sum over the arena. Both arenas are postorder (children
+    /// precede parents), so one forward loop each suffices. Sums saturate: a
+    /// saturated extent is already wider than any target width, which is all
+    /// the comparisons ask.
     pub(crate) fn finish(self, rows: Vec<Row>) -> Doc {
+        let mut fix_extents: Vec<usize> = Vec::with_capacity(self.fixes.len());
+        for node in &self.fixes {
+            let extent = match node {
+                FixNode::Text(data) => text_width(data),
+                FixNode::Comp(left, right, pad) => fix_extents[*left as usize]
+                    .saturating_add(usize::from(*pad))
+                    .saturating_add(fix_extents[*right as usize]),
+            };
+            fix_extents.push(extent);
+        }
+
+        let mut extents: Vec<usize> = Vec::with_capacity(self.objs.len());
+        let mut next_comps: Vec<usize> = Vec::with_capacity(self.objs.len());
+        for node in &self.objs {
+            let (extent, next_comp) = match node {
+                ObjNode::Text(data) => {
+                    let width = text_width(data);
+                    (width, width)
+                }
+                // A fixed object never contains a composition boundary.
+                ObjNode::Fix(fix) => {
+                    let extent = fix_extents[*fix as usize];
+                    (extent, extent)
+                }
+                // A mid-line group is laid out as one opaque block, so the
+                // whole group stands before the next boundary.
+                ObjNode::Grp(child) => {
+                    let extent = extents[*child as usize];
+                    (extent, extent)
+                }
+                ObjNode::Seq(child) | ObjNode::Nest(child) | ObjNode::Pack(_, child) => {
+                    (extents[*child as usize], next_comps[*child as usize])
+                }
+                ObjNode::Comp(left, right, pad) => (
+                    extents[*left as usize]
+                        .saturating_add(usize::from(*pad))
+                        .saturating_add(extents[*right as usize]),
+                    next_comps[*left as usize],
+                ),
+            };
+            extents.push(extent);
+            next_comps.push(next_comp);
+        }
+
         Doc {
             rows,
             objs: self.objs,
             fixes: self.fixes,
+            extents,
+            next_comps,
         }
     }
 }

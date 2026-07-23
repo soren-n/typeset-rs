@@ -19,17 +19,21 @@
 //! the index is absent, so removing exactly those keys restores the caller's
 //! map.
 
-use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row};
+use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row, text_width};
 use std::cmp::max;
 use std::collections::HashMap;
 
-/// The two node slices of a [`Doc`], passed by value (a pair of slice refs) so
-/// the traversals index objects and fixed objects without carrying the whole
-/// document around.
+/// The node slices and extent tables of a [`Doc`], passed by value (a few
+/// slice refs) so the traversals index objects, fixed objects, and precomputed
+/// mid-line extents without carrying the whole document around.
 #[derive(Copy, Clone)]
 struct Arena<'a> {
     objs: &'a [ObjNode],
     fixes: &'a [FixNode],
+    /// Per-object flat mid-line extent (see [`Doc::extents`]).
+    extents: &'a [usize],
+    /// Per-object mid-line advance to the first composition boundary.
+    next_comps: &'a [usize],
 }
 
 impl<'a> Arena<'a> {
@@ -61,15 +65,6 @@ fn make_state(width: usize, tab: usize) -> State {
         lvl: 0,
         pos: 0,
     }
-}
-
-/// Width of a literal in columns.
-///
-/// `String::len` is the UTF-8 byte length, which over-measures any non-ASCII
-/// text and breaks lines far earlier than the requested width. Layout positions
-/// are column counts, so count characters instead.
-fn text_width(data: &str) -> usize {
-    data.chars().count()
 }
 
 fn inc_pos(n: usize, state: State) -> State {
@@ -176,11 +171,11 @@ fn resolve_pack(marks: &mut HashMap<usize, usize>, index: usize, state: State) -
     }
 }
 
-/// Frame for the state-only measuring traversals ([`fold`], in either mode).
+/// Frame for the state-only measuring traversal ([`fold`]).
 ///
-/// These fold a document object into a single position without producing any
-/// output, so a frame only needs to describe the remaining work and any state
-/// field to restore once a child subtree has been folded.
+/// The fold reduces a document object to a single position without producing
+/// any output, so a frame only needs to describe the remaining work and any
+/// state field to restore once a child subtree has been folded.
 enum MFrame {
     Obj(ObjId),
     Fix(FixId),
@@ -193,61 +188,39 @@ enum MFrame {
     FixCompMid(FixId, bool),
 }
 
-/// Which look-ahead the state-only fold performs. The two modes share an
-/// identical traversal and diverge at exactly two nodes — `Grp` and `Comp`.
-#[derive(Debug, Copy, Clone, PartialEq)]
-enum Fold {
-    /// Full extent: fold the entire object, visiting both sides of every `Comp`.
-    Measure,
-    /// Stop at the first composition boundary: visit only the left of a `Comp`,
-    /// and treat a non-`head` `Grp` as an opaque already-measured block.
-    NextComp,
-}
-
-/// Reusable buffers for one nesting level of [`fold`].
-///
-/// The measuring folds run once per line-break decision, so allocating their
-/// work stacks fresh each call dominates rendering cost; instead the renderer
-/// owns two levels of buffers (the [`Fold::NextComp`] fold calls a
-/// [`Fold::Measure`] fold for an opaque group, and `Measure` never recurses,
-/// so two levels are exactly enough) and every fold call reuses them.
+/// Reusable buffers for [`fold`]: its frame stack and its inserted-marks undo
+/// list. The fold runs per head-of-line fit check, so the renderer owns one
+/// set of buffers and every call reuses them instead of allocating.
 #[derive(Default)]
-struct FoldBufs {
+struct Scratch {
     stack: Vec<MFrame>,
     inserted: Vec<usize>,
 }
 
-/// The renderer's reusable fold buffers: one [`FoldBufs`] per nesting level.
-#[derive(Default)]
-struct Scratch {
-    levels: [FoldBufs; 2],
-}
-
-/// Folds `obj` into a single ending position without emitting output (iterative).
+/// Folds `obj` into its ending position without emitting output (iterative):
+/// where `obj` finishes if laid out from `state`. Any marks inserted while
+/// folding are undone before returning, so `marks` is left exactly as the
+/// caller passed it.
 ///
-/// [`Fold::Measure`] returns where `obj` finishes if laid out from `state`;
-/// [`Fold::NextComp`] returns the position of the next composition boundary
-/// reachable from `obj`. Either way, any marks inserted while folding are undone
-/// before returning, so `marks` is left exactly as the caller passed it.
+/// This is the head-of-line slow path of [`will_fit`]: at the head of a line
+/// `Nest`/`Pack` offsets depend on the live indentation level and pack marks,
+/// so the extent must be folded from the actual state. Mid-line the
+/// precomputed [`Doc`] extent tables answer instead, and [`should_break`]
+/// (always mid-line) never folds at all.
 ///
 /// Width-bounded: the position only ever advances while measuring (nothing a
-/// fold visits can move it backwards), and both consumers ([`will_fit`],
-/// [`should_break`]) only compare the result against the target width — so the
-/// fold stops as soon as the position passes it. This keeps the repeated
-/// look-aheads cheap: a comp decision costs at most O(width) regardless of how
-/// large the subtree beyond it is.
+/// fold visits can move it backwards), and the one consumer ([`will_fit`])
+/// only compares the result against the target width — so the fold stops as
+/// soon as the position passes it, costing at most O(width) regardless of how
+/// large the subtree is.
 fn fold(
-    mode: Fold,
     arena: Arena,
     obj: ObjId,
     state: State,
     marks: &mut HashMap<usize, usize>,
-    bufs: &mut [FoldBufs],
+    scratch: &mut Scratch,
 ) -> usize {
-    let (cur, rest) = bufs
-        .split_first_mut()
-        .expect("a fold level has its buffers");
-    let (stack, inserted) = (&mut cur.stack, &mut cur.inserted);
+    let Scratch { stack, inserted } = scratch;
     stack.clear();
     inserted.clear();
     let mut st = state;
@@ -260,20 +233,7 @@ fn fold(
             MFrame::Obj(o) => match arena.obj(o) {
                 ObjNode::Text(data) => st = inc_pos(text_width(data), st),
                 ObjNode::Fix(fix) => stack.push(MFrame::Fix(*fix)),
-                // The first point of divergence: `Measure` always descends;
-                // `NextComp` folds an already-laid-out group as one opaque block.
-                ObjNode::Grp(obj1) => {
-                    // Golden path: descend into the group. Only a non-head group
-                    // under `NextComp` is folded inline as an opaque, already
-                    // laid-out block.
-                    if mode != Fold::NextComp || st.head {
-                        stack.push(MFrame::Obj(*obj1));
-                    } else {
-                        let end = fold(Fold::Measure, arena, *obj1, st, marks, rest);
-                        st = State { pos: end, ..st };
-                    }
-                }
-                ObjNode::Seq(obj1) => stack.push(MFrame::Obj(*obj1)),
+                ObjNode::Grp(obj1) | ObjNode::Seq(obj1) => stack.push(MFrame::Obj(*obj1)),
                 ObjNode::Nest(obj1) => {
                     let lvl = st.lvl;
                     let state1 = indent(st.tab, st);
@@ -295,13 +255,9 @@ fn fold(
                     stack.push(MFrame::RestoreLvl(lvl));
                     stack.push(MFrame::Obj(*obj1));
                 }
-                // The second point of divergence: `Measure` folds both operands
-                // (padding and dropping `head` between them); `NextComp` stops at
-                // the boundary, folding only the left operand.
+                // Fold both operands, padding and dropping `head` between them.
                 ObjNode::Comp(left, right, pad) => {
-                    if mode == Fold::Measure {
-                        stack.push(MFrame::CompMid(*right, *pad));
-                    }
+                    stack.push(MFrame::CompMid(*right, *pad));
                     stack.push(MFrame::Obj(*left));
                 }
             },
@@ -334,6 +290,11 @@ fn fold(
 }
 
 /// Whether `obj` fits within the width if laid out from `state`.
+///
+/// Mid-line this is pure arithmetic on the precomputed extent (neither `Nest`
+/// nor `Pack` advances the position when `head` is false, so the flat extent
+/// is exact); only at the head of a line — where indentation offsets depend on
+/// the live state — does it fold.
 fn will_fit(
     arena: Arena,
     obj: ObjId,
@@ -341,27 +302,17 @@ fn will_fit(
     marks: &mut HashMap<usize, usize>,
     scratch: &mut Scratch,
 ) -> bool {
-    fold(Fold::Measure, arena, obj, state, marks, &mut scratch.levels) <= state.width
+    if !state.head {
+        return state.pos.saturating_add(arena.extents[obj as usize]) <= state.width;
+    }
+    fold(arena, obj, state, marks, scratch) <= state.width
 }
 
-/// Whether the next composition boundary reachable from `obj` passes the width.
-fn should_break(
-    arena: Arena,
-    obj: ObjId,
-    state: State,
-    marks: &mut HashMap<usize, usize>,
-    scratch: &mut Scratch,
-) -> bool {
-    state.broken
-        || state.width
-            < fold(
-                Fold::NextComp,
-                arena,
-                obj,
-                state,
-                marks,
-                &mut scratch.levels,
-            )
+/// Whether the next composition boundary reachable from `obj` passes the
+/// width. Break decisions are made mid-line (`head` is false), where the
+/// precomputed boundary distance is exact — pure arithmetic, no traversal.
+fn should_break(arena: Arena, obj: ObjId, state: State) -> bool {
+    state.broken || state.width < state.pos.saturating_add(arena.next_comps[obj as usize])
 }
 
 /// Frame for the output-producing object traversal.
@@ -466,7 +417,7 @@ fn render_obj(
                     head: false,
                     ..inc_pos(usize::from(pad), state1)
                 };
-                if should_break(arena, right, state3, marks, scratch) {
+                if should_break(arena, right, state3) {
                     let state2 = newline(state1);
                     let offset = get_offset(state2);
                     st = inc_pos(offset, state2);
@@ -517,6 +468,8 @@ pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
     let arena = Arena {
         objs: doc.objs(),
         fixes: doc.fixes(),
+        extents: doc.extents(),
+        next_comps: doc.next_comps(),
     };
     let mut st = make_state(width, tab);
     let mut marks: HashMap<usize, usize> = HashMap::new();
