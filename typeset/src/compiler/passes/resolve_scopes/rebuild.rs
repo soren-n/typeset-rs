@@ -216,8 +216,8 @@ fn visit_line<'a>(
 }
 
 fn visit_fix<'a>(b: &mut Builder<'a>, run: &FixRun<'a>) -> RFixId {
-    // Rebuild the run as a right-nested fixed composition spine. Terms pass
-    // through by borrow; the pads are the run's separator pads.
+    // Rebuild the run as a right-nested fixed composition spine. Terms are
+    // copied through by value; the pads are the run's separator pads.
     let last = *run.terms.last().expect("a fix run has at least one term");
     let mut rfix = b.fix(RebuildFix::Term(last));
     for k in (0..run.seps.len()).rev() {

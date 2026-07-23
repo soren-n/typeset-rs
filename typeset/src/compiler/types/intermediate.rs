@@ -59,7 +59,7 @@ pub struct EdslDoc<'a> {
     pub root: EdslId,
 }
 
-// Serial.
+// SerialDoc.
 //
 // A flat list of leaf entries in document order; each entry is a term plus how
 // it glues to what follows. The entry list is always non-empty and its final

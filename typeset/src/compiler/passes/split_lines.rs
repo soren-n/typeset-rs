@@ -1,4 +1,4 @@
-//! split_lines: Serial → FixedDoc (lift newlines to spine, coalesce fixed comps)
+//! split_lines: SerialDoc entries → FixedDoc (lift newlines to spine, coalesce fixed comps)
 //!
 //! One sweep over the serial entries: a hard line break flushes the current
 //! line, and maximal runs of terms joined by fixed compositions coalesce into

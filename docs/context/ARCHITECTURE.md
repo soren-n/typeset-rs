@@ -34,19 +34,24 @@ The former custom
 `cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
 used, have been removed.
 
-The one deliberate exception is `serialize`, which keeps two small local
-cons-list structs (`TermList`/`CompList`) for its nest/pack and grp/seq path
-accumulators. Unlike the removed `List`, these are genuinely persistent: at a
-`Comp`/`Line` node both operands capture the same parent accumulator, and comp
-accumulators are also captured into the emitted entries, so the tails are shared
-across branches. A `Vec` would force a clone at every branch, so the shared
-cons-list is the right structure here and stays. That sharing is also load-
-bearing for speed: `serialize` turns each composition's enclosing-scope list
-into scope open/close *deltas* by diffing it against the previous composition's
-list, and because the two lists share their outer tail by pointer the diff is a
-short longest-common-suffix walk (`CompList` carries a `depth` field for it).
-Carrying deltas — rather than each composition's full enclosing scope stack —
-keeps the grp/seq passes linear on deeply nested scopes instead of O(n^2).
+The one deliberate exception is `serialize`, which keeps a small local
+cons-list struct (`CompList`) for its grp/seq scope-path accumulator. Unlike
+the removed `List`, it is genuinely persistent: at a `Comp`/`Line` node both
+operands capture the same parent accumulator, and comp accumulators are also
+captured into the emitted entries, so the tails are shared across branches. A
+`Vec` would force a clone at every branch, so the shared cons-list is the right
+structure here and stays. That sharing is also load-bearing for speed:
+`serialize` turns each composition's enclosing-scope list into scope open/close
+*deltas* by diffing it against the previous composition's list, and because the
+two lists share their outer tail by pointer the diff is a short longest-common-
+suffix walk (`CompList` carries a `depth` field for it). Carrying deltas —
+rather than each composition's full enclosing scope stack — keeps the grp/seq
+passes linear on deeply nested scopes instead of O(n^2). (The nest/pack term
+path once had a sibling `TermList` cons-list, but it is now a flat
+parent-linked arena of `PathNode`s that the emitted terms index by id, so
+sibling leaves share their wrapper spine without a per-leaf chain; converting
+`CompList` the same way to drop the last bump is a listed candidate in
+PERFORMANCE.md.)
 
 ### Upstream references
 
@@ -67,9 +72,11 @@ sequence. That sort is the load-bearing ordering guarantee for grp/seq nesting,
 not just a convenience. The still-open scopes are held in a `BTreeMap` keyed by
 their small integer index; the map is threaded linearly (an open inserts, a
 close removes) and its iteration order does not matter, since the edges are
-sorted explicitly. The graph itself is index-linked: nodes and edges live in
-`Vec`s per line, with in/out adjacency as ordered `Vec<EdgeId>` lists that
-`solve` rearranges with plain insert/splice operations.
+sorted explicitly. The graph itself is index-linked: the whole document shares
+one node array and one edge pool, and each node's in/out adjacency is an
+intrusive linked list threaded through the edge pool. `solve` rearranges those
+lists with O(1) pointer rewiring — pop a list head, insert before a known edge,
+splice one list into another — instead of scanning and shifting `Vec`s.
 
 ### typeset-parser crate (`typeset-parser/src/`)
 
