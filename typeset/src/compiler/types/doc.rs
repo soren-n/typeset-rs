@@ -137,10 +137,12 @@ pub(crate) struct DocBuilder {
 }
 
 impl DocBuilder {
-    pub(crate) fn new() -> Self {
+    /// A builder with arena capacities reserved (callers pass the size of the
+    /// representation they are lowering from, a floor on the output size).
+    pub(crate) fn with_capacity(objs: usize, fixes: usize) -> Self {
         DocBuilder {
-            objs: Vec::new(),
-            fixes: Vec::new(),
+            objs: Vec::with_capacity(objs),
+            fixes: Vec::with_capacity(fixes),
         }
     }
 
@@ -240,7 +242,7 @@ mod tests {
 
     /// Builds a single-line document whose object is `Nest^depth(Text("x"))`.
     fn deep_nest_line(depth: usize) -> Doc {
-        let mut b = DocBuilder::new();
+        let mut b = DocBuilder::with_capacity(0, 0);
         let mut id = b.obj(ObjNode::Text("x".to_string()));
         for _ in 0..depth {
             id = b.obj(ObjNode::Nest(id));

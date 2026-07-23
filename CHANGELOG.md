@@ -24,6 +24,11 @@ by the previous automated release tooling.
   vector index (slot count stored in the `Doc`) instead of hashing into a
   `HashMap`; the output `String` reserves the document's text bytes up front.
   Another ~30% off pack-heavy rendering.
+* **The compile passes pre-size their arenas and reuse scratch buffers.**
+  `denull`, `rescope`, and the scope-graph rebuild reserve their output
+  vectors from the known input sizes, and reassociation's chain
+  materialization reuses one pair of scratch vectors instead of allocating
+  per grp/seq boundary. ~8-10% off compilation of grp/seq-heavy documents.
 * **The renderer's measuring folds reuse their work buffers.** Each line-break
   decision allocated two fresh `Vec`s (the fold's frame stack and its
   inserted-marks undo list); the renderer now owns one set of buffers and

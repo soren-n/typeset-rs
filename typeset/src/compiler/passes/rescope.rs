@@ -18,7 +18,9 @@ use crate::compiler::types::{
 
 /// Rescope nest and pack, lowering the flat `DenullDoc` into the heap `Doc`.
 pub fn rescope(doc: DenullDoc) -> Box<Doc> {
-    let mut b = DocBuilder::new();
+    // The output holds at least one node per input node (plus re-applied
+    // props), and exactly one fixed node per input fixed node.
+    let mut b = DocBuilder::with_capacity(doc.objs.len(), doc.fixes.len());
 
     // Fold the fixed-object arena bottom-up. A fix composition keeps only its
     // left operand's props (the right operand's are dropped).

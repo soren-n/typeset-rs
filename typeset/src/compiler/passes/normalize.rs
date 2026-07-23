@@ -229,15 +229,23 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
     let mut tail: Vec<DObjId> = vec![0; n];
     let mut next: Vec<Option<(bool, DObjId)>> = vec![None; n];
 
+    // Scratch for `materialize`, reused across calls: one materialization
+    // runs per grp/seq boundary and per row, so fresh vectors here would be
+    // per-node allocation churn.
+    let mut atoms: Vec<DObjId> = Vec::new();
+    let mut pads: Vec<bool> = Vec::new();
+
     fn materialize<'a>(
         objs: &mut Vec<DenullObj<'a>>,
         atom_out: &[DObjId],
         next: &[Option<(bool, DObjId)>],
         start: DObjId,
+        atoms: &mut Vec<DObjId>,
+        pads: &mut Vec<bool>,
     ) -> DObjId {
         // Collect the chain's atoms (output ids) and the pads between them.
-        let mut atoms: Vec<DObjId> = Vec::new();
-        let mut pads: Vec<bool> = Vec::new();
+        atoms.clear();
+        pads.clear();
         let mut cur = start;
         loop {
             atoms.push(atom_out[cur as usize]);
@@ -265,13 +273,27 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
                 tail[i] = i as DObjId;
             }
             DenullObj::Grp(c) => {
-                let spine = materialize(&mut objs, &atom_out, &next, head[c as usize]);
+                let spine = materialize(
+                    &mut objs,
+                    &atom_out,
+                    &next,
+                    head[c as usize],
+                    &mut atoms,
+                    &mut pads,
+                );
                 atom_out[i] = push_node(&mut objs, DenullObj::Grp(spine));
                 head[i] = i as DObjId;
                 tail[i] = i as DObjId;
             }
             DenullObj::Seq(c) => {
-                let spine = materialize(&mut objs, &atom_out, &next, head[c as usize]);
+                let spine = materialize(
+                    &mut objs,
+                    &atom_out,
+                    &next,
+                    head[c as usize],
+                    &mut atoms,
+                    &mut pads,
+                );
                 atom_out[i] = push_node(&mut objs, DenullObj::Seq(spine));
                 head[i] = i as DObjId;
                 tail[i] = i as DObjId;
@@ -289,12 +311,22 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
         .into_iter()
         .map(|row| match row {
             DenullRow::Empty => DenullRow::Empty,
-            DenullRow::Break(id) => {
-                DenullRow::Break(materialize(&mut objs, &atom_out, &next, head[id as usize]))
-            }
-            DenullRow::Line(id) => {
-                DenullRow::Line(materialize(&mut objs, &atom_out, &next, head[id as usize]))
-            }
+            DenullRow::Break(id) => DenullRow::Break(materialize(
+                &mut objs,
+                &atom_out,
+                &next,
+                head[id as usize],
+                &mut atoms,
+                &mut pads,
+            )),
+            DenullRow::Line(id) => DenullRow::Line(materialize(
+                &mut objs,
+                &atom_out,
+                &next,
+                head[id as usize],
+                &mut atoms,
+                &mut pads,
+            )),
         })
         .collect();
 

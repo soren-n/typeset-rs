@@ -24,8 +24,10 @@ enum Res<Id> {
 
 /// Remove null identities.
 pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
-    let mut objs: Vec<DenullObj<'a>> = Vec::new();
-    let mut fixes: Vec<DenullFix<'a>> = Vec::new();
+    // Every input node yields at most one output node, so the input sizes are
+    // exact capacity bounds.
+    let mut objs: Vec<DenullObj<'a>> = Vec::with_capacity(doc.objs.len());
+    let mut fixes: Vec<DenullFix<'a>> = Vec::with_capacity(doc.fixes.len());
 
     // Fold the fixed-object arena bottom-up (forward, children first).
     let mut fix_res: Vec<Res<DFixId>> = Vec::with_capacity(doc.fixes.len());

@@ -96,8 +96,11 @@ fn close(b: &mut Builder, count: usize, stack: &mut RStack, term: RObjId) -> ROb
 }
 
 pub(super) fn rebuild<'a>(doc: &GraphDoc<'a>) -> RebuildDoc<'a> {
+    // Every graph node yields at least one object, so the node total is a
+    // capacity floor for the object arena.
+    let nodes: usize = doc.iter().map(|line| line.nodes.len()).sum();
     let mut b = Builder {
-        objs: Vec::new(),
+        objs: Vec::with_capacity(nodes),
         fixes: Vec::new(),
     };
     let lines: Vec<RObjId> = doc.iter().map(|line| visit_line(&mut b, line)).collect();
