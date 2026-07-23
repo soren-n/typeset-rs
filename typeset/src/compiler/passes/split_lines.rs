@@ -7,42 +7,79 @@
 //! between them; the split and the coalescing are one forward scan.)
 
 use crate::compiler::types::{
-    FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, SerialComp, SerialEntry, Term,
+    FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, FixedSpan, SerialComp, SerialEntry, Term,
 };
 
-/// Accumulates the line currently being built, plus the fix run currently
-/// being coalesced within it (non-empty `run_terms` means a run is open).
+/// Accumulates the flattened document. Items, line separators, run terms, and
+/// run separators are appended straight into the shared arenas; the line and
+/// fix run currently being built are tracked as start offsets, so a line or run
+/// costs no allocation of its own — only the amortized growth of the arenas.
 #[derive(Default)]
 struct LineAccum<'a> {
-    lines: Vec<FixedLine<'a>>,
+    lines: Vec<FixedLine>,
     items: Vec<FixedItem<'a>>,
-    seps: Vec<FixedComp>,
-    run_terms: Vec<Term<'a>>,
+    item_seps: Vec<FixedComp>,
+    terms: Vec<Term<'a>>,
     run_seps: Vec<FixedComp>,
+    // Start offsets of the line currently being built.
+    line_items_start: u32,
+    line_seps_start: u32,
+    // Start offsets of the fix run currently being coalesced; `run_open` is
+    // false when no run is being built.
+    run_terms_start: u32,
+    run_seps_start: u32,
+    run_open: bool,
 }
 
 impl<'a> LineAccum<'a> {
+    /// Extends (or starts) the open fix run with `term` and the fixed
+    /// composition `comp` that follows it.
+    fn push_fixed(&mut self, term: Term<'a>, comp: FixedComp) {
+        if !self.run_open {
+            self.run_terms_start = self.terms.len() as u32;
+            self.run_seps_start = self.run_seps.len() as u32;
+            self.run_open = true;
+        }
+        self.terms.push(term);
+        self.run_seps.push(comp);
+    }
+
     /// Appends `term` as the line's next item: as the final term of the open
     /// fix run if one is being built, else as a plain term.
     fn push_item(&mut self, term: Term<'a>) {
-        if self.run_terms.is_empty() {
+        if !self.run_open {
             self.items.push(FixedItem::Term(term));
             return;
         }
-        self.run_terms.push(term);
+        self.terms.push(term);
         self.items.push(FixedItem::Fix(FixRun {
-            terms: std::mem::take(&mut self.run_terms),
-            seps: std::mem::take(&mut self.run_seps),
+            terms: FixedSpan {
+                start: self.run_terms_start,
+                end: self.terms.len() as u32,
+            },
+            seps: FixedSpan {
+                start: self.run_seps_start,
+                end: self.run_seps.len() as u32,
+            },
         }));
+        self.run_open = false;
     }
 
     /// Ends the current line with `term` as its last item.
     fn flush_line(&mut self, term: Term<'a>) {
         self.push_item(term);
         self.lines.push(FixedLine {
-            items: std::mem::take(&mut self.items),
-            seps: std::mem::take(&mut self.seps),
+            items: FixedSpan {
+                start: self.line_items_start,
+                end: self.items.len() as u32,
+            },
+            seps: FixedSpan {
+                start: self.line_seps_start,
+                end: self.item_seps.len() as u32,
+            },
         });
+        self.line_items_start = self.items.len() as u32;
+        self.line_seps_start = self.item_seps.len() as u32;
     }
 }
 
@@ -63,18 +100,23 @@ pub fn split_lines<'a>(entries: &[SerialEntry<'a>]) -> FixedDoc<'a> {
                 };
                 if attr.brk.is_fixed() {
                     // A fixed composition: extend (or start) the current run.
-                    acc.run_terms.push(*term);
-                    acc.run_seps.push(comp);
+                    acc.push_fixed(*term, comp);
                 } else {
                     // A non-fixed composition separates items (closing the
                     // open run, if any).
                     acc.push_item(*term);
-                    acc.seps.push(comp);
+                    acc.item_seps.push(comp);
                 }
             }
         }
     }
-    FixedDoc { lines: acc.lines }
+    FixedDoc {
+        lines: acc.lines,
+        items: acc.items,
+        item_seps: acc.item_seps,
+        terms: acc.terms,
+        run_seps: acc.run_seps,
+    }
 }
 
 #[cfg(test)]
@@ -121,11 +163,11 @@ mod tests {
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
-        let [FixedItem::Fix(run)] = &line.items[..] else {
+        let [FixedItem::Fix(run)] = line.items.slice(&out.items) else {
             panic!("expected a single Fix item")
         };
-        assert_eq!(run.terms.len(), DEEP + 1);
-        assert_eq!(run.seps.len(), DEEP);
+        assert_eq!(run.terms.slice(&out.terms).len(), DEEP + 1);
+        assert_eq!(run.seps.slice(&out.run_seps).len(), DEEP);
     }
 
     #[test]
@@ -140,9 +182,10 @@ mod tests {
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
-        assert_eq!(line.items.len(), DEEP + 1);
-        assert_eq!(line.seps.len(), DEEP);
-        assert!(line.items.iter().all(|i| matches!(i, FixedItem::Term(_))));
+        let items = line.items.slice(&out.items);
+        assert_eq!(items.len(), DEEP + 1);
+        assert_eq!(line.seps.slice(&out.item_seps).len(), DEEP);
+        assert!(items.iter().all(|i| matches!(i, FixedItem::Term(_))));
     }
 
     #[test]
@@ -169,10 +212,10 @@ mod tests {
         let [line] = &out.lines[..] else {
             panic!("expected a single line")
         };
-        let [FixedItem::Fix(run), FixedItem::Term(_)] = &line.items[..] else {
+        let [FixedItem::Fix(run), FixedItem::Term(_)] = line.items.slice(&out.items) else {
             panic!("expected a fix run then a plain term")
         };
-        assert_eq!(run.terms.len(), 2);
-        assert_eq!(line.seps.len(), 1);
+        assert_eq!(run.terms.slice(&out.terms).len(), 2);
+        assert_eq!(line.seps.slice(&out.item_seps).len(), 1);
     }
 }

@@ -136,10 +136,10 @@ pub(super) fn rebuild<'a>(doc: &GraphDoc<'_, 'a>) -> RebuildDoc<'a> {
 
 /// Builds one graph node's payload (its line's like-indexed item) into the
 /// arena.
-fn visit_item<'a>(b: &mut Builder<'a>, item: &FixedItem<'a>) -> RObjId {
+fn visit_item<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, item: &FixedItem<'a>) -> RObjId {
     match item {
         FixedItem::Fix(run) => {
-            let fix1 = visit_fix(b, run);
+            let fix1 = visit_fix(b, g, *run);
             b.obj(RebuildObj::Fix(fix1))
         }
         FixedItem::Term(term) => b.obj(RebuildObj::Term(*term)),
@@ -149,23 +149,23 @@ fn visit_item<'a>(b: &mut Builder<'a>, item: &FixedItem<'a>) -> RObjId {
 fn visit_line<'a>(
     b: &mut Builder<'a>,
     g: &GraphDoc<'_, 'a>,
-    gl: &GraphLine<'_, 'a>,
+    gl: &GraphLine,
     st: &mut ContState,
 ) -> RObjId {
     // Walk the nodes in order, threading the continuation stack and the live
     // partial spine. `line.seps[i].pad` is the pad between node `i` and
     // `i + 1`.
     st.reset();
-    let (last_item, rest) = gl
-        .line
-        .items
+    let items = gl.line.items.slice(&g.fixed.items);
+    let seps = gl.line.seps.slice(&g.fixed.item_seps);
+    let (last_item, rest) = items
         .split_last()
         .expect("every line has at least one node");
     for (i, item) in rest.iter().enumerate() {
         let node = &g.nodes[gl.nodes_start as usize + i];
-        let obj = visit_item(b, item);
+        let obj = visit_item(b, g, item);
         let in_deg = node.ins_len as usize;
-        let pad = gl.line.seps[i].pad;
+        let pad = seps[i].pad;
         match (in_deg, node.outs_head == NONE) {
             // In-degree 0, no out-properties: extend the live partial spine.
             (0, true) => st.partials.push((obj, pad)),
@@ -206,7 +206,7 @@ fn visit_line<'a>(
         last_node.outs_head == NONE,
         "Invariant: line ends without open scopes"
     );
-    let obj = visit_item(b, last_item);
+    let obj = visit_item(b, g, last_item);
     let applied = apply_rpartial(b, &st.partials[st.cur_start as usize..], obj);
     let obj2 = close(b, st, last_node.ins_len as usize, applied);
     if st.bounds[..] != [0] {
@@ -215,14 +215,17 @@ fn visit_line<'a>(
     apply_steps(b, st, 0, obj2)
 }
 
-fn visit_fix<'a>(b: &mut Builder<'a>, run: &FixRun<'a>) -> RFixId {
+fn visit_fix<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, run: FixRun) -> RFixId {
     // Rebuild the run as a right-nested fixed composition spine. Terms are
-    // copied through by value; the pads are the run's separator pads.
-    let last = *run.terms.last().expect("a fix run has at least one term");
+    // copied through by value; the pads are the run's separator pads. The run's
+    // terms and separators are ranges into the borrowed `FixedDoc`'s arenas.
+    let terms = run.terms.slice(&g.fixed.terms);
+    let seps = run.seps.slice(&g.fixed.run_seps);
+    let last = *terms.last().expect("a fix run has at least one term");
     let mut rfix = b.fix(RebuildFix::Term(last));
-    for k in (0..run.seps.len()).rev() {
-        let left = b.fix(RebuildFix::Term(run.terms[k]));
-        rfix = b.fix(RebuildFix::Comp(left, rfix, run.seps[k].pad));
+    for k in (0..seps.len()).rev() {
+        let left = b.fix(RebuildFix::Term(terms[k]));
+        rfix = b.fix(RebuildFix::Comp(left, rfix, seps[k].pad));
     }
     rfix
 }

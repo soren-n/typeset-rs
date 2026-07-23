@@ -27,9 +27,31 @@ pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>, scopes: &[Scope]) -> RebuildDoc<'a
 mod tests {
     use super::*;
     use crate::compiler::types::{
-        FixRun, FixedComp, FixedItem, FixedLine, NO_PATH, PathNode, Prop, RebuildFix, RebuildObj,
-        ScopeRange, Term, TermLeaf,
+        FixRun, FixedComp, FixedItem, FixedLine, FixedSpan, NO_PATH, PathNode, Prop, RebuildFix,
+        RebuildObj, ScopeRange, Term, TermLeaf,
     };
+
+    /// Wraps `items` and `item_seps` arenas as a single-line [`FixedDoc`] with
+    /// no fix runs — the shape most of these tests build.
+    fn one_line(items: Vec<FixedItem<'static>>, item_seps: Vec<FixedComp>) -> FixedDoc<'static> {
+        let line = FixedLine {
+            items: FixedSpan {
+                start: 0,
+                end: items.len() as u32,
+            },
+            seps: FixedSpan {
+                start: 0,
+                end: item_seps.len() as u32,
+            },
+        };
+        FixedDoc {
+            lines: vec![line],
+            items,
+            item_seps,
+            terms: Vec::new(),
+            run_seps: Vec::new(),
+        }
+    }
 
     fn text_term(text: &'static str) -> Term<'static> {
         Term {
@@ -59,15 +81,13 @@ mod tests {
         // still proves the phases iterate rather than recurse.
         let depth = 20_000usize;
         let mut items: Vec<FixedItem> = Vec::new();
-        let mut seps: Vec<FixedComp> = Vec::new();
+        let mut item_seps: Vec<FixedComp> = Vec::new();
         for _ in 0..depth {
             items.push(FixedItem::Term(text_term("y")));
-            seps.push(sep());
+            item_seps.push(sep());
         }
         items.push(FixedItem::Term(text_term("z")));
-        let doc = FixedDoc {
-            lines: vec![FixedLine { items, seps }],
-        };
+        let doc = one_line(items, item_seps);
         let out = resolve_scopes(&doc, &[]);
         // One line, rebuilt as a right-nested composition spine.
         let [root] = out.lines[..] else {
@@ -99,12 +119,7 @@ mod tests {
             path,
             leaf: TermLeaf::Text("x"),
         };
-        let doc = FixedDoc {
-            lines: vec![FixedLine {
-                items: vec![FixedItem::Term(term)],
-                seps: Vec::new(),
-            }],
-        };
+        let doc = one_line(vec![FixedItem::Term(term)], Vec::new());
         let out = resolve_scopes(&doc, &[]);
         let [root] = out.lines[..] else {
             panic!("expected one line")
@@ -132,14 +147,27 @@ mod tests {
             run_seps.push(sep());
         }
         terms.push(text_term("z"));
+        // A single line whose one item is a fix run spanning the term and
+        // run-separator arenas.
+        let run = FixRun {
+            terms: FixedSpan {
+                start: 0,
+                end: terms.len() as u32,
+            },
+            seps: FixedSpan {
+                start: 0,
+                end: run_seps.len() as u32,
+            },
+        };
         let doc = FixedDoc {
             lines: vec![FixedLine {
-                items: vec![FixedItem::Fix(FixRun {
-                    terms,
-                    seps: run_seps,
-                })],
-                seps: Vec::new(),
+                items: FixedSpan { start: 0, end: 1 },
+                seps: FixedSpan { start: 0, end: 0 },
             }],
+            items: vec![FixedItem::Fix(run)],
+            item_seps: Vec::new(),
+            terms,
+            run_seps,
         };
         let out = resolve_scopes(&doc, &[]);
         let [root] = out.lines[..] else {
@@ -160,13 +188,27 @@ mod tests {
     #[test]
     fn resolve_scopes_handles_long_doc_spine() {
         // Many document rows exercise the doc-spine walks in all three phases.
+        let mut items: Vec<FixedItem> = Vec::new();
         let lines: Vec<FixedLine> = (0..DEEP)
-            .map(|_| FixedLine {
-                items: vec![FixedItem::Term(text_term("x"))],
-                seps: Vec::new(),
+            .map(|_| {
+                let start = items.len() as u32;
+                items.push(FixedItem::Term(text_term("x")));
+                FixedLine {
+                    items: FixedSpan {
+                        start,
+                        end: items.len() as u32,
+                    },
+                    seps: FixedSpan { start: 0, end: 0 },
+                }
             })
             .collect();
-        let doc = FixedDoc { lines };
+        let doc = FixedDoc {
+            lines,
+            items,
+            item_seps: Vec::new(),
+            terms: Vec::new(),
+            run_seps: Vec::new(),
+        };
         let out = resolve_scopes(&doc, &[]);
         assert_eq!(out.lines.len(), DEEP);
     }

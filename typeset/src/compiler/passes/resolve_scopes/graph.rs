@@ -13,7 +13,7 @@
 //! edge, splice one list into another) is O(1) pointer rewiring and building
 //! the graph allocates nothing per node or edge.
 
-use crate::compiler::types::FixedLine;
+use crate::compiler::types::{FixedDoc, FixedLine};
 
 /// Index of a node in the document-wide node array.
 pub(super) type NodeId = u32;
@@ -76,12 +76,13 @@ pub(super) struct EdgeData {
     pub next_in: EdgeId,
 }
 
-/// One line of the graph: the borrowed `FixedDoc` line (items and separator
-/// pads are read straight from it) and the line's node range in the shared
-/// node array.
+/// One line of the graph: the `FixedDoc` line's ranges (items and separator
+/// pads are read from the borrowed `FixedDoc`'s arenas) and the line's node
+/// range in the shared node array. `FixedLine` is `Copy` ranges now, so this
+/// holds it by value.
 #[derive(Debug)]
-pub(super) struct GraphLine<'b, 'a> {
-    pub line: &'b FixedLine<'a>,
+pub(super) struct GraphLine {
+    pub line: FixedLine,
     pub nodes_start: u32,
     pub nodes_end: u32,
 }
@@ -89,8 +90,11 @@ pub(super) struct GraphLine<'b, 'a> {
 /// The whole document's scope graph.
 #[derive(Debug)]
 pub(super) struct GraphDoc<'b, 'a> {
+    /// The borrowed `FixedDoc` the lines' ranges index into (its item, term,
+    /// and separator arenas back `graphify` and `rebuild`).
+    pub fixed: &'b FixedDoc<'a>,
     /// One entry per line, in document order.
-    pub lines: Vec<GraphLine<'b, 'a>>,
+    pub lines: Vec<GraphLine>,
     /// All lines' nodes, contiguous per line, in document order.
     pub nodes: Vec<NodeData>,
     /// The shared edge pool the intrusive lists thread through.

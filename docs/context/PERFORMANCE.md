@@ -78,11 +78,18 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
 - Render is width-independent (since the extent tables, for all documents)
   and linear in output size.
 - Peak native stack is constant everywhere (flat arenas); depth costs heap.
-- Compiling a plain (no grp/seq/nest) document performs a constant number of
-  heap allocations (~57 for a 128k-node chain) — the arenas amortize
-  everything; scope-heavy documents add ~0.33 allocs/node (was ~1.6 before
-  the satellite/term flattening landed; the remainder is now graphify's
-  BTreeMap of open scopes, the last per-object allocator on the compile path).
+- Compiling *any* document — plain or scope-heavy — now performs a constant
+  number of heap allocations (~57 for a 128k-node chain; ~64 for `json 8 d=5`);
+  the arenas amortize everything. This was not always true: scope-heavy
+  documents used to add ~0.33 allocs/node. Per-pass attribution (2026-07-23)
+  placed ~98% of that in `split_lines`, which built `FixedDoc` with an owned
+  `Vec` per line and an owned `Vec<Term>` + `Vec<FixedComp>` per coalesced
+  fixed run (~2N allocations for N fixed runs). Flattening `FixedDoc` into
+  shared arenas (landed optimization 12) eliminated it. (`graphify`'s
+  open-scope `BTreeMap` — once believed to be this remainder — was never the
+  source: json is a single hard-line-free line, so the map is created once and
+  reused to a depth-bounded peak; resolve_scopes was ~13 of the 65,596
+  allocations.)
 
 ### Costs to know about
 
@@ -93,12 +100,13 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   `flatten`, and each dismantled node's own drop grew a fresh worklist —
   ~2.5 extra alloc/free pairs per node. Fixed 2026-07 (move the `Layout` value
   out of the box instead; skip leaf children): compile got 19-28% faster.
-  With the text-span, satellite-flattening, and flat-term reworks also
-  landed, plain documents now compile with a constant number of heap
-  allocations and grp/seq/nest-heavy ones with ~0.33 per node (now just
-  graphify's BTreeMap of open scopes; serialize's scope accumulator became a
-  flat arena and its bump is gone). The node arenas themselves are amortized
-  by `Vec` growth — the flat-arena design was never the source of the traffic.
+  With the text-span, satellite-flattening, flat-term, and `FixedDoc`-arena
+  reworks also landed, *every* document — plain or grp/seq/nest-heavy — now
+  compiles with a constant number of heap allocations (`json 8 d=5`: ~64). The
+  last per-node allocator was `split_lines`'s per-line and per-fixed-run `Vec`s
+  (landed optimization 12); `serialize`'s scope accumulator became a flat arena
+  and its bump is gone. The node arenas themselves are amortized by `Vec`
+  growth — the flat-arena design was never the source of the traffic.
 - **Was dropping the bump arenas a mistake? No — measured.** The flat `Vec`
   arenas do the same amortization job for node storage that bumpalo did, with
   better locality and eager frees (bumpalo is grow-only, so peak memory would
@@ -109,7 +117,12 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   landed 2026-07 (see landed optimization 7). `serialize`'s persistent scope
   accumulator, the last bump user, later became a flat parent-linked arena
   (landed optimization 10) — the bump is gone entirely, with compile work
-  unchanged and peak memory marginally lower.
+  unchanged and peak memory marginally lower. The ~0.33 allocs/node that used
+  to remain on scope-heavy inputs was `split_lines`'s per-line and per-fixed-
+  run `Vec`s, *not* `graphify` — a per-pass alloc probe put ~98% of it in
+  `split_lines` and only ~13 allocations in all of resolve_scopes. Flattening
+  `FixedDoc` into shared arenas (landed optimization 12) removed it, so
+  scope-heavy compilation is now constant-allocation like plain documents.
 - **Compile dominates render** by roughly 15-25x at width 80. A layout
   compiled once and rendered at several widths amortizes well; per-keystroke
   recompiles pay the full pipeline each time.
@@ -135,9 +148,9 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
 Each verified byte-identical against the OCaml oracle; cumulative effect vs
 the audit baseline: render 3-11x faster by workload; compile 25-32% faster on
 plain word chains and now much more on scope- and nest-heavy documents (json
-trees ~40% faster, deeply-nested `nestwide` up to ~8x); plain-document compile
-down to a constant number of heap allocations, scope-heavy to ~0.33/node; peak
-memory cut 28-90% by workload shape.
+trees ~50% faster, deeply-nested `nestwide` up to ~8x); *every* document now
+compiles with a constant number of heap allocations (scope-heavy included,
+after the `FixedDoc`-arena rework); peak memory cut 28-90% by workload shape.
 
 1. Renderer fold scratch reuse — the measuring folds allocated two `Vec`s per
    break decision (24-48% render).
@@ -201,6 +214,29 @@ memory cut 28-90% by workload shape.
     across the two commits; isolated warmed `perf_probe` distributions
     overlap, confirming flat. Trust `alloc_probe` (exact) and isolated
     `perf_probe` over criterion %-change on binary-layout-shifting refactors.
+12. `FixedDoc` flattened into shared arenas (the former remaining candidate 1
+    — the compile path's last per-node allocator). `split_lines` built
+    `FixedDoc` with an owned `Vec` per line (items + separators) and an owned
+    `Vec<Term>` + `Vec<FixedComp>` per coalesced fixed run, so a document with
+    N fixed runs paid ~2N allocations — ~98% of the ~0.33 allocs/node on
+    scope-heavy inputs (a per-pass alloc probe put 2,593 of `json 6 d=4`'s
+    2,652 compile allocations there, and only 13 in all of resolve_scopes).
+    Items, line separators, run terms, and run separators now live in four
+    shared arenas on `FixedDoc`, with each line and fix run a `(start, end)`
+    range (`FixedSpan`) into them; `split_lines` appends instead of allocating,
+    `graphify`/`rebuild` resolve the ranges against the borrowed `FixedDoc`
+    (node/item index-alignment preserved). Scope-heavy compilation drops to a
+    *constant* allocation count (`json 8 d=5`: 65,596 → 64) — the regime plain
+    documents already had — and runs ~18% faster there (`json 8 d=5` warmed
+    compile ~20.9 → ~17.1 ms). Unlike the layout-shift noise in optimizations
+    10–11, this speedup is backed by the exact alloc delta (65k fewer
+    malloc/free pairs on an allocator-bound compile), not criterion. Byte-
+    identical (OCaml oracle + 40k differential-fuzz rounds).
+    Note: `graphify`'s open-scope `BTreeMap` was previously believed to be this
+    remainder and was investigated first; it is not the source — json is a
+    single hard-line-free line, so the map is created once and reused to a
+    depth-bounded peak. A dense-`Vec` rewrite of it is byte-identical but saves
+    ~0 allocations and slightly regresses peak memory, so it was not landed.
 
 ### Remaining candidates
 

@@ -10,6 +10,19 @@ by the previous automated release tooling.
 
 ### Performance
 
+* **`FixedDoc` is flat: no per-line or per-run allocation.** `split_lines`
+  built `FixedDoc` as a `Vec` of lines, each owning a `Vec` of items and a
+  `Vec` of separators, and each coalesced fixed run owning its own `Vec` of
+  terms and separators — so a document with N fixed runs paid ~2N heap
+  allocations (a scope- and comma-heavy `json` tree made ~half its leaves into
+  length-1 runs). Items, line separators, run terms, and run separators now
+  live in four shared arenas on `FixedDoc`, with each line and fix run holding
+  `(start, end)` ranges into them; `split_lines` appends instead of allocating.
+  This was the compile path's last per-node allocator: scope-heavy compilation
+  drops from ~0.33 allocations per input node to a *constant* (`json 8 d=5`:
+  65,596 to 64 compile allocations), the same constant-allocation regime plain
+  documents already enjoyed, and compiles ~18% faster there. Byte-identical
+  output (OCaml oracle plus 40k differential-fuzz rounds).
 * **Layout text lives in one buffer and the node arena drops early.**
   `flatten` used to move each leaf's text into its own arena node (one heap
   `String` per text), so the whole layout node arena had to live to the end of

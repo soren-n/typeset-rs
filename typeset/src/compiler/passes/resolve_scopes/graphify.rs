@@ -59,16 +59,21 @@ fn apply_comp(
 }
 
 pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>, scopes: &[Scope]) -> GraphDoc<'b, 'a> {
-    let node_total: usize = doc.lines.iter().map(|line| line.items.len()).sum();
+    // Every item across all lines is one node.
+    let node_total = doc.items.len();
     let mut g = GraphDoc {
+        fixed: doc,
         lines: Vec::with_capacity(doc.lines.len()),
         nodes: Vec::with_capacity(node_total),
         edges: Vec::new(),
     };
     // Per-line edge scratch, reused across lines.
     let mut edges: Vec<Edge> = Vec::new();
-    for line in &doc.lines {
-        visit_line(&mut g, line, scopes, &mut edges);
+    // `doc` is passed alongside `g` (not read back through `g.fixed`) so that
+    // resolving a line's item/sep ranges borrows `doc` while `g.nodes` is
+    // pushed to — two disjoint borrows.
+    for &line in &doc.lines {
+        visit_line(&mut g, doc, line, scopes, &mut edges);
     }
     g
 }
@@ -79,27 +84,30 @@ pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>, scopes: &[Scope]) -> Graph
 /// order threads them.
 fn visit_line<'b, 'a>(
     g: &mut GraphDoc<'b, 'a>,
-    line: &'b FixedLine<'a>,
+    doc: &FixedDoc<'a>,
+    line: FixedLine,
     scopes: &[Scope],
     edges: &mut Vec<Edge>,
 ) {
     let start = g.nodes.len() as u32;
     let mut open: OpenScopes = BTreeMap::new();
     edges.clear();
-    for (i, item) in line.items.iter().enumerate() {
+    let items = line.items.slice(&doc.items);
+    let seps = line.seps.slice(&doc.item_seps);
+    for (i, item) in items.iter().enumerate() {
         let index = start + i as u32;
         g.nodes.push(NodeData::new());
         if let FixedItem::Fix(run) = item {
-            for sep in &run.seps {
+            for sep in run.seps.slice(&doc.run_seps) {
                 apply_comp(index, sep, scopes, &mut open, edges);
             }
         }
-        if let Some(sep) = line.seps.get(i) {
+        if let Some(sep) = seps.get(i) {
             apply_comp(index, sep, scopes, &mut open, edges);
         }
     }
     // Close every scope still open at the line's last node.
-    let last_index = start + (line.items.len() - 1) as u32;
+    let last_index = start + (items.len() - 1) as u32;
     for (index, (prop, from)) in &open {
         edges.push((*index, *prop, *from, last_index));
     }

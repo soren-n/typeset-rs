@@ -188,6 +188,26 @@ pub enum SerialComp {
 // by fixed compositions coalesced into single fix items. (This replaces the
 // former LinearDoc + cons-list FixedDoc pair — splitting lines and coalescing
 // fixed runs happen in one sweep over the serial entries.)
+//
+// `lines` is the top-level index; the four element arenas (items, item_seps,
+// run terms, run_seps) are shared across all lines and fix runs, and a line or
+// fix run is just a pair of ranges into them. So `split_lines` appends instead
+// of allocating a `Vec` per line and per coalesced run (the former shape cost
+// ~2 allocations per fixed run — the compile path's last per-node allocator).
+
+/// A half-open range `[start, end)` into one of [`FixedDoc`]'s arenas.
+#[derive(Debug, Copy, Clone)]
+pub struct FixedSpan {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl FixedSpan {
+    /// The elements this range selects from one of `FixedDoc`'s arenas.
+    pub fn slice<'s, T>(&self, buf: &'s [T]) -> &'s [T] {
+        &buf[self.start as usize..self.end as usize]
+    }
+}
 
 /// A composition: its pad flag, the scopes opening here, and the scopes
 /// closing here (ranges into the serial document's shared scope buffer).
@@ -199,30 +219,40 @@ pub struct FixedComp {
 }
 
 /// A maximal run of terms joined by fixed compositions, coalesced into one
-/// unbreakable item. `seps[i]` sits between `terms[i]` and `terms[i + 1]`.
-#[derive(Debug)]
-pub struct FixRun<'a> {
-    pub terms: Vec<Term<'a>>,
-    pub seps: Vec<FixedComp>,
+/// unbreakable item. `terms` and `seps` are ranges into [`FixedDoc`]'s shared
+/// `terms` and `run_seps` arenas; `seps[i]` sits between `terms[i]` and
+/// `terms[i + 1]` (so `terms.len() == seps.len() + 1`).
+#[derive(Debug, Copy, Clone)]
+pub struct FixRun {
+    pub terms: FixedSpan,
+    pub seps: FixedSpan,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum FixedItem<'a> {
     Term(Term<'a>),
-    Fix(FixRun<'a>),
+    Fix(FixRun),
 }
 
-/// One line: its items and the non-fixed compositions separating them.
-/// `seps[i]` sits between `items[i]` and `items[i + 1]`.
-#[derive(Debug)]
-pub struct FixedLine<'a> {
-    pub items: Vec<FixedItem<'a>>,
-    pub seps: Vec<FixedComp>,
+/// One line: ranges into [`FixedDoc`]'s `items` and `item_seps` arenas.
+/// `item_seps[seps.start + i]` is the non-fixed composition between the line's
+/// item `i` and item `i + 1`.
+#[derive(Debug, Copy, Clone)]
+pub struct FixedLine {
+    pub items: FixedSpan,
+    pub seps: FixedSpan,
 }
 
+/// The whole document, flattened. `lines` holds each line's ranges; the four
+/// element arenas are shared across all lines (items and their separators) and
+/// all fix runs (run terms and their separators).
 #[derive(Debug)]
 pub struct FixedDoc<'a> {
-    pub lines: Vec<FixedLine<'a>>,
+    pub lines: Vec<FixedLine>,
+    pub items: Vec<FixedItem<'a>>,
+    pub item_seps: Vec<FixedComp>,
+    pub terms: Vec<Term<'a>>,
+    pub run_seps: Vec<FixedComp>,
 }
 
 // RebuildDoc.
