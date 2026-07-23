@@ -10,6 +10,14 @@ by the previous automated release tooling.
 
 ### Performance
 
+* **Term prop lists live in one shared buffer.** `denull` strips each term's
+  nest/pack wrappers into a single document-wide prop buffer and terms carry
+  `(start, end)` ranges into it, instead of one heap `Vec` per wrapped term.
+  Every downstream prop operation (`rescope`'s prefix factoring included) is
+  range arithmetic on the shared buffer, so `DenullTerm` is now `Copy` and
+  `normalize`'s term moves are free. ~35% fewer compile allocations and ~12%
+  faster compilation on nest-heavy documents (`json`: 1.57 to 1.01 allocs per
+  input node).
 * **Line-break decisions are O(1).** `compile` now precomputes two per-object
   tables in the `Doc`: the flat mid-line extent (neither nest nor pack
   advances the position mid-line, so it is an exact sum) and the mid-line

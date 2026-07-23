@@ -60,7 +60,7 @@ fn leaf_obj<'a>(
 ) -> DObjId {
     match node {
         DenullObj::Fix(fix) => match &fixes[fix as usize] {
-            DenullFix::Term(term) => push_node(objs, DenullObj::Term(term.clone())),
+            DenullFix::Term(term) => push_node(objs, DenullObj::Term(*term)),
             DenullFix::Comp(..) => push_node(objs, DenullObj::Fix(fix)),
         },
         other => push_node(objs, other),
@@ -128,6 +128,7 @@ fn elim_seqs(doc: DenullDoc) -> DenullDoc {
         rows: doc.rows.into_iter().map(|r| map_row(r, &out)).collect(),
         objs,
         fixes: doc.fixes,
+        props: doc.props,
     }
 }
 
@@ -203,6 +204,7 @@ fn elim_grps(doc: DenullDoc) -> DenullDoc {
         rows: doc.rows.into_iter().map(|r| map_row(r, &out)).collect(),
         objs,
         fixes: doc.fixes,
+        props: doc.props,
     }
 }
 
@@ -334,13 +336,14 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
         rows,
         objs,
         fixes: doc.fixes,
+        props: doc.props,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::DenullTerm;
+    use crate::compiler::types::{DenullTerm, Props};
 
     /// Far past where a native-stack recursion could survive; with flat arenas
     /// the folds are plain loops, so this now guards sizing behavior only.
@@ -348,7 +351,7 @@ mod tests {
 
     fn term(text: &'static str) -> DenullObj<'static> {
         DenullObj::Term(DenullTerm {
-            props: Vec::new(),
+            props: Props { start: 0, end: 0 },
             text,
         })
     }
@@ -358,6 +361,7 @@ mod tests {
             rows: vec![DenullRow::Line(root)],
             objs,
             fixes: Vec::new(),
+            props: Vec::new(),
         }
     }
 
@@ -425,6 +429,7 @@ mod tests {
             rows,
             objs,
             fixes: Vec::new(),
+            props: Vec::new(),
         };
         let out = normalize(doc);
         assert_eq!(out.rows.len(), DEEP);

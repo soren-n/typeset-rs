@@ -13,27 +13,34 @@
 
 use crate::compiler::types::{
     DenullDoc, DenullFix, DenullObj, DenullRow, Doc, DocBuilder, FixId, FixNode, ObjId, ObjNode,
-    Prop, Row,
+    Prop, Props, Row,
 };
 
 /// Rescope nest and pack, lowering the flat `DenullDoc` into the heap `Doc`.
 pub fn rescope(doc: DenullDoc) -> Box<Doc> {
+    let DenullDoc {
+        rows,
+        objs,
+        fixes,
+        props,
+    } = doc;
+
     // The output holds at least one node per input node (plus re-applied
     // props), and exactly one fixed node per input fixed node.
-    let mut b = DocBuilder::with_capacity(doc.objs.len(), doc.fixes.len());
+    let mut b = DocBuilder::with_capacity(objs.len(), fixes.len());
 
     // Fold the fixed-object arena bottom-up. A fix composition keeps only its
-    // left operand's props (the right operand's are dropped).
-    let mut fix_res: Vec<(Vec<Prop>, FixId)> = Vec::with_capacity(doc.fixes.len());
-    for node in doc.fixes {
+    // left operand's props (the right operand's are dropped). Prop lists are
+    // ranges into the shared buffer, so results are plain copyable pairs.
+    let mut fix_res: Vec<(Props, FixId)> = Vec::with_capacity(fixes.len());
+    for node in fixes {
         let val = match node {
             DenullFix::Term(term) => {
                 let span = b.text(term.text);
                 (term.props, b.fix(FixNode::Text(span)))
             }
             DenullFix::Comp(left, right, pad) => {
-                let l_props = std::mem::take(&mut fix_res[left as usize].0);
-                let left1 = fix_res[left as usize].1;
+                let (l_props, left1) = fix_res[left as usize];
                 let right1 = fix_res[right as usize].1;
                 (l_props, b.fix(FixNode::Comp(left1, right1, pad)))
             }
@@ -43,50 +50,54 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
 
     // Fold the object arena bottom-up the same way; compositions factor the
     // common prop prefix out around themselves.
-    let mut obj_res: Vec<(Vec<Prop>, ObjId)> = Vec::with_capacity(doc.objs.len());
-    for node in doc.objs {
+    let mut obj_res: Vec<(Props, ObjId)> = Vec::with_capacity(objs.len());
+    for node in objs {
         let val = match node {
             DenullObj::Term(term) => {
                 let span = b.text(term.text);
                 (term.props, b.obj(ObjNode::Text(span)))
             }
             DenullObj::Fix(fix) => {
-                let props = std::mem::take(&mut fix_res[fix as usize].0);
-                (props, b.obj(ObjNode::Fix(fix_res[fix as usize].1)))
+                let (fix_props, fix1) = fix_res[fix as usize];
+                (fix_props, b.obj(ObjNode::Fix(fix1)))
             }
             DenullObj::Grp(obj1) => {
-                let props = std::mem::take(&mut obj_res[obj1 as usize].0);
-                (props, b.obj(ObjNode::Grp(obj_res[obj1 as usize].1)))
+                let (obj_props, id1) = obj_res[obj1 as usize];
+                (obj_props, b.obj(ObjNode::Grp(id1)))
             }
             DenullObj::Seq(obj1) => {
-                let props = std::mem::take(&mut obj_res[obj1 as usize].0);
-                (props, b.obj(ObjNode::Seq(obj_res[obj1 as usize].1)))
+                let (obj_props, id1) = obj_res[obj1 as usize];
+                (obj_props, b.obj(ObjNode::Seq(id1)))
             }
             DenullObj::Comp(left, right, pad) => {
-                let mut l_props = std::mem::take(&mut obj_res[left as usize].0);
-                let r_props = std::mem::take(&mut obj_res[right as usize].0);
+                let (l_props, left1) = obj_res[left as usize];
+                let (r_props, right1) = obj_res[right as usize];
                 // Factor the common prop prefix out around the composition;
-                // apply the leftovers to each operand individually. `l_props`
-                // is reused as the common prefix (truncated in place).
-                let k = common_prefix_len(&l_props, &r_props);
-                let left2 = wrap_props(&mut b, &l_props[k..], obj_res[left as usize].1);
-                let right2 = wrap_props(&mut b, &r_props[k..], obj_res[right as usize].1);
+                // apply the leftovers to each operand individually. Prefix and
+                // leftovers are subranges of the operands' ranges.
+                let l = l_props.slice(&props);
+                let r = r_props.slice(&props);
+                let k = common_prefix_len(l, r);
+                let left2 = wrap_props(&mut b, &l[k..], left1);
+                let right2 = wrap_props(&mut b, &r[k..], right1);
                 let comp = b.obj(ObjNode::Comp(left2, right2, pad));
-                l_props.truncate(k);
-                (l_props, comp)
+                let prefix = Props {
+                    start: l_props.start,
+                    end: l_props.start + k as u32,
+                };
+                (prefix, comp)
             }
         };
         obj_res.push(val);
     }
 
     // Map the spine rows, re-applying each root's remaining prop prefix.
-    let rows: Vec<Row> = doc
-        .rows
+    let rows: Vec<Row> = rows
         .into_iter()
         .map(|row| {
             let mut finish = |id: u32| {
-                let props = std::mem::take(&mut obj_res[id as usize].0);
-                wrap_props(&mut b, &props, obj_res[id as usize].1)
+                let (root_props, root) = obj_res[id as usize];
+                wrap_props(&mut b, root_props.slice(&props), root)
             };
             match row {
                 DenullRow::Empty => Row::Empty,
@@ -127,18 +138,33 @@ mod tests {
     /// the folds are plain loops, so this now guards sizing behavior only.
     const DEEP: usize = 50_000;
 
-    fn nest_term(depth: usize, text: &'static str) -> DenullObj<'static> {
+    /// Pushes `props` onto the shared buffer and returns a term over them.
+    fn prop_term(
+        buf: &mut Vec<Prop>,
+        props: impl IntoIterator<Item = Prop>,
+        text: &'static str,
+    ) -> DenullObj<'static> {
+        let start = buf.len() as u32;
+        buf.extend(props);
         DenullObj::Term(DenullTerm {
-            props: vec![Prop::Nest; depth],
+            props: Props {
+                start,
+                end: buf.len() as u32,
+            },
             text,
         })
     }
 
-    fn line_doc(objs: Vec<DenullObj>, root: DObjId) -> DenullDoc {
+    fn nest_term(buf: &mut Vec<Prop>, depth: usize, text: &'static str) -> DenullObj<'static> {
+        prop_term(buf, std::iter::repeat_n(Prop::Nest, depth), text)
+    }
+
+    fn line_doc(objs: Vec<DenullObj>, props: Vec<Prop>, root: DObjId) -> DenullDoc {
         DenullDoc {
             rows: vec![DenullRow::Line(root)],
             objs,
             fixes: Vec::new(),
+            props,
         }
     }
 
@@ -152,9 +178,10 @@ mod tests {
 
     #[test]
     fn rescope_reapplies_deep_nest_props() {
+        let mut buf: Vec<Prop> = Vec::new();
         let mut objs: Vec<DenullObj> = Vec::new();
-        let root = push_node(&mut objs, nest_term(DEEP, "x"));
-        let out = rescope(line_doc(objs, root));
+        let root = push_node(&mut objs, nest_term(&mut buf, DEEP, "x"));
+        let out = rescope(line_doc(objs, buf, root));
         // The stripped nests are re-applied around the text.
         let mut count = 0usize;
         let mut cur = line_root(&out);
@@ -170,11 +197,12 @@ mod tests {
     fn rescope_factors_deep_shared_nest_prefix() {
         // Both operands share a Nest^DEEP prefix: rescoping lifts all of it
         // out around the composition.
+        let mut buf: Vec<Prop> = Vec::new();
         let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push_node(&mut objs, nest_term(DEEP, "a"));
-        let bx = push_node(&mut objs, nest_term(DEEP, "b"));
+        let a = push_node(&mut objs, nest_term(&mut buf, DEEP, "a"));
+        let bx = push_node(&mut objs, nest_term(&mut buf, DEEP, "b"));
         let root = push_node(&mut objs, DenullObj::Comp(a, bx, false));
-        let out = rescope(line_doc(objs, root));
+        let out = rescope(line_doc(objs, buf, root));
         let mut count = 0usize;
         let mut cur = line_root(&out);
         while let ObjNode::Nest(inner) = out.objs()[cur as usize] {
@@ -194,23 +222,12 @@ mod tests {
     fn rescope_splits_diverging_prop_prefixes() {
         // Left is Nest(text), right is Pack(text): no common prefix, so each
         // operand keeps its own wrapper under the composition.
+        let mut buf: Vec<Prop> = Vec::new();
         let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push_node(
-            &mut objs,
-            DenullObj::Term(DenullTerm {
-                props: vec![Prop::Nest],
-                text: "a",
-            }),
-        );
-        let bx = push_node(
-            &mut objs,
-            DenullObj::Term(DenullTerm {
-                props: vec![Prop::Pack(3)],
-                text: "b",
-            }),
-        );
+        let a = push_node(&mut objs, prop_term(&mut buf, [Prop::Nest], "a"));
+        let bx = push_node(&mut objs, prop_term(&mut buf, [Prop::Pack(3)], "b"));
         let root = push_node(&mut objs, DenullObj::Comp(a, bx, true));
-        let out = rescope(line_doc(objs, root));
+        let out = rescope(line_doc(objs, buf, root));
         let ObjNode::Comp(left, right, pad) = out.objs()[line_root(&out) as usize] else {
             panic!("expected a comp root")
         };
@@ -222,13 +239,14 @@ mod tests {
     #[test]
     fn rescope_handles_deep_comp_object() {
         // Right-nested comp of plain terms.
+        let mut buf: Vec<Prop> = Vec::new();
         let mut objs: Vec<DenullObj> = Vec::new();
-        let mut cur = push_node(&mut objs, nest_term(0, "z"));
+        let mut cur = push_node(&mut objs, nest_term(&mut buf, 0, "z"));
         for _ in 0..DEEP {
-            let left = push_node(&mut objs, nest_term(0, "y"));
+            let left = push_node(&mut objs, nest_term(&mut buf, 0, "y"));
             cur = push_node(&mut objs, DenullObj::Comp(left, cur, false));
         }
-        let out = rescope(line_doc(objs, cur));
+        let out = rescope(line_doc(objs, buf, cur));
         let mut count = 0usize;
         let mut walk = line_root(&out);
         while let ObjNode::Comp(_left, right, _) = out.objs()[walk as usize] {
@@ -242,17 +260,19 @@ mod tests {
     fn rescope_fix_comp_keeps_left_props_only() {
         let mut objs: Vec<DenullObj> = Vec::new();
         let mut fixes: Vec<DenullFix> = Vec::new();
+        // Both fix terms carry one Nest; their ranges share the buffer.
+        let buf = vec![Prop::Nest, Prop::Nest];
         let fa = push_node(
             &mut fixes,
             DenullFix::Term(DenullTerm {
-                props: vec![Prop::Nest],
+                props: Props { start: 0, end: 1 },
                 text: "a",
             }),
         );
         let fb = push_node(
             &mut fixes,
             DenullFix::Term(DenullTerm {
-                props: vec![Prop::Nest],
+                props: Props { start: 1, end: 2 },
                 text: "b",
             }),
         );
@@ -262,6 +282,7 @@ mod tests {
             rows: vec![DenullRow::Line(root)],
             objs,
             fixes,
+            props: buf,
         };
         let out = rescope(doc);
         // The left operand's nest surfaces around the fix; the right's is
@@ -276,15 +297,20 @@ mod tests {
 
     #[test]
     fn rescope_handles_long_doc_spine() {
+        let mut buf: Vec<Prop> = Vec::new();
         let mut objs: Vec<DenullObj> = Vec::new();
         let mut rows: Vec<DenullRow> = Vec::new();
         for _ in 0..DEEP {
-            rows.push(DenullRow::Break(push_node(&mut objs, nest_term(0, "x"))));
+            rows.push(DenullRow::Break(push_node(
+                &mut objs,
+                nest_term(&mut buf, 0, "x"),
+            )));
         }
         let doc = DenullDoc {
             rows,
             objs,
             fixes: Vec::new(),
+            props: buf,
         };
         let out = rescope(doc);
         // Eod-terminated spine: DEEP Break rows and no Line row.

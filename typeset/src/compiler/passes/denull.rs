@@ -8,8 +8,8 @@
 //! no bump arena backs it.
 
 use crate::compiler::types::{
-    DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, DenullTerm, Prop, RebuildDoc,
-    RebuildFix, RebuildObj, Term, push_node,
+    DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, DenullTerm, Prop, Props,
+    RebuildDoc, RebuildFix, RebuildObj, Term, push_node,
 };
 
 /// Result of denulling an object: nothing survived (`None`); an object
@@ -28,12 +28,14 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
     // exact capacity bounds.
     let mut objs: Vec<DenullObj<'a>> = Vec::with_capacity(doc.objs.len());
     let mut fixes: Vec<DenullFix<'a>> = Vec::with_capacity(doc.fixes.len());
+    // The shared prop buffer every surviving term's props range indexes.
+    let mut props: Vec<Prop> = Vec::new();
 
     // Fold the fixed-object arena bottom-up (forward, children first).
     let mut fix_res: Vec<Res<DFixId>> = Vec::with_capacity(doc.fixes.len());
     for node in &doc.fixes {
         let res = match node {
-            RebuildFix::Term(term) => match strip_term(term) {
+            RebuildFix::Term(term) => match strip_term(&mut props, term) {
                 None => Res::None,
                 Some(term1) => Res::Some(push_node(&mut fixes, DenullFix::Term(term1))),
             },
@@ -51,7 +53,7 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
     let mut obj_res: Vec<Res<DObjId>> = Vec::with_capacity(doc.objs.len());
     for node in &doc.objs {
         let res = match node {
-            RebuildObj::Term(term) => match strip_term(term) {
+            RebuildObj::Term(term) => match strip_term(&mut props, term) {
                 None => Res::None,
                 Some(term1) => Res::Some(push_node(&mut objs, DenullObj::Term(term1))),
             },
@@ -96,7 +98,12 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>) -> DenullDoc<'a> {
         _ => {}
     }
 
-    DenullDoc { rows, objs, fixes }
+    DenullDoc {
+        rows,
+        objs,
+        fixes,
+        props,
+    }
 }
 
 /// The composition rule shared by the object and fix folds: a dropped left
@@ -137,19 +144,30 @@ fn wrap_obj<'a>(
 }
 
 /// Denulls a term chain: `Null` and empty text vanish (wrappers and all);
-/// otherwise the nest/pack wrappers are collected outermost-first into a flat
-/// prop list over the text leaf.
-fn strip_term<'a>(term: &Term<'a>) -> Option<DenullTerm<'a>> {
-    let mut props: Vec<Prop> = Vec::new();
+/// otherwise the nest/pack wrappers are collected outermost-first into the
+/// shared prop buffer and the term records the range they landed in. A term
+/// that vanishes rolls its wrappers back off the buffer.
+fn strip_term<'a>(props: &mut Vec<Prop>, term: &Term<'a>) -> Option<DenullTerm<'a>> {
+    let start = props.len();
     let mut cur = term;
     loop {
         match cur {
-            Term::Null => break None,
+            Term::Null => {
+                props.truncate(start);
+                break None;
+            }
             Term::Text(data) => {
                 break if data.is_empty() {
+                    props.truncate(start);
                     None
                 } else {
-                    Some(DenullTerm { props, text: data })
+                    Some(DenullTerm {
+                        props: Props {
+                            start: start as u32,
+                            end: props.len() as u32,
+                        },
+                        text: data,
+                    })
                 };
             }
             Term::Nest(term1) => {
@@ -226,8 +244,9 @@ mod tests {
             panic!("expected a single term line");
         };
         assert_eq!(t.text, "x");
-        assert_eq!(t.props.len(), DEEP);
-        assert!(t.props.iter().all(|p| matches!(p, Prop::Nest)));
+        let props = t.props.slice(&out.props);
+        assert_eq!(props.len(), DEEP);
+        assert!(props.iter().all(|p| matches!(p, Prop::Nest)));
     }
 
     #[test]

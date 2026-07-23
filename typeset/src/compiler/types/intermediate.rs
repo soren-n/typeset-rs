@@ -219,13 +219,31 @@ pub enum Prop {
     Pack(u64),
 }
 
-/// A denulled term: its nest/pack wrappers (outermost first) over a non-empty
-/// text leaf. The chain shape of [`Term`] carries no other information, so
-/// post-denulling it is stored stripped — `rescope` factors these prop lists
-/// directly.
-#[derive(Debug, Clone)]
+/// A term's prop list: a `start..end` range into the document's shared prop
+/// buffer ([`DenullDoc::props`]). Every prop-list operation downstream —
+/// `rescope`'s prefix factoring splits a list into a common prefix and two
+/// leftover suffixes — yields subranges, so ranges into one shared buffer
+/// replace a per-term `Vec` without any copying.
+#[derive(Debug, Copy, Clone)]
+pub struct Props {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl Props {
+    /// The props this range selects from the document's shared buffer.
+    pub fn slice<'p>(&self, buf: &'p [Prop]) -> &'p [Prop] {
+        &buf[self.start as usize..self.end as usize]
+    }
+}
+
+/// A denulled term: its nest/pack wrappers (outermost first, as a range into
+/// the document's shared prop buffer) over a non-empty text leaf. The chain
+/// shape of [`Term`] carries no other information, so post-denulling it is
+/// stored stripped — `rescope` factors these prop lists directly.
+#[derive(Debug, Copy, Clone)]
 pub struct DenullTerm<'a> {
-    pub props: Vec<Prop>,
+    pub props: Props,
     pub text: &'a str,
 }
 
@@ -262,6 +280,8 @@ pub struct DenullDoc<'a> {
     pub objs: Vec<DenullObj<'a>>,
     /// Fixed-object arena in postorder: children precede parents.
     pub fixes: Vec<DenullFix<'a>>,
+    /// The shared prop buffer every [`DenullTerm`]'s `props` range indexes.
+    pub props: Vec<Prop>,
 }
 
 // The final pass, `rescope`, lowers `DenullDoc` straight into the owned heap
