@@ -90,8 +90,10 @@ cd tests/tester && dune exec ./bin/main.exe
 
 ### Performance Tests
 ```bash
-cargo bench -p typeset
+cargo bench -p typeset            # both suites
+cargo bench -p typeset --bench scaling   # asymptotics only
 ```
+See [PERFORMANCE.md](PERFORMANCE.md) for the benchmarking/profiling guide.
 
 ## Test Infrastructure
 

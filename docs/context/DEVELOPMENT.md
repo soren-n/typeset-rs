@@ -44,9 +44,14 @@ cargo test --all --all-features
 # OCaml only (requires setup)
 cd tests/tester && dune exec ./bin/main.exe
 
-# Benchmarks
-cargo bench -p typeset
+# Benchmarks (small-input latency + asymptotic scaling suites)
+cargo bench -p typeset --bench layout_performance
+cargo bench -p typeset --bench scaling
 ```
+
+Profiling probes (`examples/perf_probe.rs`, `examples/alloc_probe.rs`) and the
+full benchmarking/profiling guide live in
+[PERFORMANCE.md](PERFORMANCE.md).
 
 ## Examples
 

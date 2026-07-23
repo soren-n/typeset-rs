@@ -33,5 +33,6 @@ For comprehensive information, see context documents in `/docs/context/`:
 - **[DEVELOPMENT.md](docs/context/DEVELOPMENT.md)**: Build commands, testing, examples, dependencies
 - **[DSL_SYNTAX.md](docs/context/DSL_SYNTAX.md)**: Complete DSL reference, operators, constructors, examples  
 - **[TESTING.md](docs/context/TESTING.md)**: Test strategy, Rust + OCaml testing, running tests
+- **[PERFORMANCE.md](docs/context/PERFORMANCE.md)**: Benchmarking, profiling, audit findings, optimization candidates
 - **[CI_CD.md](docs/context/CI_CD.md)**: GitHub workflows, semantic versioning, release process
 - **[GIT_HOOKS.md](docs/context/GIT_HOOKS.md)**: Pre-commit hooks, quality enforcement, troubleshooting

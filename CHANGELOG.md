@@ -6,6 +6,39 @@ entry for each release before tagging it (see the release steps in
 [Semantic Versioning](https://semver.org/). Entries below `3.2.1` were generated
 by the previous automated release tooling.
 
+## [Unreleased]
+
+### Performance
+
+* **The renderer's measuring folds reuse their work buffers.** Each line-break
+  decision allocated two fresh `Vec`s (the fold's frame stack and its
+  inserted-marks undo list); the renderer now owns one set of buffers and
+  threads them through every fold. Render output is byte-identical and
+  24-48% faster across the audit workloads (pack-heavy layouts gained most).
+* **Layout teardown no longer allocates.** The iterative `Drop` and `flatten`
+  dismantled the `Box<Layout>` tree with `mem::take` on each child box, which
+  allocates a placeholder box per edge (`Box::default()`), and every
+  dismantled node's own drop grew a fresh worklist — ~2.5 alloc/free pairs
+  per node of pure overhead. Children now move out of their boxes by value
+  (leaf children skipped), so dropping a tree performs a single allocation
+  (the worklist) and compile is 19-28% faster across the audit workloads.
+
+### Added
+
+* **A scaling benchmark suite** (`cargo bench -p typeset --bench scaling`):
+  compile and render at sizes that expose asymptotics, including a nest-depth
+  sweep and a render width sweep, complementing the small-input
+  `layout_performance` bench.
+* **A profiling probe** (`typeset/examples/perf_probe.rs`): scalable workload
+  generators with CSV timing output and a `loop=1` mode for attaching
+  sampling profilers.
+* **An allocation probe** (`typeset/examples/alloc_probe.rs`): per-phase heap
+  traffic counts (allocs/frees/reallocs/bytes, per input node) via a counting
+  global allocator.
+* **[docs/context/PERFORMANCE.md](docs/context/PERFORMANCE.md)**: how to
+  benchmark and profile the crate, plus the 2026-07 resource-usage audit's
+  findings and ranked optimization candidates.
+
 ## [4.0.0](https://github.com/soren-n/typeset-rs/compare/v3.2.1...v4.0.0) (2026-07-22)
 
 A **major version bump**: the entries below include breaking API changes.
