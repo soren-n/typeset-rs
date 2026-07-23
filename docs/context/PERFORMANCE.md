@@ -75,9 +75,13 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
 - Every compile pass is linear in its input; compile time scales linearly for
   word chains, hard-line spines, fix runs, JSON-like trees, and grp/seq
   nesting (the old graphify O(n^2) stays fixed).
-- Render is width-independent for documents without grp/seq (`wide`, `packs`
-  flat across width 20 → 100k) and linear in output size.
+- Render is width-independent (since the extent tables, for all documents)
+  and linear in output size.
 - Peak native stack is constant everywhere (flat arenas); depth costs heap.
+- Compiling a plain (no grp/seq/nest) document performs a constant number of
+  heap allocations (~57 for a 128k-node chain) — the arenas amortize
+  everything; scope-heavy documents add ~1.6 allocs/node in satellite
+  structures (see remaining candidates).
 
 ### Costs to know about
 
@@ -87,63 +91,80 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   child allocated a placeholder box per edge in both the iterative `Drop` and
   `flatten`, and each dismantled node's own drop grew a fresh worklist —
   ~2.5 extra alloc/free pairs per node. Fixed 2026-07 (move the `Layout` value
-  out of the box instead; skip leaf children): compile got 19-28% faster and
-  now performs ~0.5 heap allocs per node on plain documents (essentially just
-  `rescope`'s per-text `String` copy) and ~2.2 on grp/seq/nest-heavy ones
-  (per-node satellite `Vec`s in graphify/rebuild/denull plus uncapacitied
-  growth). The node arenas themselves are already amortized by `Vec` growth
-  (~170 reallocs per 128k-node compile) — the flat-arena design is not the
-  source of the traffic.
+  out of the box instead; skip leaf children): compile got 19-28% faster.
+  With the text-span rework also landed, plain documents now compile with a
+  constant number of heap allocations and grp/seq/nest-heavy ones with ~1.6
+  per node (the remaining satellite `Vec`s in graphify/rebuild/denull). The
+  node arenas themselves are amortized by `Vec` growth — the flat-arena
+  design was never the source of the traffic.
 - **Was dropping the bump arenas a mistake? No — measured.** The flat `Vec`
   arenas do the same amortization job for node storage that bumpalo did, with
   better locality and eager frees (bumpalo is grow-only, so peak memory would
   be higher). What the bump removal genuinely re-introduced is per-object
   malloc for the small per-node satellite collections on scope-heavy inputs
-  (~1.7 allocs/node on `json`); the better-than-bump fix is flattening those
-  into shared side arrays with ranges (candidate list below). `serialize`
+  (~1.6 allocs/node on `json`); the better-than-bump fix is flattening those
+  into shared side arrays with ranges (remaining candidate 1). `serialize`
   keeps its bump because its persistent accumulators share structure — the one
   place bump semantics are load-bearing.
-- **Compile dominates render** by roughly 5-15x at width 80. A layout compiled
-  once and rendered at several widths amortizes well; per-keystroke recompiles
-  pay the full pipeline each time.
+- **Compile dominates render** by roughly 15-25x at width 80. A layout
+  compiled once and rendered at several widths amortizes well; per-keystroke
+  recompiles pay the full pipeline each time.
 - **Nest/pack wrapper distribution is O(leaves × wrapper depth).**
   `serialize` materializes the accumulated nest/pack path at every leaf,
   `denull` strips it to a prop list, `rescope` re-factors shared prefixes.
   `nestwide` confirms compile grows linearly in depth × leaves. Fine for
   code-shaped depth (~10-100); quadratic if depth grows with document size.
-- **Render look-ahead is width-bounded, so grp/seq-heavy documents cost more
-  at large widths.** Each `Seq` runs a full `will_fit` measure and nested seqs
-  re-measure their subtrees; cost per decision is O(min(width, subtree
-  extent)). The JSON workload renders ~5x slower at width 100k than at 20.
-  Using a huge width to "disable wrapping" buys worst-case look-ahead.
 - **Peak memory is ~0.5-1 KB per input node** (e.g. 188 MiB for a 512k-node
   chain; 899 MiB for a 1.3M-node JSON tree). Every intermediate representation
   stays alive until `compile` returns, because later IRs borrow text and terms
   from earlier ones; the peak is the sum of all of them plus the `Doc`.
 
-### Optimization candidates, best first
+### Landed optimizations (2026-07)
 
-Done (2026-07): renderer fold scratch reuse (24-48% render win) and
-zero-allocation layout teardown in `Drop`/`flatten` (19-28% compile win; tree
-drop went from 2.5 allocs/node to one allocation total).
+Each verified byte-identical against the OCaml oracle; cumulative effect vs
+the audit baseline: render 3-11x faster by workload, compile 26-32% faster,
+plain-document compile down to a constant number of heap allocations.
 
-1. **Precompute flat extents for `will_fit`.** A subtree without nest/pack is
-   state-independent when measured flat; a one-pass bottom-up extent table in
-   the `Doc` would make most `Seq` fit checks O(1) instead of O(width),
-   removing the width sensitivity above (the Oppen/prettyplease approach).
-2. **Flatten per-node satellite collections and cut per-pass churn.** Store
-   graphify's `ins`/`outs`, denull's props, and rebuild's continuation lists
-   as ranges into shared side arrays (CSR-style) instead of one `Vec` per
-   node; `with_capacity` or reuse the vectors that grow (the `json` workload
-   does ~0.65 reallocs per node); consider fusing the three normalize folds'
-   rebuilds. This recovers the per-object amortization the old bump arenas
-   provided, with better locality.
-3. **Stop copying text in `rescope`.** Move the `String`s out of the
-   `LayoutArena` (they are owned there and dead afterwards) or store one
-   shared text buffer plus spans in `Doc`. Saves one malloc + copy per text
-   node (the remaining ~0.5 allocs/node on plain documents) and shrinks `Doc`.
-4. **Replace the renderer's pack-marks `HashMap` with a dense `Vec`** (pack
-   indices are dense DFS counters; SipHash per lookup is waste). Only matters
-   for pack-heavy layouts.
+1. Renderer fold scratch reuse — the measuring folds allocated two `Vec`s per
+   break decision (24-48% render).
+2. Zero-allocation layout teardown — `mem::take` on `Box` children allocated
+   a placeholder box per edge in `Drop`/`flatten` (19-28% compile; tree drop
+   is now one allocation total).
+3. Mid-line extent tables in the `Doc` — mid-line, nest/pack never advance
+   the position, so flat extents and next-boundary distances are exact
+   precomputable sums; `should_break` is pure arithmetic and `will_fit` only
+   folds at the head of a line. Removed the O(width) look-ahead entirely
+   (width-100k rendering 7x faster; render now flat in width).
+4. Dense pack-mark vector (pack indices are dense DFS counters) and a
+   pre-sized output `String` (~30% off pack-heavy rendering).
+5. Pass arena pre-sizing and reassociation scratch reuse (~8-10% compile on
+   grp/seq-heavy documents).
+6. Text spans — `Doc` text nodes are 8-byte spans into one shared `String`;
+   the renderer's per-row frame stack is reused (many-row rendering 2.25x
+   faster; text nodes a quarter of their former size).
 
-Ideas 1-4 are unimplemented; benchmark with `scaling` baselines before/after.
+### Remaining candidates
+
+1. **Flatten the remaining satellite collections.** graphify's `ins`/`outs`,
+   denull's props lists, and rebuild's continuation vectors still cost ~1.6
+   allocs/node on scope-heavy documents; CSR-style ranges into shared side
+   arrays would finish the job (solve's in-place list surgery is the hard
+   part).
+2. **Flat term representation from `serialize` onward.** The bump-allocated
+   `Term` wrapper chains are the last pointer-linked IR and the source of the
+   O(leaves × depth) memory above; `(props-range, text)` terms would delete
+   `strip_term` and likely retire the remaining `Bump`.
+3. **Break the borrow chain to drop IRs early.** Text moving through the
+   pipeline (rather than being borrowed from the `LayoutArena`) would let
+   early IRs drop mid-compile; estimated 30-50% peak-memory cut.
+4. **Selective pass fusion.** The two normalize elimination folds have nearly
+   identical shapes; fusing them saves one full arena rebuild. Fuse further
+   only with care — the pass-per-file structure is a deliberate legibility
+   choice.
+5. **Arena-native construction** (builder API or macro-emitted arenas) to
+   skip the `Box` tree entirely; public-API surface, only worth it if
+   compile-per-keystroke latency becomes a use case.
+6. **CI regression gating** — run the `scaling` bench (or instruction counts
+   via iai-callgrind/CodSpeed on a Linux runner) automatically.
+
+Benchmark any of these with `scaling` baselines before/after.
