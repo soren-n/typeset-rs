@@ -17,11 +17,30 @@ pub(crate) type ObjId = u32;
 /// Index into a [`Doc`]'s fixed-object arena ([`Doc::fixes`]).
 pub(crate) type FixId = u32;
 
-/// A node in the object arena. Children are arena indices, not owning boxes, so
-/// a node is a shallow record and the whole arena drops/clones without recursion.
+/// A byte range into a [`Doc`]'s shared text buffer ([`Doc::text`]).
+///
+/// Texts live concatenated in one `String` rather than as one heap `String`
+/// per node: a text node is then a shallow 8-byte record, and building or
+/// dropping a document touches one buffer instead of one allocation per text.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct Span {
+    start: u32,
+    end: u32,
+}
+
+impl Span {
+    /// The spanned slice of `text` (the document's shared buffer).
+    pub(crate) fn resolve<'a>(&self, text: &'a str) -> &'a str {
+        &text[self.start as usize..self.end as usize]
+    }
+}
+
+/// A node in the object arena. Children are arena indices, not owning boxes,
+/// and text is a [`Span`] into the shared buffer, so a node is a shallow
+/// record and the whole arena drops/clones without recursion.
 #[derive(Clone, Debug)]
 pub(crate) enum ObjNode {
-    Text(String),
+    Text(Span),
     Fix(FixId),
     Grp(ObjId),
     Seq(ObjId),
@@ -33,7 +52,7 @@ pub(crate) enum ObjNode {
 /// A node in the fixed-object arena (the subset of objects that never break).
 #[derive(Clone, Debug)]
 pub(crate) enum FixNode {
-    Text(String),
+    Text(Span),
     Comp(FixId, FixId, bool),
 }
 
@@ -70,6 +89,8 @@ pub struct Doc {
     rows: Vec<Row>,
     objs: Vec<ObjNode>,
     fixes: Vec<FixNode>,
+    /// All node text, concatenated; nodes hold [`Span`]s into it.
+    text: String,
     /// Per-object flat extent: how many columns the object advances when laid
     /// out mid-line (`head == false`). Mid-line, `Nest`/`Pack` never emit an
     /// offset, so this is the plain sum of text widths and pads — exact and
@@ -83,8 +104,6 @@ pub struct Doc {
     /// Pack indices are dense DFS counters assigned during compilation, so
     /// the renderer keys its marks by plain vector index.
     packs: usize,
-    /// Total text bytes across both arenas, used to pre-size the output.
-    text_bytes: usize,
 }
 
 impl Doc {
@@ -103,6 +122,11 @@ impl Doc {
         &self.fixes
     }
 
+    /// The shared text buffer node [`Span`]s resolve against.
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
     /// Per-object flat (mid-line) extents.
     pub(crate) fn extents(&self) -> &[usize] {
         &self.extents
@@ -118,9 +142,9 @@ impl Doc {
         self.packs
     }
 
-    /// Total text bytes across both arenas (an output-size floor).
+    /// Total text bytes (an output-size floor).
     pub(crate) fn text_bytes(&self) -> usize {
-        self.text_bytes
+        self.text.len()
     }
 }
 
@@ -134,6 +158,7 @@ impl Doc {
 pub(crate) struct DocBuilder {
     objs: Vec<ObjNode>,
     fixes: Vec<FixNode>,
+    text: String,
 }
 
 impl DocBuilder {
@@ -143,6 +168,21 @@ impl DocBuilder {
         DocBuilder {
             objs: Vec::with_capacity(objs),
             fixes: Vec::with_capacity(fixes),
+            text: String::new(),
+        }
+    }
+
+    /// Append `data` to the shared text buffer and return its span.
+    pub(crate) fn text(&mut self, data: &str) -> Span {
+        let start = self.text.len();
+        self.text.push_str(data);
+        let end = self.text.len();
+        // Spans are u32 byte offsets; a document with 4 GiB of text is far
+        // outside anything the renderer could produce output for anyway.
+        assert!(end <= u32::MAX as usize, "document text exceeds span range");
+        Span {
+            start: start as u32,
+            end: end as u32,
         }
     }
 
@@ -167,16 +207,12 @@ impl DocBuilder {
     /// saturated extent is already wider than any target width, which is all
     /// the comparisons ask.
     pub(crate) fn finish(self, rows: Vec<Row>) -> Doc {
-        let mut text_bytes: usize = 0;
         let mut packs: usize = 0;
 
         let mut fix_extents: Vec<usize> = Vec::with_capacity(self.fixes.len());
         for node in &self.fixes {
             let extent = match node {
-                FixNode::Text(data) => {
-                    text_bytes += data.len();
-                    text_width(data)
-                }
+                FixNode::Text(span) => text_width(span.resolve(&self.text)),
                 FixNode::Comp(left, right, pad) => fix_extents[*left as usize]
                     .saturating_add(usize::from(*pad))
                     .saturating_add(fix_extents[*right as usize]),
@@ -191,9 +227,8 @@ impl DocBuilder {
                 packs = packs.max(*index as usize + 1);
             }
             let (extent, next_comp) = match node {
-                ObjNode::Text(data) => {
-                    text_bytes += data.len();
-                    let width = text_width(data);
+                ObjNode::Text(span) => {
+                    let width = text_width(span.resolve(&self.text));
                     (width, width)
                 }
                 // A fixed object never contains a composition boundary.
@@ -225,10 +260,10 @@ impl DocBuilder {
             rows,
             objs: self.objs,
             fixes: self.fixes,
+            text: self.text,
             extents,
             next_comps,
             packs,
-            text_bytes,
         }
     }
 }
@@ -243,7 +278,8 @@ mod tests {
     /// Builds a single-line document whose object is `Nest^depth(Text("x"))`.
     fn deep_nest_line(depth: usize) -> Doc {
         let mut b = DocBuilder::with_capacity(0, 0);
-        let mut id = b.obj(ObjNode::Text("x".to_string()));
+        let span = b.text("x");
+        let mut id = b.obj(ObjNode::Text(span));
         for _ in 0..depth {
             id = b.obj(ObjNode::Nest(id));
         }

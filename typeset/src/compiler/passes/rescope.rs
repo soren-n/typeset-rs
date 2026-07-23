@@ -27,7 +27,10 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
     let mut fix_res: Vec<(Vec<Prop>, FixId)> = Vec::with_capacity(doc.fixes.len());
     for node in doc.fixes {
         let val = match node {
-            DenullFix::Term(term) => (term.props, b.fix(FixNode::Text(term.text.to_string()))),
+            DenullFix::Term(term) => {
+                let span = b.text(term.text);
+                (term.props, b.fix(FixNode::Text(span)))
+            }
             DenullFix::Comp(left, right, pad) => {
                 let l_props = std::mem::take(&mut fix_res[left as usize].0);
                 let left1 = fix_res[left as usize].1;
@@ -43,7 +46,10 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
     let mut obj_res: Vec<(Vec<Prop>, ObjId)> = Vec::with_capacity(doc.objs.len());
     for node in doc.objs {
         let val = match node {
-            DenullObj::Term(term) => (term.props, b.obj(ObjNode::Text(term.text.to_string()))),
+            DenullObj::Term(term) => {
+                let span = b.text(term.text);
+                (term.props, b.obj(ObjNode::Text(span)))
+            }
             DenullObj::Fix(fix) => {
                 let props = std::mem::take(&mut fix_res[fix as usize].0);
                 (props, b.obj(ObjNode::Fix(fix_res[fix as usize].1)))

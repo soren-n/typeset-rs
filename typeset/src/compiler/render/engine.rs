@@ -18,7 +18,7 @@
 //! before returning — measurement only ever inserts a mark when the slot is
 //! empty, so clearing exactly those slots restores the caller's marks.
 
-use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row, text_width};
+use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row, Span, text_width};
 use std::cmp::max;
 
 /// Empty pack-mark slot. Marks record line positions, which are column counts
@@ -32,6 +32,8 @@ const NO_MARK: usize = usize::MAX;
 struct Arena<'a> {
     objs: &'a [ObjNode],
     fixes: &'a [FixNode],
+    /// The shared text buffer node spans resolve against.
+    text: &'a str,
     /// Per-object flat mid-line extent (see [`Doc::extents`]).
     extents: &'a [usize],
     /// Per-object mid-line advance to the first composition boundary.
@@ -45,6 +47,10 @@ impl<'a> Arena<'a> {
 
     fn fix(&self, id: FixId) -> &'a FixNode {
         &self.fixes[id as usize]
+    }
+
+    fn text(&self, span: Span) -> &'a str {
+        span.resolve(self.text)
     }
 }
 
@@ -190,13 +196,15 @@ enum MFrame {
     FixCompMid(FixId, bool),
 }
 
-/// Reusable buffers for [`fold`]: its frame stack and its inserted-marks undo
-/// list. The fold runs per head-of-line fit check, so the renderer owns one
-/// set of buffers and every call reuses them instead of allocating.
+/// Reusable renderer buffers: [`fold`]'s frame stack and inserted-marks undo
+/// list, plus [`render_obj`]'s frame stack. The fold runs per head-of-line
+/// fit check and `render_obj` once per row, so the renderer owns one set of
+/// buffers and every call reuses them instead of allocating.
 #[derive(Default)]
 struct Scratch {
     stack: Vec<MFrame>,
     inserted: Vec<usize>,
+    frames: Vec<RFrame>,
 }
 
 /// Folds `obj` into its ending position without emitting output (iterative):
@@ -220,9 +228,9 @@ fn fold(
     obj: ObjId,
     state: State,
     marks: &mut [usize],
-    scratch: &mut Scratch,
+    stack: &mut Vec<MFrame>,
+    inserted: &mut Vec<usize>,
 ) -> usize {
-    let Scratch { stack, inserted } = scratch;
     stack.clear();
     inserted.clear();
     let mut st = state;
@@ -233,7 +241,8 @@ fn fold(
         }
         match frame {
             MFrame::Obj(o) => match arena.obj(o) {
-                ObjNode::Text(data) => st = inc_pos(text_width(data), st),
+                // A text's flat extent is exactly its width; no need to rescan.
+                ObjNode::Text(_) => st = inc_pos(arena.extents[o as usize], st),
                 ObjNode::Fix(fix) => stack.push(MFrame::Fix(*fix)),
                 ObjNode::Grp(obj1) | ObjNode::Seq(obj1) => stack.push(MFrame::Obj(*obj1)),
                 ObjNode::Nest(obj1) => {
@@ -264,7 +273,7 @@ fn fold(
                 }
             },
             MFrame::Fix(f) => match arena.fix(f) {
-                FixNode::Text(data) => st = inc_pos(text_width(data), st),
+                FixNode::Text(span) => st = inc_pos(text_width(arena.text(*span)), st),
                 FixNode::Comp(left, right, pad) => {
                     stack.push(MFrame::FixCompMid(*right, *pad));
                     stack.push(MFrame::Fix(*left));
@@ -302,12 +311,13 @@ fn will_fit(
     obj: ObjId,
     state: State,
     marks: &mut [usize],
-    scratch: &mut Scratch,
+    stack: &mut Vec<MFrame>,
+    inserted: &mut Vec<usize>,
 ) -> bool {
     if !state.head {
         return state.pos.saturating_add(arena.extents[obj as usize]) <= state.width;
     }
-    fold(arena, obj, state, marks, scratch) <= state.width
+    fold(arena, obj, state, marks, stack, inserted) <= state.width
 }
 
 /// Whether the next composition boundary reachable from `obj` passes the
@@ -348,13 +358,20 @@ fn render_obj(
     result: &mut String,
 ) {
     let mut st = *state;
-    let mut stack: Vec<RFrame> = vec![RFrame::Obj(obj)];
+    let Scratch {
+        stack: fold_stack,
+        inserted,
+        frames: stack,
+    } = scratch;
+    stack.clear();
+    stack.push(RFrame::Obj(obj));
     while let Some(frame) = stack.pop() {
         match frame {
             RFrame::Obj(o) => match arena.obj(o) {
-                ObjNode::Text(data) => {
-                    st = inc_pos(text_width(data), st);
-                    result.push_str(data);
+                // A text's flat extent is exactly its width; no need to rescan.
+                ObjNode::Text(span) => {
+                    st = inc_pos(arena.extents[o as usize], st);
+                    result.push_str(arena.text(*span));
                 }
                 ObjNode::Fix(fix) => stack.push(RFrame::Fix(*fix)),
                 ObjNode::Grp(obj1) => {
@@ -368,7 +385,7 @@ fn render_obj(
                 ObjNode::Seq(obj1) => {
                     // A sequence that doesn't fit renders broken; either way
                     // the child renders next.
-                    if !will_fit(arena, *obj1, st, marks, scratch) {
+                    if !will_fit(arena, *obj1, st, marks, fold_stack, inserted) {
                         stack.push(RFrame::RestoreBreak(st.broken));
                         st = State { broken: true, ..st };
                     }
@@ -401,7 +418,8 @@ fn render_obj(
                 }
             },
             RFrame::Fix(f) => match arena.fix(f) {
-                FixNode::Text(data) => {
+                FixNode::Text(span) => {
+                    let data = arena.text(*span);
                     st = inc_pos(text_width(data), st);
                     result.push_str(data);
                 }
@@ -470,6 +488,7 @@ pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
     let arena = Arena {
         objs: doc.objs(),
         fixes: doc.fixes(),
+        text: doc.text(),
         extents: doc.extents(),
         next_comps: doc.next_comps(),
     };

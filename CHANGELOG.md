@@ -24,6 +24,12 @@ by the previous automated release tooling.
   vector index (slot count stored in the `Doc`) instead of hashing into a
   `HashMap`; the output `String` reserves the document's text bytes up front.
   Another ~30% off pack-heavy rendering.
+* **Document text lives in one shared buffer.** `Doc` text nodes hold 8-byte
+  spans into a single concatenated `String` instead of one heap `String`
+  each, and the renderer's per-row frame stack is reused across rows.
+  Compiling a plain word chain now performs ~57 heap allocations total
+  (previously one per text node), text nodes shrink to a quarter of their
+  size, and rendering many-row documents is ~2x faster.
 * **The compile passes pre-size their arenas and reuse scratch buffers.**
   `denull`, `rescope`, and the scope-graph rebuild reserve their output
   vectors from the known input sizes, and reassociation's chain
