@@ -2,10 +2,13 @@
 //!
 //! Reads the solved scope graph per line and rebuilds an explicit composition
 //! spine (grp/seq wrappers and left compositions) into the flat postorder
-//! [`RebuildDoc`] arena.
+//! [`RebuildDoc`] arena. Node payloads and pads are read straight from the
+//! borrowed `FixedDoc` line (nodes are index-aligned with the line's items).
 
-use super::graph::{GraphDoc, GraphFixRun, LineGraph, NodeItem, Property};
-use crate::compiler::types::{RFixId, RObjId, RebuildDoc, RebuildFix, RebuildObj, push_node};
+use super::graph::{GraphDoc, GraphLine, NONE, NodeData, Property};
+use crate::compiler::types::{
+    FixRun, FixedItem, RFixId, RObjId, RebuildDoc, RebuildFix, RebuildObj, push_node,
+};
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
 /// indices always already exist.
@@ -68,8 +71,8 @@ fn apply_rcont(b: &mut Builder, cont: &[RStep], obj: RObjId) -> RObjId {
 }
 
 // Composes `partial` into the top continuation, then pushes a grp/seq
-// continuation for each property.
-fn open(props: &[Property], stack: &mut RStack, partial: RPartial) {
+// continuation for each of the node's out-edge properties (in list order).
+fn open(g: &GraphDoc<'_, '_>, node: &NodeData, stack: &mut RStack, partial: RPartial) {
     // Prepend a Partial step onto the current top continuation (a `push` in
     // the reversed-storage convention), then push a fresh single-step
     // continuation per property.
@@ -77,11 +80,13 @@ fn open(props: &[Property], stack: &mut RStack, partial: RPartial) {
         .last_mut()
         .expect("Invariant")
         .push(RStep::Partial(partial));
-    for prop in props {
-        stack.push(match prop {
+    let mut e = node.outs_head;
+    while e != NONE {
+        stack.push(match g.edges[e as usize].prop {
             Property::Grp => vec![RStep::Grp],
             Property::Seq => vec![RStep::Seq],
         });
+        e = g.edges[e as usize].next_out;
     }
 }
 
@@ -95,15 +100,18 @@ fn close(b: &mut Builder, count: usize, stack: &mut RStack, term: RObjId) -> ROb
     result
 }
 
-pub(super) fn rebuild<'a>(doc: &GraphDoc<'a>) -> RebuildDoc<'a> {
+pub(super) fn rebuild<'a>(doc: &GraphDoc<'_, 'a>) -> RebuildDoc<'a> {
     // Every graph node yields at least one object, so the node total is a
     // capacity floor for the object arena.
-    let nodes: usize = doc.iter().map(|line| line.nodes.len()).sum();
     let mut b = Builder {
-        objs: Vec::with_capacity(nodes),
+        objs: Vec::with_capacity(doc.nodes.len()),
         fixes: Vec::new(),
     };
-    let lines: Vec<RObjId> = doc.iter().map(|line| visit_line(&mut b, line)).collect();
+    let lines: Vec<RObjId> = doc
+        .lines
+        .iter()
+        .map(|line| visit_line(&mut b, doc, line))
+        .collect();
     RebuildDoc {
         lines,
         objs: b.objs,
@@ -111,32 +119,35 @@ pub(super) fn rebuild<'a>(doc: &GraphDoc<'a>) -> RebuildDoc<'a> {
     }
 }
 
-/// Builds one graph node's payload into the arena.
-fn visit_item<'a>(b: &mut Builder<'a>, item: &NodeItem<'a>) -> RObjId {
+/// Builds one graph node's payload (its line's like-indexed item) into the
+/// arena.
+fn visit_item<'a>(b: &mut Builder<'a>, item: &FixedItem<'a>) -> RObjId {
     match item {
-        NodeItem::Fix(run) => {
+        FixedItem::Fix(run) => {
             let fix1 = visit_fix(b, run);
             b.obj(RebuildObj::Fix(fix1))
         }
-        NodeItem::Term(term) => b.obj(RebuildObj::Term(term)),
+        FixedItem::Term(term) => b.obj(RebuildObj::Term(term)),
     }
 }
 
-fn visit_line<'a>(b: &mut Builder<'a>, g: &LineGraph<'a>) -> RObjId {
+fn visit_line<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, gl: &GraphLine<'_, 'a>) -> RObjId {
     // Walk the nodes in order, threading the continuation stack and the left
-    // composition spine (partial). `g.pads[i]` is the pad between node `i` and
-    // `i + 1`. The initial stack holds one identity continuation.
+    // composition spine (partial). `line.seps[i].pad` is the pad between node
+    // `i` and `i + 1`. The initial stack holds one identity continuation.
     let mut stack: RStack = vec![Vec::new()];
     let mut partial: RPartial = Vec::new();
-    let (last, rest) = g
-        .nodes
+    let (last_item, rest) = gl
+        .line
+        .items
         .split_last()
         .expect("every line has at least one node");
-    for (i, node) in rest.iter().enumerate() {
-        let obj = visit_item(b, &node.item);
-        let in_deg = node.ins.len();
-        let pad = g.pads[i];
-        match (in_deg, node.outs.is_empty()) {
+    for (i, item) in rest.iter().enumerate() {
+        let node = &g.nodes[gl.nodes_start as usize + i];
+        let obj = visit_item(b, item);
+        let in_deg = node.ins_len as usize;
+        let pad = gl.line.seps[i].pad;
+        match (in_deg, node.outs_head == NONE) {
             // In-degree 0, no out-properties: extend the partial spine.
             (0, true) => partial.push((obj, pad)),
             // In-degree > 0, no out-properties: close the incoming scopes,
@@ -149,12 +160,7 @@ fn visit_line<'a>(b: &mut Builder<'a>, g: &LineGraph<'a>) -> RObjId {
             // In-degree 0, has out-properties: open new scopes, then
             // start a fresh partial from this object.
             (0, false) => {
-                let props: Vec<Property> = node
-                    .outs
-                    .iter()
-                    .map(|&e| g.edges[e as usize].prop)
-                    .collect();
-                open(&props, &mut stack, std::mem::take(&mut partial));
+                open(g, node, &mut stack, std::mem::take(&mut partial));
                 partial = vec![(obj, pad)];
             }
             (_, false) => unreachable!("Invariant"),
@@ -162,27 +168,28 @@ fn visit_line<'a>(b: &mut Builder<'a>, g: &LineGraph<'a>) -> RObjId {
     }
     // Final node of the line: it never has out-properties. Close any incoming
     // scopes, then apply the one remaining (identity) continuation.
+    let last_node = &g.nodes[gl.nodes_end as usize - 1];
     assert!(
-        last.outs.is_empty(),
+        last_node.outs_head == NONE,
         "Invariant: line ends without open scopes"
     );
-    let obj = visit_item(b, &last.item);
+    let obj = visit_item(b, last_item);
     let applied = apply_rpartial(b, &partial, obj);
-    let obj2 = close(b, last.ins.len(), &mut stack, applied);
+    let obj2 = close(b, last_node.ins_len as usize, &mut stack, applied);
     let [cont] = &stack[..] else {
         unreachable!("Invariant")
     };
     apply_rcont(b, cont, obj2)
 }
 
-fn visit_fix<'a>(b: &mut Builder<'a>, run: &GraphFixRun<'a>) -> RFixId {
+fn visit_fix<'a>(b: &mut Builder<'a>, run: &FixRun<'a>) -> RFixId {
     // Rebuild the run as a right-nested fixed composition spine. Terms pass
-    // through by borrow.
+    // through by borrow; the pads are the run's separator pads.
     let last = *run.terms.last().expect("a fix run has at least one term");
     let mut rfix = b.fix(RebuildFix::Term(last));
-    for k in (0..run.pads.len()).rev() {
+    for k in (0..run.seps.len()).rev() {
         let left = b.fix(RebuildFix::Term(run.terms[k]));
-        rfix = b.fix(RebuildFix::Comp(left, rfix, run.pads[k]));
+        rfix = b.fix(RebuildFix::Comp(left, rfix, run.seps[k].pad));
     }
     rfix
 }

@@ -18,6 +18,16 @@ by the previous automated release tooling.
   `normalize`'s term moves are free. ~35% fewer compile allocations and ~12%
   faster compilation on nest-heavy documents (`json`: 1.57 to 1.01 allocs per
   input node).
+* **The scope graph is intrusive lists over shared arrays.** The whole
+  document now shares one node array and one edge pool; a node's incident
+  edges are intrusive linked lists threaded through the pool instead of two
+  heap `Vec`s per node, and graph nodes borrow their line's items rather than
+  cloning fixed runs and pad lists. Solving the graph — pop a list head,
+  insert before a known edge, splice one list into another — became O(1)
+  pointer rewiring, which also removes the linear position scans the old
+  vector surgery needed. Building the graph allocates nothing per node or
+  edge (`json`: 1.01 to 0.55 compile allocs per input node, compile another
+  ~13% faster).
 * **Line-break decisions are O(1).** `compile` now precomputes two per-object
   tables in the `Doc`: the flat mid-line extent (neither nest nor pack
   advances the position mid-line, so it is an exact sum) and the mid-line
