@@ -19,6 +19,11 @@ by the previous automated release tooling.
   now flat in the target width — grp/seq-heavy documents rendered at very
   large widths ("disable wrapping") were up to 7x slower before. Output is
   byte-identical; compile pays ~3% to build the tables once.
+* **Pack marks are a dense vector and the output buffer is pre-sized.** Pack
+  indices are dense DFS counters, so the renderer keys its marks by plain
+  vector index (slot count stored in the `Doc`) instead of hashing into a
+  `HashMap`; the output `String` reserves the document's text bytes up front.
+  Another ~30% off pack-heavy rendering.
 * **The renderer's measuring folds reuse their work buffers.** Each line-break
   decision allocated two fresh `Vec`s (the fold's frame stack and its
   inserted-marks undo list); the renderer now owns one set of buffers and

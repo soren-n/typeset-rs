@@ -9,19 +9,21 @@
 //! heap-allocated frame stacks (`Vec<...Frame>`) of indices instead of on the
 //! native stack, so arbitrarily deep layouts render with a constant native stack.
 //!
-//! Pack marks are held in a plain owned [`HashMap`] threaded as `&mut`. The
-//! renderer only ever looks a mark up by index or inserts one, never iterating
-//! in key order, so an unordered map is the right fit. In the real output pass
+//! Pack marks live in a dense `Vec<usize>` threaded as `&mut`, indexed by pack
+//! index (compilation assigns them as dense DFS counters; [`Doc::packs`] is the
+//! slot count) with `NO_MARK` as the empty sentinel. In the real output pass
 //! (`render_obj`) marks accumulate forward and are never rolled back. The
-//! look-ahead measuring folds (`will_fit`/`should_break`, via `fold`) must not
-//! leak their marks into the caller, so each records the indices it inserts and
-//! removes them before returning — measurement only ever inserts a mark when
-//! the index is absent, so removing exactly those keys restores the caller's
-//! map.
+//! head-of-line measuring fold ([`will_fit`] via [`fold`]) must not leak its
+//! marks into the caller, so it records the indices it inserts and clears them
+//! before returning — measurement only ever inserts a mark when the slot is
+//! empty, so clearing exactly those slots restores the caller's marks.
 
 use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row, text_width};
 use std::cmp::max;
-use std::collections::HashMap;
+
+/// Empty pack-mark slot. Marks record line positions, which are column counts
+/// bounded far below `usize::MAX`.
+const NO_MARK: usize = usize::MAX;
 
 /// The node slices and extent tables of a [`Doc`], passed by value (a few
 /// slice refs) so the traversals index objects, fixed objects, and precomputed
@@ -141,12 +143,12 @@ struct PackStep {
 /// diverge only in what they do with the result: output renders `offset` spaces
 /// and keeps the mark; the measuring folds ignore `offset` and drop a `fresh`
 /// mark before returning.
-fn resolve_pack(marks: &mut HashMap<usize, usize>, index: usize, state: State) -> PackStep {
+fn resolve_pack(marks: &mut [usize], index: usize, state: State) -> PackStep {
     let lvl = state.lvl;
-    match marks.get(&index) {
-        None => {
+    match marks[index] {
+        NO_MARK => {
             let pos = state.pos;
-            marks.insert(index, pos);
+            marks[index] = pos;
             PackStep {
                 state: State {
                     lvl: max(lvl, pos),
@@ -156,7 +158,7 @@ fn resolve_pack(marks: &mut HashMap<usize, usize>, index: usize, state: State) -
                 fresh: true,
             }
         }
-        Some(&lvl1) => {
+        lvl1 => {
             let state1 = State {
                 lvl: max(lvl, lvl1),
                 ..state
@@ -217,7 +219,7 @@ fn fold(
     arena: Arena,
     obj: ObjId,
     state: State,
-    marks: &mut HashMap<usize, usize>,
+    marks: &mut [usize],
     scratch: &mut Scratch,
 ) -> usize {
     let Scratch { stack, inserted } = scratch;
@@ -284,7 +286,7 @@ fn fold(
         }
     }
     for index in inserted.drain(..) {
-        marks.remove(&index);
+        marks[index] = NO_MARK;
     }
     st.pos
 }
@@ -299,7 +301,7 @@ fn will_fit(
     arena: Arena,
     obj: ObjId,
     state: State,
-    marks: &mut HashMap<usize, usize>,
+    marks: &mut [usize],
     scratch: &mut Scratch,
 ) -> bool {
     if !state.head {
@@ -341,7 +343,7 @@ fn render_obj(
     arena: Arena,
     obj: ObjId,
     state: &mut State,
-    marks: &mut HashMap<usize, usize>,
+    marks: &mut [usize],
     scratch: &mut Scratch,
     result: &mut String,
 ) {
@@ -472,9 +474,11 @@ pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
         next_comps: doc.next_comps(),
     };
     let mut st = make_state(width, tab);
-    let mut marks: HashMap<usize, usize> = HashMap::new();
+    let mut marks: Vec<usize> = vec![NO_MARK; doc.packs()];
     let mut scratch = Scratch::default();
-    let mut result = String::new();
+    // The output is at least the document's text; reserving it (plus a
+    // newline per row) leaves only indentation to grow into.
+    let mut result = String::with_capacity(doc.text_bytes() + doc.rows().len());
     // The document spine is a linear `Vec<Row>` in document order, so it is
     // walked with a plain loop. `marks` and `lvl` survive `reset`, so they carry
     // across lines exactly as the recursive formulation threaded them. A `Line`

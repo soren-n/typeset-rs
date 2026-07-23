@@ -79,6 +79,12 @@ pub struct Doc {
     /// along the left spine, resolving a group as one already-laid-out block
     /// (its full extent). Exact for the same reason as `extents`.
     next_comps: Vec<usize>,
+    /// Number of pack-mark slots the renderer needs (max pack index + 1).
+    /// Pack indices are dense DFS counters assigned during compilation, so
+    /// the renderer keys its marks by plain vector index.
+    packs: usize,
+    /// Total text bytes across both arenas, used to pre-size the output.
+    text_bytes: usize,
 }
 
 impl Doc {
@@ -105,6 +111,16 @@ impl Doc {
     /// Per-object mid-line advances to the first composition boundary.
     pub(crate) fn next_comps(&self) -> &[usize] {
         &self.next_comps
+    }
+
+    /// Number of pack-mark slots the renderer needs.
+    pub(crate) fn packs(&self) -> usize {
+        self.packs
+    }
+
+    /// Total text bytes across both arenas (an output-size floor).
+    pub(crate) fn text_bytes(&self) -> usize {
+        self.text_bytes
     }
 }
 
@@ -149,10 +165,16 @@ impl DocBuilder {
     /// saturated extent is already wider than any target width, which is all
     /// the comparisons ask.
     pub(crate) fn finish(self, rows: Vec<Row>) -> Doc {
+        let mut text_bytes: usize = 0;
+        let mut packs: usize = 0;
+
         let mut fix_extents: Vec<usize> = Vec::with_capacity(self.fixes.len());
         for node in &self.fixes {
             let extent = match node {
-                FixNode::Text(data) => text_width(data),
+                FixNode::Text(data) => {
+                    text_bytes += data.len();
+                    text_width(data)
+                }
                 FixNode::Comp(left, right, pad) => fix_extents[*left as usize]
                     .saturating_add(usize::from(*pad))
                     .saturating_add(fix_extents[*right as usize]),
@@ -163,8 +185,12 @@ impl DocBuilder {
         let mut extents: Vec<usize> = Vec::with_capacity(self.objs.len());
         let mut next_comps: Vec<usize> = Vec::with_capacity(self.objs.len());
         for node in &self.objs {
+            if let ObjNode::Pack(index, _) = node {
+                packs = packs.max(*index as usize + 1);
+            }
             let (extent, next_comp) = match node {
                 ObjNode::Text(data) => {
+                    text_bytes += data.len();
                     let width = text_width(data);
                     (width, width)
                 }
@@ -199,6 +225,8 @@ impl DocBuilder {
             fixes: self.fixes,
             extents,
             next_comps,
+            packs,
+            text_bytes,
         }
     }
 }
