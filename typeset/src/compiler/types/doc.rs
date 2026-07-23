@@ -154,7 +154,7 @@ impl Doc {
 /// Appends object arena nodes and returns their indices while lowering into a
 /// [`Doc`].
 ///
-/// The final compiler pass ([`rescope`](crate::compiler::passes::rescope)) drives
+/// The final compiler pass ([`rescope`](fn@crate::compiler::passes::rescope)) drives
 /// this: it pushes each object/fixed-object node as it is built (children before
 /// parents, so a parent's child indices always already exist) and collects the
 /// spine rows separately, then calls [`finish`](DocBuilder::finish).

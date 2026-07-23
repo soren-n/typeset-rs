@@ -16,8 +16,6 @@ readme = "README.md"
 [lints]
 workspace = true
 
-[dependencies]
-
 [dev-dependencies]
 typeset-parser.workspace = true
 criterion.workspace = true

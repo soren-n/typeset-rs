@@ -143,7 +143,7 @@ pub fn line(left: Box<Layout>, right: Box<Layout>) -> Box<Layout> {
 /// The general composition of two layouts. [`Pad`] chooses whether a space
 /// separates them when they share a line; [`Break`] chooses whether the
 /// composition may break (`Break::Fixed` forbids it, like wrapping in
-/// [`fix`](crate::fix)). When a breakable composition doesn't fit, the right
+/// [`fix`]). When a breakable composition doesn't fit, the right
 /// operand moves to the next line. The [`pad`]/[`unpad`]/[`fix_pad`]/[`fix_unpad`]
 /// shortcuts name the four combinations.
 ///
@@ -350,7 +350,7 @@ pub fn brackets(layout: Box<Layout>) -> Box<Layout> {
 }
 
 /// Wraps a layout in curly braces: `{content}`. Commonly combined with
-/// [`nest`](crate::nest) for indented block content.
+/// [`nest`] for indented block content.
 ///
 /// ```rust
 /// use typeset::*;
