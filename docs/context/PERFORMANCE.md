@@ -80,9 +80,9 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
 - Peak native stack is constant everywhere (flat arenas); depth costs heap.
 - Compiling a plain (no grp/seq/nest) document performs a constant number of
   heap allocations (~57 for a 128k-node chain) — the arenas amortize
-  everything; scope-heavy documents add ~0.4 allocs/node (was ~1.6 before the
-  satellite flattening landed; the remainder is serialize's term chains and
-  graphify's BTreeMap, see remaining candidates).
+  everything; scope-heavy documents add ~0.33 allocs/node (was ~1.6 before
+  the satellite/term flattening landed; the remainder is graphify's BTreeMap
+  of open scopes and serialize's CompList bump chunks).
 
 ### Costs to know about
 
@@ -93,12 +93,12 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
   `flatten`, and each dismantled node's own drop grew a fresh worklist —
   ~2.5 extra alloc/free pairs per node. Fixed 2026-07 (move the `Layout` value
   out of the box instead; skip leaf children): compile got 19-28% faster.
-  With the text-span and satellite-flattening reworks also landed, plain
-  documents now compile with a constant number of heap allocations and
-  grp/seq/nest-heavy ones with ~0.4 per node (serialize's bump-allocated term
-  chains and graphify's BTreeMap of open scopes). The node arenas themselves
-  are amortized by `Vec` growth — the flat-arena design was never the source
-  of the traffic.
+  With the text-span, satellite-flattening, and flat-term reworks also
+  landed, plain documents now compile with a constant number of heap
+  allocations and grp/seq/nest-heavy ones with ~0.33 per node (graphify's
+  BTreeMap of open scopes and serialize's CompList bump chunks). The node
+  arenas themselves are amortized by `Vec` growth — the flat-arena design
+  was never the source of the traffic.
 - **Was dropping the bump arenas a mistake? No — measured.** The flat `Vec`
   arenas do the same amortization job for node storage that bumpalo did, with
   better locality and eager frees (bumpalo is grow-only, so peak memory would
@@ -112,21 +112,29 @@ Silicon — put instruction-count regression gating in Linux CI if wanted.
 - **Compile dominates render** by roughly 15-25x at width 80. A layout
   compiled once and rendered at several widths amortizes well; per-keystroke
   recompiles pay the full pipeline each time.
-- **Nest/pack wrapper distribution is O(leaves × wrapper depth).**
-  `serialize` materializes the accumulated nest/pack path at every leaf,
-  `denull` strips it to a prop list, `rescope` re-factors shared prefixes.
-  `nestwide` confirms compile grows linearly in depth × leaves. Fine for
-  code-shaped depth (~10-100); quadratic if depth grows with document size.
-- **Peak memory is ~0.5-1 KB per input node** (e.g. 188 MiB for a 512k-node
-  chain; 899 MiB for a 1.3M-node JSON tree). Every intermediate representation
-  stays alive until `compile` returns, because later IRs borrow text and terms
-  from earlier ones; the peak is the sum of all of them plus the `Doc`.
+- **Nest/pack wrapper distribution was O(leaves × wrapper depth) — fixed
+  2026-07.** `serialize` used to materialize the accumulated nest/pack path
+  at every leaf; wrappers now live in a shared path arena (one node per
+  `Nest`/`Pack` descended through, sibling leaves share their spine) and
+  `denull` memoizes each distinct path's prop materialization, so wrapper
+  storage is O(input tree). Compiling 1000 words under 1024 nests went from
+  11 ms / 87 MB peak to 2 ms / 8 MB (see landed optimizations 8-9).
+- **Peak memory was the sum of all live IRs — fixed 2026-07.** Later IRs
+  borrow only the layout arena's text now (scope deltas are ranges into an
+  owned buffer, not bump slices), so `compile` drops each intermediate as
+  soon as its consumer pass ran; the peak is a narrow window around the
+  largest adjacent-IR pair plus the arena and the `Doc`. 512k-word chain:
+  411 MB → 297 MB peak RSS. The residual ~0.5 KB/node peak is dominated by
+  the layout arena (one `String` per text node) plus the `Doc`.
 
 ### Landed optimizations (2026-07)
 
 Each verified byte-identical against the OCaml oracle; cumulative effect vs
-the audit baseline: render 3-11x faster by workload, compile 26-32% faster,
-plain-document compile down to a constant number of heap allocations.
+the audit baseline: render 3-11x faster by workload; compile 25-32% faster on
+plain word chains and now much more on scope- and nest-heavy documents (json
+trees ~40% faster, deeply-nested `nestwide` up to ~8x); plain-document compile
+down to a constant number of heap allocations, scope-heavy to ~0.33/node; peak
+memory cut 28-90% by workload shape.
 
 1. Renderer fold scratch reuse — the measuring folds allocated two `Vec`s per
    break decision (24-48% render).
@@ -154,16 +162,28 @@ plain-document compile down to a constant number of heap allocations.
    one flat step vector plus a bounds stack with partial spines as ranges
    into a shared buffer, all reused across lines. Cumulative on `json 8 d=5`:
    compile allocs 1.57 → 0.42 per input node, compile ~22% faster.
+8. Flat terms over a shared path arena — `serialize` no longer materializes
+   per-leaf bump `Term` chains; a term is a `Copy` `(path id, leaf)` pair
+   into a shared arena with one node per Nest/Pack, and `denull` memoizes
+   path materialization. Killed the O(leaves × depth) tier: `nestwide 1000
+   d=1024` compiles ~8x faster at 87 → 8 MB peak RSS.
+9. Early IR drops — scope deltas became ranges into an owned `Vec<Scope>`
+   (no bump references escape `serialize`), so each IR drops as soon as its
+   consumer pass ran. 512k-word chain peak RSS 411 → 297 MB; json ~8% off
+   peak and ~12% faster compile (0.33 allocs/node).
 
 ### Remaining candidates
 
-1. **Flat term representation from `serialize` onward.** The bump-allocated
-   `Term` wrapper chains are the last pointer-linked IR and the source of the
-   O(leaves × depth) memory above; `(props-range, text)` terms would delete
-   `strip_term` and likely retire the remaining `Bump`.
-2. **Break the borrow chain to drop IRs early.** Text moving through the
-   pipeline (rather than being borrowed from the `LayoutArena`) would let
-   early IRs drop mid-compile; estimated 30-50% peak-memory cut.
+1. **Move text out of the layout arena early.** The `LayoutArena` (one
+   `String` per text node) now outlives every other intermediate only
+   because text is borrowed from it; concatenating text into one buffer at
+   `flatten` (spans instead of `&str`) would let the node arena drop after
+   `resolve_breaks` and remove the last long-lived structure. It is the
+   dominant term in the residual ~0.5 KB/node peak.
+2. **Retire the last bump.** `serialize`'s persistent `CompList` scope
+   accumulators are the only remaining bump users; a flat parent-linked
+   arena (ids instead of `ptr::eq`, like the term path arena) would drop
+   `bumpalo` entirely.
 3. **Selective pass fusion.** The two normalize elimination folds have nearly
    identical shapes; fusing them saves one full arena rebuild. Fuse further
    only with care — the pass-per-file structure is a deliberate legibility
