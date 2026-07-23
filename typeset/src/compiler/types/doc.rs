@@ -2,14 +2,17 @@
 //!
 //! `Doc` is a flat arena, not a `Box`-recursive tree. The document object graph
 //! (the `Comp`/`Grp`/`Nest`/… nodes) is stored in two flat `Vec`s — one for
-//! objects, one for fixed objects — and children are referenced by arena index
-//! rather than by owning box. The spine is a `Vec<Row>` in document order.
+//! objects, one for fixed objects — with children referenced by arena index
+//! rather than by owning box, and all text concatenated in one shared `String`
+//! that text nodes span into. The spine is a `Vec<Row>` in document order,
+//! and two side tables hold each object's precomputed mid-line extents for the
+//! renderer's O(1) break decisions.
 //!
 //! The point of the flat representation is that deep-safety is *structural*
 //! rather than hand-maintained: dropping, cloning, or debug-printing a `Doc`
-//! touches three `Vec`s of shallow records, which never recurses no matter how
-//! deeply nested the document is — so `Clone`, `Drop`, and `Debug` are all
-//! derived.
+//! touches a few flat `Vec`s of shallow records and one `String`, which never
+//! recurses no matter how deeply nested the document is — so `Clone`, `Drop`,
+//! and `Debug` are all derived.
 
 /// Index into a [`Doc`]'s object arena ([`Doc::objs`]).
 pub(crate) type ObjId = u32;

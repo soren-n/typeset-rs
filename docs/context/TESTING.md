@@ -14,7 +14,7 @@ The project uses a comprehensive dual-language testing approach combining Rust u
 - Layout constructor behavior
 - Compiler pass validation (including per-pass depth-50k deep-safety tests)
 
-The compiler uses only standard-library collections (`Vec`/slices, `HashMap`,
+The compiler uses only standard-library collections (`Vec`/slices,
 `BTreeMap`), so there is no bespoke data-structure test suite; their use is
 covered end-to-end by the differential fuzzer and the OCaml oracle.
 

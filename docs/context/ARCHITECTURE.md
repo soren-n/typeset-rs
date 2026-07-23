@@ -26,9 +26,10 @@ This is a Rust workspace containing two main crates:
 
 The compiler passes use standard-library collections throughout — the shared
 custom data-structure layer is gone. Sequences and LIFO working stacks are
-`Vec<T>`; integer-keyed maps are `HashMap` (the renderer's pack marks — point
-lookup/insert only, no ordering needed) or `BTreeMap` (`graphify`'s open-scope
-map, keyed by scope index — see below). The former custom
+`Vec<T>`; dense integer keys index plain `Vec`s (the renderer's pack marks,
+keyed by the compiler's dense DFS pack counters); the one ordered map is
+`BTreeMap` (`graphify`'s open-scope map, keyed by scope index — see below).
+The former custom
 `avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
 `cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
 used, have been removed.
@@ -108,10 +109,14 @@ tree, so it keeps iterative `Drop`/`Clone`/`Debug` impls (see
 cap; layout depth shows up only as O(depth) heap, freed once compilation
 returns.
 
-**Renderer:** the measuring folds are width-bounded — the position only ever
-advances while measuring, and both consumers compare against the target width,
-so measurement stops the moment it passes the width. A break decision costs at
-most O(width) regardless of subtree size.
+**Renderer:** break decisions are O(1). Compilation precomputes each object's
+flat mid-line extent and its mid-line distance to the first composition
+boundary (mid-line, `head == false`, neither nest nor pack advances the
+position, so both are exact state-independent sums stored in the `Doc`).
+`should_break` compares arithmetic against the width; `will_fit` only falls
+back to an actual measuring fold at the head of a line, where indentation
+offsets depend on live state — and that fold is width-bounded (it stops the
+moment the position passes the target width).
 
 ## Key Layout Concepts
 

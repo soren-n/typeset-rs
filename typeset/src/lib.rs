@@ -69,10 +69,11 @@
 //! Typeset is designed for high performance:
 //!
 //! - Flat, loop-based compilation: every intermediate representation is a
-//!   flat arena folded with plain loops, and text is borrowed (never copied)
-//!   through the whole pipeline
-//! - Width-bounded line-breaking decisions: the renderer stops measuring a
-//!   subtree as soon as it passes the target width
+//!   flat arena folded with plain loops, and text is borrowed through every
+//!   pass, copied exactly once into the [`Doc`]'s shared text buffer
+//! - Constant-time line-breaking decisions: compilation precomputes each
+//!   node's flat extent, so rendering decides breaks by arithmetic instead of
+//!   re-measuring subtrees — render cost does not grow with the target width
 //! - Constant native stack throughout: the passes and renderer never recurse,
 //!   and the output [`Doc`] is a flat `Vec`-backed arena, so cloning or
 //!   freeing it is non-recursive too — deep layouts never overflow the stack
