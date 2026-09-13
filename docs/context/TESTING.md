@@ -24,7 +24,7 @@ with the Python differential fuzzer. (Earlier bespoke `proptest` tests over the
 custom data structures were removed along with those structures.)
 
 ### 2. Rust Integration Tests  
-**Location**: `typeset/tests/` and `tests/unit/`
+**Location**: `typeset/tests/`
 
 **Coverage**:
 - End-to-end layout compilation and rendering
@@ -51,8 +51,8 @@ for that.
 
 **Location**: `tests/compare.sh`, `tests/fuzz.py`, `tests/tester/bin/oracle.ml`
 
-`oracle.ml` parses the same DSL grammar as `tests/unit` (see
-`tests/unit/src/layout.pest`) and renders it through the OCaml reference, so a
+`oracle.ml` parses the same DSL grammar as `typeset::dsl` and renders it
+through the OCaml reference; `tests/differential` is the Rust driver, so a
 single expression can be compared directly instead of waiting for the generator
 to stumble onto it. Both wrappers expect to run from `tests/` after `./build.sh`.
 

@@ -27,7 +27,7 @@ cd tests && ./run.sh          # Run all tests
 
 **Rust Tests**:
 - Unit tests: `typeset/tests/` and inline `#[cfg(test)]` modules
-- Integration tests: `tests/unit/` (separate crate)
+- Differential driver: `tests/differential/` (workspace bin, not published)
 - Performance tests: `typeset/benches/`
 
 **OCaml Property-Based Tests**:
@@ -99,8 +99,6 @@ cargo check --all-targets --all-features  # Type checking
 - `criterion`: Benchmarking framework
 - `typeset` and `typeset-parser` dev-depend on each other (doctests and
   examples); the release workflow strips the parser's side before publishing
-- `tests/unit` (excluded from the workspace): `pest`/`pest_derive` for the
-  differential harness's DSL grammar
 
 ## Project Layout Standards
 

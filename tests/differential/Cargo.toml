@@ -1,0 +1,13 @@
+[package]
+name = "typeset-differential"
+description = "Differential-test driver: renders a layout DSL string with typeset"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+typeset.workspace = true

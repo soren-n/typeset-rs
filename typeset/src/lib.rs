@@ -105,6 +105,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod compiler;
+pub mod dsl;
 
 pub use self::compiler::{
     // Composition axes for `comp`

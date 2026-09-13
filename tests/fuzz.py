@@ -45,19 +45,16 @@ def main():
     failures = 0
     for i in range(iterations):
         # Deeper trees interleave more grp/seq scopes, which is where the two
-        # implementations' breaking decisions can diverge. Depth stays well
-        # under the ~2000-level recursive-parser limit.
+        # implementations' breaking decisions can diverge.
         expr = gen(rng, rng.randint(3, 9))
         width = str(rng.choice([1, 2, 3, 5, 8, 12, 20, 40, 80]))
         tab = str(rng.choice([0, 1, 2, 4, 8]))
         ocaml, oc_rc = run(["./_build/oracle", expr, tab, width])
-        rust_raw, rs_rc = run(["./_build/unit", expr, tab, width])
+        rust, rs_rc = run(["./_build/differential", expr, tab, width])
         if oc_rc != 0 or rs_rc != 0:
             print("ERROR rc oc=%d rs=%d: %s" % (oc_rc, rs_rc, expr))
             failures += 1
             continue
-        marker = "!!!!output!!!!\n"
-        rust = rust_raw.split(marker, 1)[1] if marker in rust_raw else rust_raw
         if ocaml != rust:
             failures += 1
             print("=" * 60)

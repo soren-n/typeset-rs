@@ -1,6 +1,6 @@
 (* One-off oracle: parse a layout DSL string and render it with the OCaml
-   reference implementation. Mirrors the grammar in tests/unit/src/layout.pest
-   (all binary operators share one precedence level and associate right). *)
+   reference implementation. Mirrors the grammar of `typeset::dsl` (all binary
+   operators share one precedence level and associate right). *)
 
 open Typeset
 

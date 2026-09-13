@@ -54,8 +54,7 @@ below); the workflow only publishes what the tag points at.
 ### 3. Dependabot (`.github/dependabot.yml` + `dependabot-auto-merge.yml`)
 **Triggers**: Weekly
 
-Dependabot opens grouped PRs for GitHub Actions, the root Cargo workspace, and
-`tests/unit`. `dependabot-auto-merge.yml` squash-merges a Dependabot PR once
+Dependabot opens grouped PRs for GitHub Actions and the Cargo workspace. `dependabot-auto-merge.yml` squash-merges a Dependabot PR once
 the `CI` workflow has passed on it (the repo has no branch protection, so the
 gate lives in the workflow via `workflow_run`). This is the primary dependency
 update path.

@@ -14,10 +14,3 @@ updates:
     groups:
       cargo-all:
         patterns: ["*"]
-  - package-ecosystem: "cargo"
-    directory: "/tests/unit/"
-    schedule:
-      interval: "weekly"
-    groups:
-      cargo-tests-all:
-        patterns: ["*"]

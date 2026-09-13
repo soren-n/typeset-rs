@@ -39,26 +39,18 @@ let print_layout layout =
   in
   _visit layout _skip
 
-let rec _process_output items log =
-  match items with
-  | [] -> None
-  | "!!!!output!!!!" :: output ->
-    Some (List.rev log, (String.concat "\n" output))
-  | item :: items1 ->
-    _process_output items1 (item :: log)
-
 (* Must close with Unix.close_process_in, not In_channel.close: the latter
    closes the descriptor without reaping the child, so one zombie accumulates
    per generated case until fork fails with EAGAIN. *)
 let run cmd =
   let channel = Unix.open_process_in cmd in
-  let result = In_channel.input_lines channel in
+  let lines = In_channel.input_lines channel in
   ignore (Unix.close_process_in channel);
-  _process_output result []
+  String.concat "\n" lines
 
 let rust_impl layout_dsl tab width =
   let open Printf in
-  run (sprintf "./_build/unit '%s' %d %d" layout_dsl tab width)
+  run (sprintf "./_build/differential '%s' %d %d" layout_dsl tab width)
 
 (* Each case pairs a layout with a (tab, width) to render at. Fixing the
    dimensions per case (rather than always 2/80) is what exercises the breaking
@@ -94,23 +86,17 @@ let rust_ocaml_identity =
       print_layout layout |> fun layout_dsl ->
       compile layout |> fun document ->
       render document tab width |> fun expected_output ->
-      rust_impl layout_dsl tab width |> fun maybe_actual_output ->
-      match maybe_actual_output with
-      | None -> assert false
-      | Some (rust_log, actual_output) ->
-        let judgement = expected_output = actual_output in
-        if judgement then true else begin
+      rust_impl layout_dsl tab width |> fun actual_output ->
+      if expected_output = actual_output then true else begin
         printf "============ layout (tab=%d width=%d) ==============\n" tab width;
         printf "%s\n" layout_dsl;
         printf "======== expected_output =========\n";
         printf "\"%s\"\n" expected_output;
         printf "========= actual_output ==========\n";
         printf "\"%s\"\n" actual_output;
-        printf "=========== rust log =============\n";
-        printf "%s\n" (String.concat "\n" rust_log);
         printf "============== end ===============\n";
         false
-        end)
+      end)
 
 (* Propagate the runner's status: discarding it made the executable exit 0 even
    when a property failed, so no caller could detect a failure. *)
