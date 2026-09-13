@@ -10,7 +10,7 @@
 //! whole ins list in after a known edge — is O(1) pointer rewiring.
 
 use super::graph::{EdgeId, GraphDoc, NodeId};
-use crate::compiler::types::ScopeKind;
+use crate::ir::ScopeKind;
 
 /// Edges never cross lines, so the per-line resolution loop is one pass over
 /// the document-wide node arena.

@@ -5,8 +5,8 @@
 //! `resolve_scopes`, `DenullDoc` in `denull`); what lives here is the
 //! vocabulary those types have in common.
 
-use super::arena::{Id, Range};
-use super::layout::Pad;
+use crate::arena::{Id, Range};
+use crate::layout::Pad;
 
 pub(crate) type PathId = Id<PathNode>;
 

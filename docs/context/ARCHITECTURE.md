@@ -12,18 +12,15 @@ A Rust workspace of three crates:
 ## typeset crate (`typeset/src/`)
 
 - `lib.rs`: public API (`Layout`, `Doc`, `Pad`, `Break`, the constructors,
-  `compile`, `render`, `format_layout`) and the `dsl` module
+  `compile`, `render`, `format_layout`), the pass table, and the `dsl` module
 - `dsl.rs`: runtime parser for the layout DSL, iterative (parenthesis depth
   costs heap, not stack)
-- `compiler/constructors.rs`: the constructor functions users build layouts
-  with
-- `compiler/pipeline.rs`: `compile`, the authoritative pass table
-- `compiler/passes/`: one module per pass; each owns the representation it
-  produces
-- `compiler/render.rs`: `render` and `Doc::render`
-- `compiler/types/`: `arena.rs` (the arena primitives), `layout.rs` (the
-  public input type), `ir.rs` (the vocabulary passes share), `doc.rs` (the
-  public output type)
+- `constructors.rs`: the constructor functions users build layouts with
+- `serialize.rs`, `resolve_scopes/`, `denull.rs`, `normalize.rs`,
+  `rescope.rs`: one module per pass; each owns the representation it produces
+- `render.rs`: `render` and `Doc::render`
+- `arena.rs` (the arena primitives), `layout.rs` (the public input type),
+  `ir.rs` (the vocabulary passes share), `doc.rs` (the public output type)
 
 ### Arenas, ids, ranges
 

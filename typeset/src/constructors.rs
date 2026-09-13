@@ -17,7 +17,7 @@
 //! let output = format_layout(layout, 2, 40);
 //! ```
 
-use crate::compiler::types::{Attr, Break, Layout, LayoutNode, Pad};
+use crate::layout::{Attr, Break, Layout, LayoutNode, Pad};
 
 // --- Primitives ------------------------------------------------------------
 
@@ -360,5 +360,5 @@ pub fn braces(layout: Layout) -> Layout {
 /// assert_eq!(format_layout(text("Hello, world!"), 2, 80), "Hello, world!");
 /// ```
 pub fn format_layout(layout: Layout, tab: usize, width: usize) -> String {
-    crate::compiler::pipeline::compile(layout).render(tab, width)
+    crate::compile(layout).render(tab, width)
 }

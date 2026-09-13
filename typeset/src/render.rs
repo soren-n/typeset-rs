@@ -9,7 +9,9 @@
 //! commits pack marks; `fold` only measures, and undoes any marks it recorded
 //! before returning so the caller's marks are untouched.
 
-use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Pad, text_width};
+use crate::doc::{Doc, FixId, FixNode, ObjId, ObjNode, text_width};
+
+use crate::layout::Pad;
 use std::cmp::max;
 
 /// Rendering parameters, fixed for the whole render.

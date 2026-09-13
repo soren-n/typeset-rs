@@ -14,7 +14,7 @@ The project uses a comprehensive dual-language testing approach combining Rust u
   scope deltas and fix coalescing; resolve_scopes' scope reconstruction and
   widening; denull's pad merging; normalize's eliminations and reassociation;
   rescope's prefix factoring), plus the DSL parser
-- Two end-to-end depth-50k tests in `pipeline.rs` guard constant native stack
+- Two end-to-end depth-50k tests in `lib.rs` guard constant native stack
   for the whole pipeline; passes do not repeat that individually
 
 The compiler uses only standard-library collections (`Vec`/slices,

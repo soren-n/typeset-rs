@@ -22,10 +22,11 @@
 //! Scope and pack indices are DFS pre-order counters; `resolve_scopes` keys
 //! the scope graph by scope index.
 
-use crate::compiler::types::{
-    Arena, Attr, Break, Id, IdVec, LayId, LayoutNode, Pad, PathId, PathNode, Prop, Range, Scope,
-    ScopeKind, Term, TermLeaf, append_range,
-};
+use crate::arena::{Arena, Id, IdVec, Range, append_range};
+
+use crate::ir::{PathId, PathNode, Prop, Scope, ScopeKind, Term, TermLeaf};
+
+use crate::layout::{Attr, Break, LayId, LayoutNode, Pad};
 
 /// A composition between two items: its padding and the scopes opening and
 /// closing here (ranges into the document's shared scope buffer).
@@ -428,8 +429,8 @@ fn diff_chains(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::constructors::{comp, fix, grp, line, nest, pack, seq, text};
-    use crate::compiler::types::Layout;
+    use crate::constructors::{comp, fix, grp, line, nest, pack, seq, text};
+    use crate::layout::Layout;
 
     const DEEP: usize = 50_000;
 

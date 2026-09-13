@@ -15,8 +15,9 @@ mod graphify;
 mod rebuild;
 mod solve;
 
-use super::serialize::FixedDoc;
-use crate::compiler::types::{Arena, Fix, Id, Obj, Term};
+use crate::arena::{Arena, Id};
+use crate::ir::{Fix, Obj, Term};
+use crate::serialize::FixedDoc;
 
 pub(crate) type RObjId<'a> = Id<Obj<Term<'a>>>;
 pub(crate) type RFixId<'a> = Id<Fix<Term<'a>>>;
@@ -41,9 +42,10 @@ pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::constructors::{comp, fix, grp, seq, text};
-    use crate::compiler::passes::serialize::serialize;
-    use crate::compiler::types::{Break, Layout, Pad, TermLeaf};
+    use crate::constructors::{comp, fix, grp, seq, text};
+    use crate::ir::TermLeaf;
+    use crate::layout::{Break, Layout, Pad};
+    use crate::serialize::serialize;
 
     /// The rebuilt tree of a one-line layout, printed as nested constructor
     /// names over the texts.

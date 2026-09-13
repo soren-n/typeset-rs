@@ -15,8 +15,8 @@
 //! recurses no matter how deeply nested the document is — so `Clone`, `Drop`,
 //! and `Debug` are all derived.
 
-use super::arena::{Arena, Id, IdVec, Range};
-use super::layout::Pad;
+use crate::arena::{Arena, Id, IdVec, Range};
+use crate::layout::Pad;
 
 pub(crate) type ObjId = Id<ObjNode>;
 pub(crate) type FixId = Id<FixNode>;
@@ -86,7 +86,7 @@ pub struct Doc {
 /// Appends object arena nodes and returns their ids while lowering into a
 /// [`Doc`].
 ///
-/// The final compiler pass ([`rescope`](fn@crate::compiler::passes::rescope)) drives
+/// The final compiler pass ([`rescope`](fn@crate::rescope::rescope)) drives
 /// this: it pushes each object/fixed-object node as it is built (children before
 /// parents, so a parent's child ids always already exist) and collects the
 /// spine rows separately, then calls [`finish`](DocBuilder::finish).

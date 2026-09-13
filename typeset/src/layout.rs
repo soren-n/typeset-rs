@@ -1,6 +1,6 @@
 //! The public input type: a [`Layout`] tree stored as a flat arena.
 
-use super::arena::{Arena, Id, Range};
+use crate::arena::{Arena, Id, Range};
 
 /// Whether a composition puts a space between its two operands when they share
 /// a line — the padding axis of [`comp`](crate::comp).
@@ -166,7 +166,7 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::constructors::{comp, nest, text};
+    use crate::constructors::{comp, nest, text};
 
     /// Deeper than a native-stack recursion could survive.
     const DEEP: usize = 50_000;

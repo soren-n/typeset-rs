@@ -24,8 +24,8 @@
 //!
 //! The parser is iterative: parenthesis depth costs heap, never native stack.
 
-use crate::compiler::constructors::{comp, fix, grp, line, nest, null, pack, seq, text};
-use crate::compiler::types::{Break, Layout, Pad};
+use crate::constructors::{comp, fix, grp, line, nest, null, pack, seq, text};
+use crate::layout::{Break, Layout, Pad};
 use std::fmt;
 
 /// Why a DSL string failed to parse, and where.

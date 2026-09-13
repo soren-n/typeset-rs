@@ -11,8 +11,9 @@
 //! linear in the number of scopes.
 
 use super::graph::{EdgeData, GraphDoc, GraphLine, NodeData, NodeId};
-use crate::compiler::passes::serialize::{FixedComp, FixedDoc, FixedItem, FixedLine};
-use crate::compiler::types::{Arena, Range, Scope, ScopeKind};
+use crate::arena::{Arena, Range};
+use crate::ir::{Scope, ScopeKind};
+use crate::serialize::{FixedComp, FixedDoc, FixedItem, FixedLine};
 use std::collections::BTreeMap;
 
 // The scopes open across the current point of a line, keyed by scope index:

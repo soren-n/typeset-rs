@@ -11,10 +11,10 @@
 //! postorder arena, so both walks are plain forward folds — children's results
 //! are already computed when a parent is visited — and the spine is a row map.
 
-use super::denull::DenullDoc;
-use crate::compiler::types::{
-    DenullTerm, Doc, DocBuilder, Fix, FixId, FixNode, IdVec, Obj, ObjId, ObjNode, Prop, Range,
-};
+use crate::arena::{IdVec, Range};
+use crate::denull::DenullDoc;
+use crate::doc::{Doc, DocBuilder, FixId, FixNode, ObjId, ObjNode};
+use crate::ir::{DenullTerm, Fix, Obj, Prop};
 
 /// Rescope nest and pack, lowering the flat `DenullDoc` into the `Doc`.
 pub fn rescope(doc: DenullDoc) -> Doc {
@@ -125,9 +125,10 @@ fn wrap_props(b: &mut DocBuilder, props: &[Prop], term: ObjId) -> ObjId {
 
 #[cfg(test)]
 mod tests {
-    use super::super::denull::DObjId;
     use super::*;
-    use crate::compiler::types::{Arena, Pad};
+    use crate::arena::Arena;
+    use crate::denull::DObjId;
+    use crate::layout::Pad;
 
     const DEEP: usize = 50_000;
 

@@ -7,8 +7,10 @@
 
 use super::graph::{GraphDoc, GraphLine};
 use super::{RFixId, RObjId, RebuildDoc};
-use crate::compiler::passes::serialize::{FixRun, FixedItem};
-use crate::compiler::types::{Arena, Fix, Obj, Pad, Range, ScopeKind, Term};
+use crate::arena::{Arena, Range};
+use crate::ir::{Fix, Obj, ScopeKind, Term};
+use crate::layout::Pad;
+use crate::serialize::{FixRun, FixedItem};
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
 /// ids always already exist.

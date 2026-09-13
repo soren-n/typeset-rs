@@ -6,10 +6,10 @@
 //! so the object and fix walks are plain forward folds: by the time a node is
 //! visited its children's results are already computed.
 
-use super::resolve_scopes::RebuildDoc;
-use crate::compiler::types::{
-    Arena, DenullTerm, Fix, Id, IdVec, Obj, Pad, PathNode, Prop, Range, Term, TermLeaf,
-};
+use crate::arena::{Arena, Id, IdVec, Range};
+use crate::ir::{DenullTerm, Fix, Obj, PathNode, Prop, Term, TermLeaf};
+use crate::layout::Pad;
+use crate::resolve_scopes::RebuildDoc;
 
 pub(crate) type DObjId<'a> = Id<Obj<DenullTerm<'a>>>;
 pub(crate) type DFixId<'a> = Id<Fix<DenullTerm<'a>>>;

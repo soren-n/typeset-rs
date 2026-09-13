@@ -14,8 +14,10 @@
 //! in reverse order), and a forward pass computing the bottom-up rebuild
 //! (children precede parents in forward order).
 
-use super::denull::{DObjId, DenullDoc};
-use crate::compiler::types::{Arena, DenullTerm, Fix, IdVec, Obj, Pad};
+use crate::arena::{Arena, IdVec};
+use crate::denull::{DObjId, DenullDoc};
+use crate::ir::{DenullTerm, Fix, Obj};
+use crate::layout::Pad;
 
 /// The object and fixed-object node types this pass folds.
 type DObj<'a> = Obj<DenullTerm<'a>>;
@@ -298,7 +300,7 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::Range;
+    use crate::arena::Range;
 
     const DEEP: usize = 50_000;
 

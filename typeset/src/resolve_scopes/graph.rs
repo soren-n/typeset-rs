@@ -13,8 +13,9 @@
 //! edge, splice one list into another) is O(1) pointer rewiring and building
 //! the graph allocates nothing per node or edge.
 
-use crate::compiler::passes::serialize::{FixedDoc, FixedLine};
-use crate::compiler::types::{Arena, Id, Range, ScopeKind};
+use crate::arena::{Arena, Id, Range};
+use crate::ir::ScopeKind;
+use crate::serialize::{FixedDoc, FixedLine};
 
 pub(super) type NodeId = Id<NodeData>;
 pub(super) type EdgeId = Id<EdgeData>;
