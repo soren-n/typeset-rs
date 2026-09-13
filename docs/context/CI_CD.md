@@ -11,9 +11,12 @@ The project uses GitHub Actions workflows for continuous integration, releases, 
 
 **Quality Gates**:
 - **Formatting**: `cargo fmt --check` (must pass)
-- **Linting**: `cargo clippy` (warnings allowed, errors blocked)  
+- **Linting**: `cargo clippy --all-targets --all-features -- -D warnings`
+  (warnings fail the build)
 - **Type Checking**: `cargo check --all-targets --all-features`
-- **Testing**: Rust tests (`cargo test --all`)
+- **Doc build**: `cargo doc --no-deps --all-features` (broken intra-doc links
+  are denied at the crate root)
+- **Testing**: Rust tests (`cargo test --all --all-features`)
 - **Differential correctness** (`differential` job): builds the OCaml reference
   oracle (the `typeset` opam package) plus the Rust `unit` binary and compares
   their rendered output. Runs the grp/seq-biased differential fuzzer
@@ -21,13 +24,16 @@ The project uses GitHub Actions workflows for continuous integration, releases, 
   guard against silent renderer divergence, which uniform QCheck rarely catches.
 
 **Matrix Testing**:
-- Rust stable and MSRV (1.89.0)
-- Multiple OS environments (if configured)
+- Rust stable (all gates) and MSRV 1.89.0 (`cargo check` + `cargo test` only;
+  fmt/clippy/doc run on stable alone so new lints never break the MSRV job)
+- Linux only
 
 **Security & Compliance**:
-- `cargo-audit`: Security vulnerability scanning
-- `cargo-deny`: License and dependency policy enforcement
-- Build verification and artifact generation
+- `cargo-deny` (`deny` job, config in `deny.toml`): advisories, license
+  allow-list, duplicate-version and source checks
+- `build` job: release build with uploaded artifacts (7-day retention)
+
+`cargo-audit` runs in the Dependencies workflow, not here.
 
 ### 2. Release Pipeline (`.github/workflows/release.yml`)
 **Triggers**: Pushing a `v*` tag (e.g. `v3.3.0`)
@@ -37,20 +43,32 @@ The project uses GitHub Actions workflows for continuous integration, releases, 
   fails on mismatch
 - Builds and runs the full test suite
 - Publishes crates to crates.io in dependency order (`typeset-parser` first,
-  then `typeset`, which depends on it)
+  then `typeset`, whose doctests and examples use the macro). Each crate
+  dev-depends on the other, so the workflow strips the parser's `typeset`
+  dev-dependency before publishing it to break the cycle.
 - Creates a GitHub release whose body links to `CHANGELOG.md`
 
 Version bumping and `CHANGELOG.md` are manual (see [Releasing](#releasing)
 below); the workflow only publishes what the tag points at.
 
-### 3. Dependencies Workflow (`.github/workflows/dependencies.yml`)
-**Triggers**: Weekly schedule
+### 3. Dependabot (`.github/dependabot.yml` + `dependabot-auto-merge.yml`)
+**Triggers**: Weekly
 
-**Automated Maintenance**:
-- Updates Rust dependencies with automated PRs
-- Security vulnerability scanning
-- License compliance checking
-- Dependency freshness monitoring
+Dependabot opens grouped PRs for GitHub Actions, the root Cargo workspace, and
+`tests/unit`. `dependabot-auto-merge.yml` squash-merges a Dependabot PR once
+the `CI` workflow has passed on it (the repo has no branch protection, so the
+gate lives in the workflow via `workflow_run`). This is the primary dependency
+update path.
+
+### 4. Dependencies Workflow (`.github/workflows/dependencies.yml`)
+**Triggers**: Weekly schedule + manual dispatch
+
+Two jobs:
+- `update-rust`: `cargo update` + `cargo upgrade --incompatible` (cargo-edit),
+  runs the tests, and opens a PR. Largely redundant with Dependabot; note that
+  PRs opened with the default `GITHUB_TOKEN` do not trigger the CI workflow.
+- `security-audit`: `cargo audit`, uploads the JSON report and fails on any
+  vulnerability.
 
 ## Releasing
 
@@ -138,13 +156,8 @@ are not installed automatically — see [GIT_HOOKS.md](GIT_HOOKS.md).
 
 ## Monitoring & Maintenance
 
-### Quality Metrics
-- Test coverage tracking
-- Performance regression detection  
-- Security vulnerability alerts
-- Dependency staleness monitoring
-
-### Automated Updates
-- Weekly dependency updates via PRs
-- Security patches prioritized
-- Breaking changes flagged for manual review
+- Dependency freshness: Dependabot (weekly, auto-merged after CI).
+- Vulnerabilities: `cargo deny` on every CI run, `cargo audit` weekly.
+- Performance: not gated in CI. Run the `scaling` bench with criterion
+  baselines locally (see [PERFORMANCE.md](PERFORMANCE.md)); instruction-count
+  gating on a Linux runner is a listed candidate there.

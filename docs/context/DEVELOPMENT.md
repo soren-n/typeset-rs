@@ -62,12 +62,17 @@ cargo run --example <name> -p typeset          # Layout examples
 ```
 
 ### Available Examples
+`typeset`:
 - `basic.rs`: Simple layout construction
-- `dsl_syntax.rs`: DSL syntax demonstration  
+- `dsl_syntax.rs`: DSL syntax demonstration
 - `json_formatter.rs`: JSON pretty printer
 - `lisp_formatter.rs`: Lisp-style formatter
 - `code_formatter.rs`: Source code formatting
 - `convenience_api.rs`: High-level API usage
+- `perf_probe.rs`, `alloc_probe.rs`: profiling probes (see PERFORMANCE.md)
+
+`typeset-parser`:
+- `full.rs`: every `layout!` operator and constructor in one macro invocation
 
 ## Code Quality
 
@@ -92,7 +97,10 @@ cargo check --all-targets --all-features  # Type checking
 
 ### Development Dependencies
 - `criterion`: Benchmarking framework
-- Various test utilities in dev-dependencies sections
+- `typeset` and `typeset-parser` dev-depend on each other (doctests and
+  examples); the release workflow strips the parser's side before publishing
+- `tests/unit` (excluded from the workspace): `pest`/`pest_derive` for the
+  differential harness's DSL grammar
 
 ## Project Layout Standards
 

@@ -44,6 +44,18 @@ This directory contains comprehensive examples demonstrating how to use the type
 
 **Run with:** `cargo run --example dsl_syntax -p typeset`
 
+### 6. `convenience_api.rs` - One-Step Formatting
+- `format_layout()` and the joining/wrapping helpers (`join_with_commas`,
+  `braces`, `brackets`, ...)
+- The shortest path from a layout to a string
+
+**Run with:** `cargo run --example convenience_api -p typeset`
+
+### Profiling probes (not tutorials)
+`perf_probe.rs` and `alloc_probe.rs` generate scalable workloads and print
+timing and allocation counts. They are documented in
+[docs/context/PERFORMANCE.md](../../docs/context/PERFORMANCE.md).
+
 ## Key Concepts Demonstrated
 
 ### Layout Combinators
@@ -67,11 +79,12 @@ This directory contains comprehensive examples demonstrating how to use the type
 - **`+`** - Padded composition
 - **`!+`** - Infix-fixed padded composition
 
-### Two-Phase System
-All examples use the standard two-phase approach:
-1. **Construction** - Build layout tree with combinators
-2. **Compilation** - `compile()` optimizes the layout
-3. **Rendering** - `render()` produces final text at given width
+### Compile, then render
+All examples follow the same shape:
+1. **Construction** - Build a layout tree with combinators
+2. **Compilation** - `compile()` lowers it to a `Doc` (width-independent)
+3. **Rendering** - `render()` produces text at a given tab and width; a
+   compiled `Doc` can be rendered at many widths
 
 ## Design Patterns
 

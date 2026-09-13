@@ -69,11 +69,12 @@ feat!: change API for layout composition
 ### 1. CI Workflow (`.github/workflows/ci.yml`)
 **Triggers:** Every push and PR to main
 - Code formatting (`cargo fmt`)
-- Linting (`cargo clippy`)
-- Rust tests (`cargo test`)
-- OCaml tests (property-based testing)
-- Security audit (`cargo audit`, `cargo deny`)
-- Build verification
+- Linting (`cargo clippy -- -D warnings`) and `cargo doc`
+- Rust tests (`cargo test`) on stable and MSRV
+- Differential job: builds the OCaml oracle and runs the QCheck property
+  suite plus the grp/seq-biased differential fuzzer
+- License and advisory policy (`cargo deny`)
+- Release build verification
 
 ### 2. Release Workflow (`.github/workflows/release.yml`)
 **Triggers:** Pushing a `v*` tag
@@ -84,11 +85,12 @@ feat!: change API for layout composition
 
 Version bumping and `CHANGELOG.md` are manual (see [Release Process](#release-process)).
 
-### 3. Dependencies Workflow (`.github/workflows/dependencies.yml`)
-**Triggers:** Weekly schedule + manual dispatch
-- Updates Rust dependencies
-- Security vulnerability scanning
-- Creates automated PRs for dependency updates
+### 3. Dependency updates
+- **Dependabot** (`.github/dependabot.yml`): weekly grouped PRs for GitHub
+  Actions and both Cargo manifests; `dependabot-auto-merge.yml` merges them
+  once CI passes.
+- **Dependencies workflow** (`.github/workflows/dependencies.yml`): weekly
+  `cargo audit` (fails on vulnerabilities) plus a `cargo upgrade` PR.
 
 ## Testing
 
@@ -144,12 +146,11 @@ release. Pick the version number per [semver](https://semver.org/).
 
 - Follow conventional-commit style for a readable history
 - Pre-commit hooks catch issues early
-- CI runs the same Rust checks as the git hooks (formatting, clippy, type
-  checking, `cargo test`), but does **not** run the OCaml property tests — those
-  run locally via the pre-commit hook only
-- OCaml tests provide additional validation
-- Dependency updates are automated weekly
-- Security scanning runs on every change
+- CI runs the same checks as the git hooks, including the OCaml oracle
+  suite and the differential fuzzer, so a contributor without OCaml installed
+  still gets their change checked against the reference in CI
+- Dependency updates are automated weekly via Dependabot
+- `cargo deny` runs on every push; `cargo audit` weekly
 
 ## Getting Help
 
