@@ -2,147 +2,151 @@
 
 ## Project Structure
 
-This is a Rust workspace containing two main crates:
-- **typeset**: A DSL for defining source code pretty printers
-- **typeset-parser**: A procedural macro parser that provides compile-time DSL parsing for typeset
+A Rust workspace of three crates:
+- **typeset**: the layout language, compiler, renderer, and a runtime DSL
+  parser (`typeset::dsl`)
+- **typeset-parser**: the `layout!` procedural macro (compile-time DSL)
+- **tests/differential** (`typeset-differential`, unpublished): the driver
+  the OCaml differential harness renders through
 
-## Core Components
+## typeset crate (`typeset/src/`)
 
-### typeset crate (`typeset/src/`)
+- `lib.rs`: public API (`Layout`, `Doc`, `Pad`, `Break`, the constructors,
+  `compile`, `render`, `format_layout`) and the `dsl` module
+- `dsl.rs`: runtime parser for the layout DSL, iterative (parenthesis depth
+  costs heap, not stack)
+- `compiler/constructors.rs`: the constructor functions users build layouts
+  with
+- `compiler/pipeline.rs`: `compile`, the authoritative pass table
+- `compiler/passes/`: one module per pass; each owns the representation it
+  produces
+- `compiler/render.rs`: `render` and `Doc::render`
+- `compiler/types/`: `arena.rs` (the arena primitives), `layout.rs` (the
+  public input type), `ir.rs` (the vocabulary passes share), `doc.rs` (the
+  public output type)
 
-**Primary modules**:
-- `lib.rs`: Main public API exports (Layout, Doc, constructors, compile, render)
-- `compiler/`: Core layout compiler and renderer implementation
-  - `constructors.rs`: Layout building primitives (text, composition, control, joining, wrapping, one-step formatting)
-  - `pipeline.rs`: The authoritative pass table — which pass lowers which
-    representation, in what order
-  - `passes/`: One module per pass (flatten, resolve_breaks, serialize,
-    split_lines, resolve_scopes, denull, normalize, rescope)
-  - `render/`: Text rendering engine
-  - `types/`: Core data structures (Layout, Doc, and the intermediate
-    representations shared between passes; an IR used by only one pass lives
-    with that pass instead — e.g. the scope graph in
-    `passes/resolve_scopes/graph.rs`)
+### Arenas, ids, ranges
 
-The compiler passes use standard-library collections throughout — the shared
-custom data-structure layer is gone. Sequences and LIFO working stacks are
-`Vec<T>`; dense integer keys index plain `Vec`s (the renderer's pack marks,
-keyed by the compiler's dense DFS pack counters); the one ordered map is
-`BTreeMap` (`graphify`'s open-scope map, keyed by scope index — see below).
-The former custom
-`avl.rs`/`map.rs`/`order.rs`/`list.rs` layer (a faithful port of the OCaml
-`cps_toolbox` AVL/Map/List), and the `util.rs` closure-composition helper it
-used, have been removed.
+Every representation in the pipeline, the public `Layout` and `Doc` included,
+is a flat postorder arena: nodes live in a `Vec`, children precede their
+parents, and a node refers to its children by index. `types/arena.rs` gives
+that shape types:
 
-`serialize`'s grp/seq scope-path accumulator needs genuine persistence: at a
-`Comp`/`Line` node both operands capture the same parent accumulator, and comp
-accumulators are also captured into the emitted entries, so the spines are
-shared across branches. A `Vec` snapshot would clone at every branch. It gets
-that sharing from a flat parent-linked arena (`CompNode`): descending through a
-grp/seq pushes one node linked to its parent, an accumulator is just that
-node's id, and sibling branches share their outer spine by id — the same shape
-as the nest/pack path arena, and no bump or cons-list. That sharing is also
-load-bearing for speed:
-`serialize` turns each composition's enclosing-scope chain into scope
-open/close *deltas* by diffing it against the previous composition's chain, and
-because the two chains share their outer spine by id the diff is a short
-longest-common-suffix walk (each `CompNode` carries a `depth` field for it).
-Carrying deltas — rather than each composition's full enclosing scope stack —
-keeps the grp/seq passes linear on deeply nested scopes instead of O(n^2).
-`serialize`'s other accumulator, the nest/pack term path (`PathNode`s), works
-the same way; both are flat parent-linked arenas indexed by id, and neither
-uses a bump.
+- `Arena<T>` is an append-only `Vec<T>` whose `push` returns an `Id<T>`.
+- `Id<T>` is a `u32` index usable only with arenas and side tables of element
+  type `T`, so a cross-arena index mix-up is a type error. It is non-zero
+  internally, so `Option<Id<T>>` is the same four bytes and is how every
+  "no parent" / "no next edge" / "not yet seen" link is expressed; there are
+  no sentinel values.
+- `IdVec<K, V>` is a side table with one `V` per element of an `Arena<K>`,
+  indexed by `Id<K>`.
+- `Range<T>` is a `[start, end)` pair of `u32` offsets into a shared buffer
+  (`Range<str>` for text), which is how a representation refers to a
+  sub-sequence without owning a `Vec` of its own.
 
-### Upstream references
+Because everything is flat, every pass is a loop: a bottom-up fold runs
+forward over the arena (children's results are already computed), inherited
+context runs backward (parents first). No stage recurses on the native stack,
+so a layout of any depth compiles and renders; depth costs heap.
 
-The compiler is a port, and the OCaml original is the ground truth when
-behaviour diverges. If the OCaml packages are installed (see TESTING.md) the
-source sits at:
+### `Layout`
 
-- `~/.opam/default/lib/typeset/Typeset.ml` — the compiler passes and renderer
+`Layout` is opaque: a postorder `Arena<LayoutNode>` with the root last and one
+text buffer that text nodes range into. Unary constructors push a node; binary
+constructors append the smaller operand's arena onto the larger (shifting its
+ids and text ranges) and push the parent. Building `n` nodes is O(n) for
+left- or right-leaning chains and O(n log n) in the worst (balanced) case.
+`Clone`, `Drop` and `Debug` are derived; cloning is two allocations.
 
-Ordering matters in `resolve_scopes`: each grp/seq scope becomes one graph
-edge, and the order edges are created fixes every node's incoming/outgoing edge
-lists, which `solve` and `rebuild` then consume. Scopes arrive as
-per-composition open/close deltas (computed in `serialize`); `graphify` replays
-them per line — an open records a scope's `from` node, a close pairs it with a
-`to` node — then sorts the resulting edges by scope index before materializing
-them, so the graph is always built in a deterministic, ascending-index
-sequence. That sort is the load-bearing ordering guarantee for grp/seq nesting,
-not just a convenience. The still-open scopes are held in a `BTreeMap` keyed by
-their small integer index; the map is threaded linearly (an open inserts, a
-close removes) and its iteration order does not matter, since the edges are
-sorted explicitly. The graph itself is index-linked: the whole document shares
-one node array and one edge pool, and each node's in/out adjacency is an
-intrusive linked list threaded through the edge pool. `solve` rearranges those
-lists with O(1) pointer rewiring — pop a list head, insert before a known edge,
-splice one list into another — instead of scanning and shifting `Vec`s.
+### Pipeline
 
-### typeset-parser crate (`typeset-parser/src/`)
+| Pass             | Lowers                    | Does |
+|------------------|---------------------------|------|
+| `serialize`      | `Layout` → `FixedDoc`     | split into lines at hard breaks and inside broken sequences; coalesce runs of fixed compositions; record scope open/close deltas |
+| `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve and read back the grp/seq scope graph per line |
+| `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms; strip nest/pack paths to prop lists |
+| `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq; right-associate compositions |
+| `rescope`        | `DenullDoc` → `Doc`       | factor shared nest/pack prefixes; build the `Doc` and its extent tables |
 
-- `lib.rs`: Procedural macro implementation for parsing layout DSL syntax
-- Dependencies: `syn`, `quote`, `proc-macro2` for macro parsing
+Each pass's output type lives in its module; `types/ir.rs` holds what they
+share: `Term` (a nest/pack path over a leaf), `PathNode`, `Prop`, `Scope`,
+and the generic composition-tree nodes `Obj<T>` / `Fix<T>` that
+`resolve_scopes` produces over `Term` and `denull`/`normalize` fold over
+`DenullTerm`.
 
-## Layout System Architecture
+**serialize.** One left-to-right DFS with an explicit stack. It threads:
+- the innermost nest/pack wrapper, as an id into a shared path arena (one
+  node per wrapper descended through, so sibling leaves share their spine);
+- the innermost grp/seq wrapper, as an id into a parent-linked scope-chain
+  arena. A composition records the scopes that open and close at it by
+  diffing its chain against the previous composition's on the same line;
+  the chains share their outer spine by id and carry a depth, so the diff is
+  an O(delta) walk to the common suffix. Carrying deltas (total size O(number
+  of scopes)) rather than each composition's full scope stack is what keeps
+  deeply nested scopes linear;
+- `fixed` (under a `fix`: every surviving composition is fixed) and `broken`
+  (under a `seq` whose subtree contains a hard line: the seq is dropped and
+  its breakable compositions become lines; `fix` and `grp` reset it). The
+  line decision uses the composition's own attribute, before the fix
+  override.
 
-The library implements a two-phase pretty printing system:
+The leaves are then laid out as lines of items, with maximal runs of terms
+joined by fixed compositions coalesced into single fix items. Everything is
+ranges into five shared buffers, so no per-line or per-run allocation.
 
-### Phase 1: Layout Construction
-Build layout trees using constructors:
-- **Text**: `text()` - literal text nodes
-- **Composition**: `comp()` - combine layouts with spacing/breaking behavior  
-- **Control**: `nest()`, `pack()` - indentation management
-- **Grouping**: `fix()`, `grp()`, `seq()` - break behavior control
+**resolve_scopes.** Per line, every item is a graph node and every scope an
+edge from the node it opened at to the node it closed at (`graphify`), built
+in ascending scope-index order, which `solve` and `rebuild` depend on. A node
+has both incoming and outgoing edges only when a fix run straddles a scope
+boundary (`grp(a + b) !& c`: the item `[b c]` both closes the grp and follows
+it). `solve` resolves those by widening: leading seq out-edges are re-sourced
+onto the incoming side, and the incoming list is handed forward past the first
+grp out-edge. `rebuild` then reads each line back as a composition spine with
+grp/seq wrappers, using a flat continuation stack. Adjacency is intrusive
+linked lists through one shared edge arena, so every list move is O(1).
 
-### Phase 2: Compilation & Rendering
-1. **Compilation**: `compile()` applies optimization passes to layout trees
-2. **Rendering**: `render()` outputs formatted text with proper line breaks and indentation
+**denull, normalize, rescope** are plain folds over `Obj`/`Fix` arenas. Nest
+and pack props are ranges into one shared prop buffer, memoized per path id,
+so `rescope`'s prefix factoring only ever produces subranges.
 
-**Stack usage and representation:** every intermediate representation is a
-**flat structure** — postorder index arenas (children precede parents) or plain
-vectors — so each pass is a loop over node indices: bottom-up folds run
-forward (children's results already computed), inherited context runs backward
-(parents visited first). `flatten` is the single step that walks the public
-`Box`-recursive `Layout` tree; all leaf text is concatenated into one buffer
-there and borrowed (as spans) through the rest of the pipeline, so the layout
-node arena itself owns no text and drops right after `resolve_breaks`. No bump
-arena remains — every accumulator is a flat `Vec` arena its pass owns (see
-above). Every stage uses
-constant native stack regardless of layout depth, so deep layouts never
-overflow; depth shows up as O(depth) heap instead. The output `Doc` is a flat
-arena too — a `Vec<Row>` spine plus two index-linked `Vec`s of shallow nodes
-(`ObjNode`/`FixNode`) — so `Clone`, `Drop`, and `Debug` are derived and
-deep-safe *structurally*. `Layout` (the input AST) is the one `Box`-recursive
-tree, so it keeps iterative `Drop`/`Clone`/`Debug` impls (see
-`types/traversal.rs`). `compile()` is therefore infallible and imposes no depth
-cap; layout depth shows up only as O(depth) heap, freed once compilation
-returns.
+### `Doc` and the renderer
 
-**Renderer:** break decisions are O(1). Compilation precomputes each object's
-flat mid-line extent and its mid-line distance to the first composition
-boundary (mid-line, `head == false`, neither nest nor pack advances the
-position, so both are exact state-independent sums stored in the `Doc`).
-`should_break` compares arithmetic against the width; `will_fit` only falls
-back to an actual measuring fold at the head of a line, where indentation
-offsets depend on live state — and that fold is width-bounded (it stops the
-moment the position passes the target width).
+`Doc` is one optional root object per line (`None` for an empty line), an
+object arena, a fixed-object arena, one text buffer, and two side tables:
+each object's mid-line extent and its mid-line distance to the first
+composition boundary. Mid-line, neither nest nor pack advances the position,
+so both are exact state-independent sums computed once in `DocBuilder::finish`.
 
-## Key Layout Concepts
+The renderer (`Renderer` over a `Config { width, tab }` and a
+`Cursor { head, broken, lvl, pos }`) walks the arena with explicit frame
+stacks. `should_break` is arithmetic on the boundary table; `will_fit` is
+arithmetic on the extent table except at the head of a line, where
+indentation depends on live state and it folds — a fold that stops as soon as
+the position passes the width. Pack marks are a dense `Vec<Option<usize>>`
+keyed by pack index. Lines are joined by newlines.
 
-### Composition Behavior
-- **Padded vs Unpadded**: Whether spaces are inserted between elements
-- **Fixed vs Breakable**: Whether line breaks are allowed at composition points
-- **Operators**: `&` (unpadded), `+` (padded), `!&` (unpadded+fix), `!+` (padded+fix)
+## Upstream reference
 
-### Special Constructors
-- `fix`: Treat content as literal (no breaks allowed)
-- `grp`: Break as a group (all elements break together)
-- `seq`: Sequential breaking (break all if any breaks)
+The compiler is a port; the OCaml original is the ground truth when behaviour
+diverges, and every refactor is held to byte-identical output against it (see
+TESTING.md). With the OCaml packages installed the source sits at
+`~/.opam/default/lib/typeset/Typeset.ml`.
 
-### Indentation Types
-- `nest`: Fixed-width indentation increase
-- `pack`: Align to position of first literal character
+## typeset-parser crate (`typeset-parser/src/`)
 
-### Line Breaking
-- `@`: Soft line break (break if needed)
-- `@@`: Hard line break (always break)
+`lib.rs`: the `layout!` macro, built on `syn`/`quote`/`proc-macro2`. It
+expands each DSL node to the matching `typeset` constructor call, so the macro
+is pure sugar over the constructor API. `typeset::dsl` accepts the same
+language at run time.
+
+## Layout language
+
+- **Text** `text()`, **empty** `null()`
+- **Composition** `comp(l, r, Pad, Break)`: `Pad` chooses a space between
+  operands, `Break::Fixed` forbids the composition from breaking. Shortcuts
+  `pad`/`unpad`/`fix_pad`/`fix_unpad`; DSL `+ & !+ !&`
+- **Hard break** `line(l, r)`; DSL `@`, and `@@` for a blank line
+- **Wrappers**: `fix` (never breaks inside), `grp` (compositions inside break
+  all-or-nothing), `seq` (once one composition breaks, all later ones do),
+  `nest` (continuation lines indent by one tab), `pack` (continuation lines
+  align to the column of the first element)

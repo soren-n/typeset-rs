@@ -7,12 +7,15 @@ The project uses a comprehensive dual-language testing approach combining Rust u
 ## Test Categories
 
 ### 1. Rust Unit Tests
-**Location**: Throughout crate modules with `#[cfg(test)]`
+**Location**: `#[cfg(test)]` modules in each pass, `dsl.rs`, and `layout.rs`
 
 **Coverage**:
-- Individual function behavior
-- Layout constructor behavior
-- Compiler pass validation (including per-pass depth-50k deep-safety tests)
+- Each pass's rules on small hand-built inputs (serialize's line splitting,
+  scope deltas and fix coalescing; resolve_scopes' scope reconstruction and
+  widening; denull's pad merging; normalize's eliminations and reassociation;
+  rescope's prefix factoring), plus the DSL parser
+- Two end-to-end depth-50k tests in `pipeline.rs` guard constant native stack
+  for the whole pipeline; passes do not repeat that individually
 
 The compiler uses only standard-library collections (`Vec`/slices,
 `BTreeMap`), so there is no bespoke data-structure test suite; their use is
@@ -23,14 +26,16 @@ QCheck suite (below) that validates rendering against the reference, together
 with the Python differential fuzzer. (Earlier bespoke `proptest` tests over the
 custom data structures were removed along with those structures.)
 
-### 2. Rust Integration Tests  
+### 2. Rust Integration Tests
 **Location**: `typeset/tests/`
 
-**Coverage**:
-- End-to-end layout compilation and rendering
-- API usage scenarios
-- Parser macro functionality
-- Performance characteristics
+- `rendering.rs`: exact-output tests. Every expected string was produced by
+  the OCaml oracle for the same layout, tab and width; add new cases the same
+  way (`tests/_build/oracle '<dsl>' <tab> <width>`), never by pasting what the
+  Rust implementation printed
+- `scaling.rs`: the one wall-clock assertion, an order-of-magnitude guard
+  that nested scopes compile in linear time
+- `unicode_width_tests.rs`: widths are counted in characters
 
 ### 3. OCaml Property-Based Tests
 **Location**: `tests/tester/`
@@ -150,7 +155,7 @@ Tests run automatically on:
 - Every commit (via git hooks, once installed with `./scripts/install-hooks.sh`)
 - Pull requests and pushes to `main` (via GitHub Actions)
 - Multiple Rust versions (stable, MSRV 1.89.0)
-- Security auditing (`cargo deny`)
+- License and advisory policy (`cargo deny`)
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) runs two jobs that gate
 merges: a `check` job (fmt, clippy, `cargo doc`, `cargo check`, and

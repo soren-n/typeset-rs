@@ -238,16 +238,24 @@ after the `FixedDoc`-arena rework); peak memory cut 28-90% by workload shape.
     depth-bounded peak. A dense-`Vec` rewrite of it is byte-identical but saves
     ~0 allocations and slightly regresses peak memory, so it was not landed.
 
+### Landed 2026-09: arena `Layout`
+
+`Layout` is a flat arena built by the constructors (the former candidate
+"arena-native construction"), so there is no `Box` tree and no `flatten`
+pass. Warmed, `json 8 d=5` (201k nodes): build 10.4 → 12.5 ms (binary
+constructors copy the smaller operand, O(n log n) on balanced trees), compile
+31.9 → 22.6 ms (no tree teardown), clone 351k allocations / 11 ms → 2
+allocations / 0.5 ms, drop 11 ms → 0. Net ~17% faster end to end on that
+workload and far more for anything that clones; chains and nest/pack-heavy
+workloads improve across the board.
+
 ### Remaining candidates
 
 1. **Selective pass fusion.** The two normalize elimination folds have nearly
    identical shapes; fusing them saves one full arena rebuild. Fuse further
    only with care — the pass-per-file structure is a deliberate legibility
    choice.
-2. **Arena-native construction** (builder API or macro-emitted arenas) to
-   skip the `Box` tree entirely; public-API surface, only worth it if
-   compile-per-keystroke latency becomes a use case.
-3. **CI regression gating** — run the `scaling` bench (or instruction counts
+2. **CI regression gating** — run the `scaling` bench (or instruction counts
    via iai-callgrind/CodSpeed on a Linux runner) automatically. Especially
    worthwhile here: criterion's wall-clock %-change is dominated by
    code-layout noise on the compile benches, so gate on instruction counts

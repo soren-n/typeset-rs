@@ -280,18 +280,17 @@ Infix fixed compositions are useful when you need to fix a literal to the beginn
 ## Compiling the layout
 Your custom layout function (pretty printer) will build a layout, which you then need to compile and render:
 ```Rust
-...
 let document = compile(layout);
-let result = render(document, 2, 80);
-println!(result);
-...
+let result = render(&document, 2, 80);
+println!("{result}");
+// or: layout.compile().render(2, 80)
 ```
 I.e. the layout should be given to the compiler, which gives you back a document ready for rendering, which you in turn give to the renderer along with arguments for indentation width and layout buffer width; in the above case indentation width is 2 and the layout buffer width is 80.
 
 The reason for splitting the solver into `compile` and `render`, is in case the result is to be displayed in a buffer where the width is variable; i.e. you will not need to re-compile the layout between renderings using varying buffer width.
 
 ## DSL and parsing
-Additionally a small DSL has been defined, and a [procedural macro parser](https://github.com/soren-n/typeset-rs/typeset-derive) implemented, which allow you to write your layouts more succinctly (versus spelling out the full layout tree with the given constructors, which we've been doing so far in this introduction):
+A small DSL lets you write layouts more succinctly than spelling out the constructor tree. The [`typeset-parser`](../typeset-parser/) crate parses it at compile time with the `layout!` macro; `typeset::dsl::parse` parses the same language (without variables) at run time:
 ```Rust
 ...
 use typeset_parser::layout;
@@ -304,7 +303,7 @@ let my_layout = layout! {
 ...
 
 ```
-The full grammar is as such:
+All binary operators share one precedence level and associate to the right. The full grammar is as such:
 ```text
 x         (Identifier variables for layout fragments)
 null      (Constructor for the empty layout)

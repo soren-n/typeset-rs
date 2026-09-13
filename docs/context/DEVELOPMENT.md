@@ -26,9 +26,12 @@ cd tests && ./run.sh          # Run all tests
 ### Test System Architecture
 
 **Rust Tests**:
-- Unit tests: `typeset/tests/` and inline `#[cfg(test)]` modules
+- Unit tests: inline `#[cfg(test)]` modules per pass
+- `typeset/tests/rendering.rs`: exact-output tests whose expected strings
+  came from the OCaml oracle; `scaling.rs`: the linear-time guard;
+  `unicode_width_tests.rs`
 - Differential driver: `tests/differential/` (workspace bin, not published)
-- Performance tests: `typeset/benches/`
+- Benchmarks: `typeset/benches/`
 
 **OCaml Property-Based Tests**:
 - Located in: `tests/tester/`
@@ -104,15 +107,16 @@ cargo check --all-targets --all-features  # Type checking
 
 - Use existing code style and conventions
 - Follow Rust naming conventions (snake_case for functions, PascalCase for types)
-- Never recurse on the native stack over user-controlled depth. Prefer
-  eliminating the recursion structurally: intermediate representations are flat
-  postorder arenas (children precede parents), so bottom-up folds are forward
-  loops and inherited context is a backward loop — no frame stacks at all. The
-  output `Doc` is a flat arena too, so `Clone`/`Drop`/`Debug` are derived and
-  deep-safe. The one `Box`-recursive tree is the public `Layout` input, which
-  keeps hand-written iterative `Clone`/`Drop`/`Debug` and is walked exactly
-  once, by the `flatten` pass
-- Keep new intermediate state flat and owned: `Vec`-backed arenas indexed by
-  `u32` ids, with any persistent/shared accumulator a flat parent-linked arena
-  (ids and a `depth` field, never pointers or a bump)
-- Maintain separation between layout construction and compilation phases
+- Never recurse on the native stack over user-controlled depth. Every
+  representation, `Layout` and `Doc` included, is a flat postorder arena
+  (children precede parents), so bottom-up folds are forward loops, inherited
+  context is a backward loop, and `Clone`/`Drop`/`Debug` derive. Where a walk
+  needs a stack (the DFS in `serialize`, the renderer, the DSL parser), it is
+  an explicit `Vec` of frames
+- Use the arena primitives in `types/arena.rs`: `Arena<T>` with typed
+  `Id<T>`s, `IdVec<K, V>` side tables, `Range<T>` into shared buffers, and
+  `Option<Id<T>>` for absent links — never raw `u32` indices or sentinel values
+- A pass owns the type it produces; only genuinely shared vocabulary goes in
+  `types/ir.rs`
+- Every change is held to byte-identical output against the OCaml oracle
+  (`cd tests && ./build.sh && python3 fuzz.py 3000 1`)

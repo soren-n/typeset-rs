@@ -83,17 +83,15 @@
 //! // Output will adapt to width constraints automatically
 //! ```
 //!
-//! ### With Parser (Optional)
+//! ### The DSL
 //!
-//! For more concise syntax, use the optional parser crate:
+//! The `typeset-parser` crate's `layout!` macro accepts a compact DSL at
+//! compile time; [`dsl::parse`] accepts the same language at run time:
 //!
-//! ```ignore
-//! use typeset_parser::layout;
-//!
-//! let my_layout = layout! {
-//!     nest ("function" + "name()")
-//!     pack ("{ body }")
-//! };
+//! ```rust
+//! let layout = typeset::dsl::parse(r#"nest ("function" + "name()") @ "{ body }""#)?;
+//! assert_eq!(layout.compile().render(2, 40), "  function name()\n{ body }");
+//! # Ok::<(), typeset::dsl::ParseError>(())
 //! ```
 //!
 //! ## Rust Version Compatibility

@@ -8,6 +8,38 @@ by the previous automated release tooling.
 
 ## [Unreleased]
 
+### Breaking
+
+* **`Layout` is an opaque arena and nothing in the API is boxed.** Every
+  constructor takes and returns `Layout` by value, `compile(Layout) -> Doc`,
+  and `render(&Doc, tab, width)`. `Layout`'s variants and the composition
+  attribute type are no longer public; build layouts through the constructors.
+  `join_with`, `join_with_spaces`, `join_with_commas` and `join_with_lines`
+  take any `IntoIterator<Item = Layout>`.
+* `Layout` no longer implements `Default`.
+
+### Added
+
+* `Layout::compile(self) -> Doc` and `Doc::render(&self, tab, width)`, so
+  `layout.compile().render(2, 80)` reads naturally.
+* `typeset::dsl::parse`: the `layout!` DSL parsed from a string at run time,
+  dependency-free and iterative, with byte-offset errors.
+
+### Changed
+
+* `Layout` clones and drops in constant allocations regardless of size
+  (previously one allocation per node), and compiles ~30% faster on tree
+  shaped documents because there is no input tree to dismantle.
+* The pipeline is five passes (`serialize`, `resolve_scopes`, `denull`,
+  `normalize`, `rescope`); every intermediate uses typed arena ids and
+  `Option` links instead of `u32::MAX` sentinels. Output is byte-identical to
+  the OCaml reference on the QCheck suite and tens of thousands of
+  differential-fuzz rounds.
+* The differential driver is the `typeset-differential` workspace member
+  (unpublished) instead of an excluded crate with a pest grammar.
+* CI no longer uploads release artifacts; the weekly workflow only runs
+  `cargo audit`. Dependabot is the dependency update path.
+
 ## [4.1.0](https://github.com/soren-n/typeset-rs/compare/v4.0.0...v4.1.0) (2026-07-23)
 
 ### Performance
@@ -392,6 +424,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Breaking
+
+* **`Layout` is an opaque arena and nothing in the API is boxed.** Every
+  constructor takes and returns `Layout` by value, `compile(Layout) -> Doc`,
+  and `render(&Doc, tab, width)`. `Layout`'s variants and the composition
+  attribute type are no longer public; build layouts through the constructors.
+  `join_with`, `join_with_spaces`, `join_with_commas` and `join_with_lines`
+  take any `IntoIterator<Item = Layout>`.
+* `Layout` no longer implements `Default`.
+
+### Added
+
+* `Layout::compile(self) -> Doc` and `Doc::render(&self, tab, width)`, so
+  `layout.compile().render(2, 80)` reads naturally.
+* `typeset::dsl::parse`: the `layout!` DSL parsed from a string at run time,
+  dependency-free and iterative, with byte-offset errors.
+
+### Changed
+
+* `Layout` clones and drops in constant allocations regardless of size
+  (previously one allocation per node), and compiles ~30% faster on tree
+  shaped documents because there is no input tree to dismantle.
+* The pipeline is five passes (`serialize`, `resolve_scopes`, `denull`,
+  `normalize`, `rescope`); every intermediate uses typed arena ids and
+  `Option` links instead of `u32::MAX` sentinels. Output is byte-identical to
+  the OCaml reference on the QCheck suite and tens of thousands of
+  differential-fuzz rounds.
+* The differential driver is the `typeset-differential` workspace member
+  (unpublished) instead of an excluded crate with a pest grammar.
+* CI no longer uploads release artifacts; the weekly workflow only runs
+  `cargo audit`. Dependabot is the dependency update path.
 
 ### Added
 - Comprehensive CI/CD pipeline with GitHub Actions
