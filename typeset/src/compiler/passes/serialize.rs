@@ -20,16 +20,9 @@
 //! composition's scope open/close deltas in the same sweep.
 
 use crate::compiler::types::{
-    Arena, Attr, Break, EdslDoc, EdslId, EdslNode, Id, PathId, PathNode, Prop, Scope, SerialComp,
-    SerialDoc, SerialEntry, Term, TermLeaf, append_range,
+    Arena, Attr, Break, EdslDoc, EdslId, EdslNode, Id, PathId, PathNode, Prop, Scope, ScopeKind,
+    SerialComp, SerialDoc, SerialEntry, Term, TermLeaf, append_range,
 };
-
-/// A grp/seq wrapper accumulated on the path to a composition.
-#[derive(Copy, Clone)]
-enum CompWrap {
-    Grp(u64),
-    Seq(u64),
-}
 
 /// A comp accumulator: the innermost enclosing grp/seq wrapper, `None` at the
 /// root.
@@ -42,7 +35,7 @@ type CompId = Option<Id<CompNode>>;
 /// (advance the deeper to equal depth, then step in lockstep to the shared id).
 #[derive(Copy, Clone)]
 struct CompNode {
-    wrap: CompWrap,
+    scope: Scope,
     parent: CompId,
     depth: u32,
 }
@@ -78,8 +71,8 @@ struct Work<'a> {
 /// The output borrows only the layout text (`'a`). Every accumulator is a flat
 /// arena owned by this pass, so nothing else outlives the return.
 pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
-    let mut i: u64 = 0;
-    let mut j: u64 = 0;
+    let mut i: u32 = 0;
+    let mut j: u32 = 0;
     let mut entries: Vec<Entry<'a>> = Vec::new();
     let mut paths: Arena<PathNode> = Arena::new();
     // Shared parent-linked arena of grp/seq wrappers; a `comps` accumulator is
@@ -129,13 +122,13 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
             wrapper @ (EdslNode::Grp(child) | EdslNode::Seq(child)) => {
                 let index = i;
                 i += 1;
-                let wrap = match wrapper {
-                    EdslNode::Grp(_) => CompWrap::Grp(index),
-                    _ => CompWrap::Seq(index),
+                let kind = match wrapper {
+                    EdslNode::Grp(_) => ScopeKind::Grp,
+                    _ => ScopeKind::Seq,
                 };
                 let depth = comps.map_or(0, |id| comp_arena[id].depth) + 1;
                 let id = comp_arena.push(CompNode {
-                    wrap,
+                    scope: Scope { kind, index },
                     parent: comps,
                     depth,
                 });
@@ -271,12 +264,6 @@ fn diff_comps(
     opens: &mut Vec<Scope>,
     closes: &mut Vec<Scope>,
 ) {
-    fn scope_of(wrap: CompWrap) -> Scope {
-        match wrap {
-            CompWrap::Grp(index) => Scope::Grp(index),
-            CompWrap::Seq(index) => Scope::Seq(index),
-        }
-    }
     let depth = |id: CompId| id.map_or(0, |id| arena[id].depth);
     let mut a = prev; // contributes closes
     let mut b = cur; // contributes opens
@@ -284,13 +271,13 @@ fn diff_comps(
     // Drop the deeper chain's excess head down to the shallower chain's depth.
     while da > db {
         let node = arena[a.expect("deeper chain is non-empty")];
-        closes.push(scope_of(node.wrap));
+        closes.push(node.scope);
         a = node.parent;
         da -= 1;
     }
     while db > da {
         let node = arena[b.expect("deeper chain is non-empty")];
-        opens.push(scope_of(node.wrap));
+        opens.push(node.scope);
         b = node.parent;
         db -= 1;
     }
@@ -299,8 +286,8 @@ fn diff_comps(
     while a != b {
         let na = arena[a.expect("chains of equal depth")];
         let nb = arena[b.expect("chains of equal depth")];
-        closes.push(scope_of(na.wrap));
-        opens.push(scope_of(nb.wrap));
+        closes.push(na.scope);
+        opens.push(nb.scope);
         a = na.parent;
         b = nb.parent;
     }
@@ -381,7 +368,7 @@ mod tests {
         // The outermost Pack is entered first and gets index 0; indices then
         // increase inward. The term's path starts at the innermost wrapper, so
         // walking outward counts back down to 0.
-        let mut expected = DEEP as u64;
+        let mut expected = DEEP as u32;
         let mut cur = term.path;
         while let Some(id) = cur {
             let PathNode {

@@ -13,17 +13,10 @@
 //! edge, splice one list into another) is O(1) pointer rewiring and building
 //! the graph allocates nothing per node or edge.
 
-use crate::compiler::types::{Arena, FixedDoc, FixedLine, Id, Range};
+use crate::compiler::types::{Arena, FixedDoc, FixedLine, Id, Range, ScopeKind};
 
 pub(super) type NodeId = Id<NodeData>;
 pub(super) type EdgeId = Id<EdgeData>;
-
-/// The kind of a grp or seq scope edge.
-#[derive(Debug, Copy, Clone)]
-pub(super) enum Property {
-    Grp,
-    Seq,
-}
 
 /// A node's ends of the intrusive edge lists. The node's payload is the
 /// like-indexed item of its line (nodes are index-aligned with `line.items`),
@@ -55,7 +48,7 @@ impl NodeData {
 
 #[derive(Debug)]
 pub(super) struct EdgeData {
-    pub prop: Property,
+    pub kind: ScopeKind,
     pub source: NodeId,
     pub target: NodeId,
     /// Links within the source's outs list. `prev_out` exists because solve

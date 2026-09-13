@@ -29,7 +29,7 @@ pub(crate) enum ObjNode {
     Grp(ObjId),
     Seq(ObjId),
     Nest(ObjId),
-    Pack(u64, ObjId),
+    Pack(u32, ObjId),
     Comp(ObjId, ObjId, bool),
 }
 

@@ -9,7 +9,8 @@
 //! arena, so each move — pop an outs head, insert before a known edge, splice a
 //! whole ins list in after a known edge — is O(1) pointer rewiring.
 
-use super::graph::{EdgeId, GraphDoc, NodeId, Property};
+use super::graph::{EdgeId, GraphDoc, NodeId};
+use crate::compiler::types::ScopeKind;
 
 /// Edges never cross lines, so the per-line resolution loop is one pass over
 /// the document-wide node arena.
@@ -48,9 +49,9 @@ fn solve_node(g: &mut GraphDoc<'_, '_>, node: NodeId) {
         let Some(curr) = g.nodes[node].outs_head else {
             break None;
         };
-        match g.edges[curr].prop {
-            Property::Grp => break Some(curr),
-            Property::Seq => {
+        match g.edges[curr].kind {
+            ScopeKind::Grp => break Some(curr),
+            ScopeKind::Seq => {
                 pop_out_head(g, node);
                 let src = g.edges[edge].source;
                 insert_out_before(g, src, curr, edge);

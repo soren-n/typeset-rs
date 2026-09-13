@@ -5,9 +5,9 @@
 //! [`RebuildDoc`] arena. Node payloads and pads are read straight from the
 //! borrowed `FixedDoc` line (nodes are index-aligned with the line's items).
 
-use super::graph::{GraphDoc, GraphLine, Property};
+use super::graph::{GraphDoc, GraphLine};
 use crate::compiler::types::{
-    Arena, FixRun, FixedItem, RFixId, RObjId, Range, RebuildDoc, RebuildFix, RebuildObj,
+    Arena, FixRun, FixedItem, RFixId, RObjId, Range, RebuildDoc, RebuildFix, RebuildObj, ScopeKind,
 };
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
@@ -191,9 +191,9 @@ fn visit_line<'a>(
                 let mut e = node.outs_head;
                 while let Some(edge) = e {
                     st.bounds.push(st.steps.len());
-                    st.steps.push(match g.edges[edge].prop {
-                        Property::Grp => RStep::Grp,
-                        Property::Seq => RStep::Seq,
+                    st.steps.push(match g.edges[edge].kind {
+                        ScopeKind::Grp => RStep::Grp,
+                        ScopeKind::Seq => RStep::Seq,
                     });
                     e = g.edges[edge].next_out;
                 }

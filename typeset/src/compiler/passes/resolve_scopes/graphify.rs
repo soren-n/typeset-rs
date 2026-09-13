@@ -10,29 +10,18 @@
 //! scope's `from` node, close pairs it with a `to` node and emits an edge — is
 //! linear in the number of scopes.
 
-use super::graph::{EdgeData, GraphDoc, GraphLine, NodeData, NodeId, Property};
-use crate::compiler::types::{Arena, FixedComp, FixedDoc, FixedItem, FixedLine, Range, Scope};
+use super::graph::{EdgeData, GraphDoc, GraphLine, NodeData, NodeId};
+use crate::compiler::types::{
+    Arena, FixedComp, FixedDoc, FixedItem, FixedLine, Range, Scope, ScopeKind,
+};
 use std::collections::BTreeMap;
-
-fn scope_index(scope: &Scope) -> u64 {
-    match scope {
-        Scope::Grp(index) | Scope::Seq(index) => *index,
-    }
-}
-
-fn scope_prop(scope: &Scope) -> Property {
-    match scope {
-        Scope::Grp(_) => Property::Grp,
-        Scope::Seq(_) => Property::Seq,
-    }
-}
 
 // The scopes open across the current point of a line, keyed by scope index:
 // each records the scope's kind and the node it opened at.
-type OpenScopes = BTreeMap<u64, (Property, NodeId)>;
+type OpenScopes = BTreeMap<u32, (ScopeKind, NodeId)>;
 // A resolved scope edge: (scope index, kind, from node, to node). Collected per
 // line, then materialized in scope-index order.
-type Edge = (u64, Property, NodeId, NodeId);
+type Edge = (u32, ScopeKind, NodeId, NodeId);
 
 // Applies one composition's scope deltas at `node`: close each scope that ends
 // here (pairing it with its recorded open into an edge), then open each scope
@@ -46,14 +35,13 @@ fn apply_comp(
     edges: &mut Vec<Edge>,
 ) {
     for scope in comp.closes.slice(scopes) {
-        let index = scope_index(scope);
-        let (prop, from) = open
-            .remove(&index)
+        let (kind, from) = open
+            .remove(&scope.index)
             .expect("Invariant: scope closed without a matching open");
-        edges.push((index, prop, from, node));
+        edges.push((scope.index, kind, from, node));
     }
     for scope in comp.opens.slice(scopes) {
-        open.insert(scope_index(scope), (scope_prop(scope), node));
+        open.insert(scope.index, (scope.kind, node));
     }
 }
 
@@ -106,16 +94,16 @@ fn visit_line<'b, 'a>(
     let nodes = Range::new(start, g.nodes.len());
     // Close every scope still open at the line's last node.
     let last = nodes.id_at(nodes.len() - 1);
-    for (index, (prop, from)) in &open {
-        edges.push((*index, *prop, *from, last));
+    for (index, (kind, from)) in &open {
+        edges.push((*index, *kind, *from, last));
     }
     // Materialize edges in scope-index order: each node's ins/outs lists are
     // ordered by scope index, which solve and rebuild depend on.
     edges.sort_by_key(|(index, ..)| *index);
-    for &(_index, prop, from, to) in edges.iter() {
+    for &(_index, kind, from, to) in edges.iter() {
         if from != to {
             let id = g.edges.push(EdgeData {
-                prop,
+                kind,
                 source: from,
                 target: to,
                 next_out: None,

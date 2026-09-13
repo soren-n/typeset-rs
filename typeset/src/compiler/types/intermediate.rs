@@ -126,9 +126,17 @@ pub(crate) enum TermLeaf<'a> {
 /// composition's full enclosing scope stack (O(depth) per composition) is what
 /// keeps the grp/seq passes linear on deeply nested scopes.
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum Scope {
-    Grp(u64),
-    Seq(u64),
+pub(crate) struct Scope {
+    pub(crate) kind: ScopeKind,
+    pub(crate) index: u32,
+}
+
+/// Which of the two breaking disciplines a scope imposes: `Grp` breaks its
+/// compositions all-or-nothing, `Seq` cascades a break forward.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum ScopeKind {
+    Grp,
+    Seq,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -246,7 +254,7 @@ pub(crate) type DFixId<'a> = Id<DenullFix<'a>>;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum Prop {
     Nest,
-    Pack(u64),
+    Pack(u32),
 }
 
 /// A denulled term: its nest/pack wrappers (outermost first, as a range into
