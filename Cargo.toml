@@ -9,7 +9,7 @@ members = [
 [workspace.package]
 edition = "2024"
 rust-version = "1.96.0"
-version = "4.1.0"
+version = "5.0.0"
 authors = ["Soren Norbaek <sorennorbaek@gmail.com>"]
 license = "GPL-3.0-or-later"
 categories = ["compilers", "template-engine"]
@@ -24,6 +24,6 @@ all = { level = "warn", priority = -1 }
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = "3.0"
-typeset = { version = "4.1.0", path = "typeset" }
-typeset-parser = { version = "4.1.0", path = "typeset-parser" }
+typeset = { version = "5.0.0", path = "typeset" }
+typeset-parser = { version = "5.0.0", path = "typeset-parser" }
 criterion = { version = "0.8", features = ["html_reports"] }

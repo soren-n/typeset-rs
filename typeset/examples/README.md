@@ -19,4 +19,4 @@ cargo run --example json_formatter -p typeset
 
 The macro form of the same language is in `typeset-parser/examples/full.rs`.
 The profiling probes live in `benches/`; see
-[docs/context/PERFORMANCE.md](../../docs/context/PERFORMANCE.md).
+[docs/context/DEVELOPMENT.md](../../docs/context/DEVELOPMENT.md).

@@ -5,7 +5,7 @@
 [![CI](https://github.com/soren-n/typeset-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/soren-n/typeset-rs/actions/workflows/ci.yml)
 [![MSRV](https://img.shields.io/badge/MSRV-1.96.0-blue)](https://github.com/soren-n/typeset-rs)
 
-An embedded DSL for defining source code pretty printers. The layout language is designed to fit naturally over a structurally recursive pass of some inductive data-structure. A layout is a tree of text literals composed with padded/unpadded compositions or line-breaks; the solver greedily fits as many literals per line as possible while respecting grouping, sequencing, and indentation properties.
+An embedded DSL for defining source code pretty printers. A layout is a tree of text literals joined by compositions that may or may not break, under wrappers that decide how groups break and how continuation lines indent; the solver greedily fits as many literals per line as the wrappers allow. The tutorial is the [typeset crate's README](typeset/README.md), also the crate documentation.
 
 ## Installation
 
@@ -61,10 +61,10 @@ cargo run --example full -p typeset-parser
 
 ## Documentation
 
-- [API reference (docs.rs)](https://docs.rs/typeset)
+- [API reference and tutorial (docs.rs)](https://docs.rs/typeset)
 - [DSL syntax reference](docs/context/DSL_SYNTAX.md) (compile time via `layout!`, run time via `typeset::dsl::parse`)
-- [Architecture overview](docs/context/ARCHITECTURE.md)
-- [Contributing guide](.github/CONTRIBUTING.md)
+- [Architecture](docs/context/ARCHITECTURE.md) and [development guide](docs/context/DEVELOPMENT.md)
+- [Contributing](.github/CONTRIBUTING.md)
 
 ## License
 

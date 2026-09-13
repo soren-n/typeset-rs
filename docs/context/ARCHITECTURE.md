@@ -1,149 +1,168 @@
 # Architecture
 
-## Project Structure
+## Project structure
 
 A Rust workspace of three crates:
-- **typeset**: the layout language, compiler, renderer, and a runtime DSL
-  parser (`typeset::dsl`)
-- **typeset-parser**: the `layout!` procedural macro (compile-time DSL)
-- **oracle/driver** (`typeset-differential`, unpublished): the driver
-  the OCaml differential harness renders through
+- **typeset**: the layout language, compiler, renderer, and the DSL parser
+  (`typeset::dsl`)
+- **typeset-parser**: the `layout!` procedural macro, a token adapter over
+  `typeset::dsl`
+- **oracle/driver** (`typeset-differential`, unpublished): the binary the
+  OCaml oracle harness renders through
 
 ## typeset crate (`typeset/src/`)
 
-- `lib.rs`: public API (`Layout`, `Doc`, `Pad`, `Break`, the constructors,
-  `Layout::compile`), the pass table, and the `dsl` module
-- `dsl.rs`: runtime parser for the layout DSL, iterative (parenthesis depth
-  costs heap, not stack)
-- `constructors.rs`: the constructor functions users build layouts with
-- `serialize.rs`, `resolve_scopes.rs`, `lower.rs`: one module per pass; each
-  owns the representation it produces
+- `lib.rs`: the crate doc (the crate README), the public API (`Layout`,
+  `Doc`, `Pad`, `Break`, the constructors), the pass table and
+  `Layout::compile`
+- `constructors.rs`: the functions users build layouts with
+- `layout.rs`: `Layout`, the public input type
+- `dsl.rs`: the DSL grammar, parser and run-time front end
+- `arena.rs`: the arena primitives every representation is built from
+- `serialize.rs`, `resolve_scopes.rs`, `lower.rs`: the three passes, each
+  owning the representation it produces
+- `doc.rs`: `Doc`, the public output type, and its builder
 - `render.rs`: `Doc::render`
-- `arena.rs` (the arena primitives), `layout.rs` (the public input type),
-  `ir.rs` (the vocabulary passes share), `doc.rs` (the public output type)
 
 ### Arenas, ids, ranges
 
-Every representation in the pipeline, the public `Layout` and `Doc` included,
-is a flat postorder arena: nodes live in a `Vec`, children precede their
-parents, and a node refers to its children by index. `types/arena.rs` gives
-that shape types:
+Every representation, the public `Layout` and `Doc` included, is a flat
+postorder arena: nodes live in a `Vec`, children precede their parents, and
+a node refers to its children by index. `arena.rs` gives that shape types:
 
 - `Arena<T>` is an append-only `Vec<T>` whose `push` returns an `Id<T>`.
-- `Id<T>` is a `u32` index usable only with arenas and side tables of element
-  type `T`, so a cross-arena index mix-up is a type error. It is non-zero
-  internally, so `Option<Id<T>>` is the same four bytes and is how every
-  "no parent" / "no next edge" / "not yet seen" link is expressed; there are
-  no sentinel values.
-- `IdVec<K, V>` is a side table with one `V` per element of an `Arena<K>`,
-  indexed by `Id<K>`.
+- `Id<T>` is a `u32` index usable only with arenas and side tables of
+  element type `T`, so a cross-arena index mix-up is a type error. It is
+  non-zero internally, so `Option<Id<T>>` is the same four bytes and is how
+  every absent link is expressed; there are no sentinel values.
+- `IdVec<K, V>` is a side table with one `V` per element of an `Arena<K>`.
 - `Range<T>` is a `[start, end)` pair of `u32` offsets into a shared buffer
-  (`Range<str>` for text), which is how a representation refers to a
-  sub-sequence without owning a `Vec` of its own.
+  (`Range<str>` for text): how a representation refers to a sub-sequence
+  without owning a `Vec`.
 
 Because everything is flat, every pass is a loop: a bottom-up fold runs
-forward over the arena (children's results are already computed), inherited
-context runs backward (parents first). No stage recurses on the native stack,
-so a layout of any depth compiles and renders; depth costs heap.
+forward over the arena, inherited context runs backward. No stage recurses
+on the native stack, so a layout of any depth compiles and renders; depth
+costs heap.
 
 ### `Layout`
 
-`Layout` is opaque: a postorder `Arena<LayoutNode>` with the root last and one
-text buffer that text nodes range into. Unary constructors push a node; binary
-constructors append the smaller operand's arena onto the larger (shifting its
-ids and text ranges) and push the parent. Building `n` nodes is O(n) for
-left- or right-leaning chains and O(n log n) in the worst (balanced) case.
-`Clone`, `Drop` and `Debug` are derived; cloning is two allocations.
+`Layout` is opaque: a postorder `Arena<LayoutNode>` with the root last and
+one text buffer that text nodes range into. The empty layout is the empty
+text. Unary constructors push a node; binary constructors append the
+smaller operand's arena onto the larger (shifting its ids and text ranges)
+and push the parent. Building `n` nodes is O(n) for left- or right-leaning
+chains and O(n log n) in the worst (balanced) case. `Clone`, `Drop` and
+`Debug` derive; cloning is two allocations.
 
 ### Pipeline
 
 | Pass             | Lowers                    | Does |
 |------------------|---------------------------|------|
-| `serialize`      | `Layout` → `FixedDoc`     | split into lines at hard breaks and inside broken sequences; coalesce runs of fixed compositions; record scope open/close deltas |
+| `serialize`      | `Layout` → `FixedDoc`     | split into lines at hard breaks and inside broken sequences; coalesce runs of fixed compositions; record scope deltas |
 | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve and read back the grp/seq scope graph per line |
-| `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms; strip nest/pack paths to prop lists |
-| `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq; right-associate compositions |
-| `rescope`        | `DenullDoc` → `Doc`       | factor shared nest/pack prefixes; build the `Doc` and its extent tables |
-
-Each pass's output type lives in its module; `types/ir.rs` holds what they
-share: `Term` (a nest/pack path over a leaf), `PathNode`, `Prop`, `Scope`,
-and the generic composition-tree nodes `Obj<T>` / `Fix<T>` that
-`resolve_scopes` produces over `Term` and `denull`/`normalize` fold over
-`DenullTerm`.
+| `lower`          | `RebuildDoc` → `Doc`      | drop empty terms; eliminate trivial grp/seq; right-associate; factor shared nest/pack prefixes; build the `Doc` and its extent tables |
 
 **serialize.** One left-to-right DFS with an explicit stack. It threads:
 - the innermost nest/pack wrapper, as an id into a shared path arena (one
   node per wrapper descended through, so sibling leaves share their spine);
-- the innermost grp/seq wrapper, as an id into a parent-linked scope-chain
-  arena. A composition records the scopes that open and close at it by
-  diffing its chain against the previous composition's on the same line;
-  the chains share their outer spine by id and carry a depth, so the diff is
-  an O(delta) walk to the common suffix. Carrying deltas (total size O(number
-  of scopes)) rather than each composition's full scope stack is what keeps
-  deeply nested scopes linear;
-- `fixed` (under a `fix`: every surviving composition is fixed) and `broken`
+- the innermost grp/seq wrapper, as an id into a parent-linked chain arena.
+  Scopes nest, so the scopes open at any point of a line form a stack: a
+  composition records how many scopes close at it and which open (outermost
+  first), by diffing its chain against the previous composition's along
+  their shared spine, an O(delta) walk. Carrying deltas rather than full
+  scope stacks is what keeps deeply nested scopes linear;
+- `fixed` (under a `fix`, every surviving composition is fixed) and `broken`
   (under a `seq` whose subtree contains a hard line: the seq is dropped and
   its breakable compositions become lines; `fix` and `grp` reset it). The
   line decision uses the composition's own attribute, before the fix
   override.
 
-The leaves are then laid out as lines of items, with maximal runs of terms
-joined by fixed compositions coalesced into single fix items. Everything is
-ranges into five shared buffers, so no per-line or per-run allocation.
+Every item of a line is a run: one or more terms joined by fixed
+compositions, which never breaks. Lines, runs, terms and separators are
+ranges into shared buffers, so nothing is allocated per line or per run.
 
-**resolve_scopes.** Per line, every item is a graph node and every scope an
-edge from the node it opened at to the node it closed at (`graphify`), built
-in ascending scope-index order, which `solve` and `rebuild` depend on. A node
-has both incoming and outgoing edges only when a fix run straddles a scope
-boundary (`grp(a + b) !& c`: the item `[b c]` both closes the grp and follows
-it). `solve` resolves those by widening: leading seq out-edges are re-sourced
-onto the incoming side, and the incoming list is handed forward past the first
-grp out-edge. `rebuild` then reads each line back as a composition spine with
-grp/seq wrappers, using a flat continuation stack. Adjacency is intrusive
-linked lists through one shared edge arena, so every list move is O(1), which
-keeps a line with tens of thousands of nested scopes linear.
+**resolve_scopes.** Scopes are ranges over a line's items, and items only
+exist once fixed compositions have coalesced into runs, so a scope's extent
+cannot be read off the tree. Per line, every item is a graph node and every
+scope an edge from the node it opened at to the node it closed at, built by
+replaying the stack deltas in opening order, which is document pre-order.
+A node has both incoming and outgoing edges only when a run straddles a
+scope boundary (`grp(a + b) !& c`: the run `[b c]` both closes the grp and
+follows it). `solve` resolves those by widening: leading seq out-edges are
+re-sourced onto the incoming side, and the incoming list is handed forward
+past the first grp out-edge, with tie-breaks that depend on edge-list
+order. `rebuild` reads each line back as a composition spine with grp/seq
+wrappers, using a stack of open scopes over one partial spine.
 
-This list-then-graph round trip is not incidental. Scopes are ranges over
-*items*, and items only exist after fix runs coalesce leaves, so a scope's
-extent cannot be read off the tree; the graph is the direct representation of
-those ranges, and the widening rules (including their tie-breaks, which
-depend on edge-list order) are what the reference implementation defines. A
-tree-rewrite formulation was evaluated and would re-encode the same ranges
-less directly.
+The graph is a side table over the item buffer (a node is its item's id)
+plus one edge arena; a node's incident edges are intrusive linked lists
+through that arena, so every list move is O(1). This is the reference
+implementation's formulation and its widening rules are defined over it; a
+tree rewrite would re-encode the same item ranges less directly.
 
-**denull, normalize, rescope** are plain folds over `Obj`/`Fix` arenas. Nest
-and pack props are ranges into one shared prop buffer, memoized per path id,
-so `rescope`'s prefix factoring only ever produces subranges.
+**lower.** The reference runs five tree rewrites here (denull, seq and grp
+identity elimination, reassociation, rescoping); `lower` applies the same
+rules, in the same non-confluent order, as three loops with side tables
+over the rebuilt arena:
+1. forward: survival (empty texts vanish, wrappers and all), the pad a
+   composition with a vanished left operand forwards to its left, the seq
+   count (a grp is opaque to it), and the lowered runs (empty terms dropped,
+   pads between survivors merged, the first survivor's wrappers kept);
+2. backward: whether each node is directly under a seq and whether it is at
+   the head of its group, which decides which seqs survive (fewer than two
+   compositions, or directly under a seq: dropped);
+3. forward: the grp count and grp survival (no compositions, or at the head
+   of its group: dropped), then each composition tree threaded as a chain
+   of atoms and materialized right-nested at every surviving wrapper and
+   line root, factoring at each composition the nest/pack prefix its
+   operands share, straight into the `Doc` builder.
 
 ### `Doc` and the renderer
 
 `Doc` is one optional root object per line (`None` for an empty line), an
-object arena, a fixed-object arena, one text buffer, and two side tables:
-each object's mid-line extent and its mid-line distance to the first
-composition boundary. Mid-line, neither nest nor pack advances the position,
-so both are exact state-independent sums computed once in `DocBuilder::finish`.
+object arena, a run buffer (each entry a text with the pad before it), one
+text buffer, and two side tables: each object's mid-line extent and its
+mid-line distance to the first composition boundary. Mid-line, neither nest
+nor pack advances the position, so both are exact state-independent sums
+computed once in `DocBuilder::finish`.
 
-The renderer (`Renderer` over a `Config { width, tab }` and a
-`Cursor { head, broken, lvl, pos }`) walks the arena with explicit frame
-stacks. `should_break` is arithmetic on the boundary table; `will_fit` is
-arithmetic on the extent table except at the head of a line, where
-indentation depends on live state and it folds — a fold that stops as soon as
-the position passes the width. Pack marks are a dense `Vec<Option<usize>>`
+The renderer walks the arena with an explicit frame stack. `should_break`
+is arithmetic on the boundary table. `will_fit` is arithmetic on the extent
+table mid-line; at the head of a line indentation offsets depend on the
+live level and pack marks, but offsets are only emitted before the first
+text on the line, so the head-of-line measure walks the object's left
+spine and adds the flat extent. Pack marks are a dense `Vec<Option<usize>>`
 keyed by pack index. Lines are joined by newlines.
+
+### Semantics worth knowing
+
+These follow from the reference and are pinned by tests:
+- `null` is `text("")`; both vanish together with any wrappers on them.
+- A fixed composition's run keeps the nest/pack wrappers of its *first*
+  literal, so `fix_unpad(text("("), pack(args))` takes the first argument
+  out of the pack. Fix a delimiter to what precedes it; compose an opening
+  delimiter with `unpad`.
+- A `seq` that does not fit breaks every composition beneath it, including
+  inside nested seqs; only a `grp` resets that.
+- Width is counted in `char`s, not bytes (the reference counts bytes; this
+  is the one deliberate divergence) and not display columns.
 
 ## Upstream reference
 
-The compiler is a port; the OCaml original is the ground truth when behaviour
-diverges, and every refactor is held to byte-identical output against it (see
-TESTING.md). With the OCaml packages installed the source sits at
-`~/.opam/default/lib/typeset/Typeset.ml`.
+The compiler is a port; the OCaml original is the ground truth when
+behaviour diverges, and every change is held to byte-identical output
+against it (see DEVELOPMENT.md). With the OCaml packages installed the
+source sits at `~/.opam/default/lib/typeset/Typeset.ml`.
 
 ## typeset-parser crate (`typeset-parser/src/`)
 
-`lib.rs`: the `layout!` macro, built on `syn`/`quote`/`proc-macro2`. It
-expands each DSL node to the matching `typeset` constructor call, so the macro
-is pure sugar over the constructor API. `typeset::dsl` accepts the same
-language at run time.
+`lib.rs`: the `layout!` macro. It flattens its Rust token trees into
+`typeset::dsl::Token`s (spans as positions), hands them to
+`typeset::dsl::parse_tokens`, and builds constructor calls through the
+`Build` trait, so the macro and `typeset::dsl::parse` share one grammar
+implementation. A bare identifier is a variable: a `Layout` in scope,
+cloned.
 
 ## Layout language
 
@@ -152,7 +171,8 @@ language at run time.
   operands, `Break::Fixed` forbids the composition from breaking. Shortcuts
   `pad`/`unpad`/`fix_pad`/`fix_unpad`; DSL `+ & !+ !&`
 - **Hard break** `line(l, r)`; DSL `@`, and `@@` for a blank line
-- **Wrappers**: `fix` (never breaks inside), `grp` (compositions inside break
-  all-or-nothing), `seq` (once one composition breaks, all later ones do),
-  `nest` (continuation lines indent by one tab), `pack` (continuation lines
-  align to the column of the first element)
+- **Wrappers**: `fix` (never breaks inside), `grp` (compositions inside
+  break all-or-nothing), `seq` (once one composition breaks, all later ones
+  do), `nest` (continuation lines indent by one tab), `pack` (continuation
+  lines align to the column of the first element)
+- **Joins**: `join_with_spaces`, `join_with_commas`, `join_with_lines`

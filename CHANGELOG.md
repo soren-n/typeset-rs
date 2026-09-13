@@ -6,7 +6,7 @@ entry for each release before tagging it (see the release steps in
 [Semantic Versioning](https://semver.org/). Entries below `3.2.1` were generated
 by the previous automated release tooling.
 
-## [Unreleased]
+## [5.0.0] (unreleased)
 
 ### Breaking
 
@@ -18,38 +18,50 @@ by the previous automated release tooling.
   before it (previously a line could start with a comma). `join_with`,
   `space`, `comma`, `semicolon`, `newline`, `blank_line`, `parens`,
   `brackets` and `braces` are gone: each was one composition, and the
-  delimiter helpers encoded a style choice that is wrong as often as right.
-  A blank line is `line(a, line(null(), b))`.
+  delimiter helpers encoded a style choice. A blank line is
+  `line(a, line(null(), b))`.
 * **`Layout` is an opaque arena and nothing in the API is boxed.** Every
-  constructor takes and returns `Layout` by value, `compile(Layout) -> Doc`,
-  and `render(&Doc, tab, width)`. `Layout`'s variants and the composition
-  attribute type are no longer public; build layouts through the constructors.
-  `join_with`, `join_with_spaces`, `join_with_commas` and `join_with_lines`
-  take any `IntoIterator<Item = Layout>`.
-* `Layout` no longer implements `Default`.
+  constructor takes and returns `Layout` by value. `Layout`'s variants and
+  the composition attribute type are no longer public; build layouts
+  through the constructors. The joins take any `IntoIterator<Item = Layout>`.
+  `Layout` no longer implements `Default`.
+* **`typeset-parser` depends on `typeset`** (it feeds the shared parser);
+  the two crates share one version as before.
+* MSRV raised from 1.89.0 to 1.96.0.
 
 ### Added
 
-* `Layout::compile(self) -> Doc` and `Doc::render(&self, tab, width)`, so
-  `layout.compile().render(2, 80)` reads naturally.
-* `typeset::dsl::parse`: the `layout!` DSL parsed from a string at run time,
-  dependency-free and iterative, with byte-offset errors.
+* `typeset::dsl`: the DSL grammar with one implementation. `parse` reads a
+  string at run time (dependency-free, iterative, byte-offset errors);
+  `parse_tokens` with the `Token` and `Build` types is what the `layout!`
+  macro feeds, so the two front ends cannot disagree.
+* The crate README is the crate documentation: a tutorial in the current
+  API whose examples are doctests.
 
 ### Changed
 
-* MSRV raised from 1.89.0 to 1.96.0.
-* `Layout` clones and drops in constant allocations regardless of size
-  (previously one allocation per node), and compiles ~30% faster on tree
-  shaped documents because there is no input tree to dismantle.
-* The pipeline is five passes (`serialize`, `resolve_scopes`, `denull`,
-  `normalize`, `rescope`); every intermediate uses typed arena ids and
-  `Option` links instead of `u32::MAX` sentinels. Output is byte-identical to
-  the OCaml reference on the QCheck suite and tens of thousands of
-  differential-fuzz rounds.
-* The differential driver is the `typeset-differential` workspace member
-  (unpublished) instead of an excluded crate with a pest grammar.
-* CI no longer uploads release artifacts; the weekly workflow only runs
-  `cargo audit`. Dependabot is the dependency update path.
+* The compiler is three passes over flat arenas: `serialize` (lines of
+  runs, scope deltas as stack pushes and pops), `resolve_scopes` (the scope
+  graph as a side table over the item buffer, solved in place, read back
+  with a stack of open scopes) and `lower` (empty terms, grp/seq identities,
+  reassociation and nest/pack factoring in three loops with side tables
+  instead of five arena rebuilds). Every item is a run of one or more
+  fixed-joined terms; the fix tree, the term leaf enum and the `Null` node
+  are gone (`null()` is `text("")`, which the reference treats identically).
+  Typed arena ids and `Option` links replace sentinels throughout.
+* The renderer's head-of-line fit measure is a left-spine walk plus the
+  precomputed extent; the measuring frame stack is gone.
+* `Layout` clones and drops in constant allocations regardless of size and
+  compile stays constant-allocation; `json 8 d=5` compiles ~35% faster
+  than 4.1.0 and renders 8-12% faster on pack- and scope-heavy documents.
+* Output is byte-identical to the OCaml reference on the QCheck identity
+  suite, whose generator is now biased toward stacked grp/seq (the Python
+  fuzzer that existed for that bias is gone). The harness lives in
+  `oracle/`; the pre-commit hook no longer skips it silently.
+* The profiling probes are harness-less bench targets sharing one workload
+  module with the scaling bench; the micro-benchmark suite is gone.
+* Releases publish with `cargo publish --workspace`; `Cargo.lock` is
+  committed; the context docs are three files.
 
 ## [4.1.0](https://github.com/soren-n/typeset-rs/compare/v4.0.0...v4.1.0) (2026-07-23)
 

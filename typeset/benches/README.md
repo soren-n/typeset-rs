@@ -1,8 +1,8 @@
 # Typeset Benchmarks
 
 One criterion suite lives here. The full benchmarking and profiling guide,
-including the audit history and what the numbers mean, is in
-[docs/context/PERFORMANCE.md](../../docs/context/PERFORMANCE.md).
+is in
+[docs/context/DEVELOPMENT.md](../../docs/context/DEVELOPMENT.md).
 
 ## The suite
 
@@ -42,7 +42,7 @@ Criterion's wall-clock percentage change on the compile benches is dominated
 by code-layout noise: a refactor that shifts symbol addresses can report a
 30-40% swing with no real change. For allocation-shape work trust
 `alloc_probe` (exact counts) and an isolated, warmed `perf_probe` run over the
-criterion delta. See PERFORMANCE.md for the cases where this bit.
+criterion delta. See DEVELOPMENT.md.
 
 ## Adding a benchmark
 

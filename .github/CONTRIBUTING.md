@@ -1,159 +1,29 @@
-# Contributing to typeset-rs
+# Contributing
 
-Thank you for your interest in contributing! This guide will help you understand our development process and automated workflows.
+## Setup
 
-## Development Setup
-
-1. **Prerequisites**
-   - Rust (stable toolchain, MSRV 1.96.0)
-   - OCaml and opam (for tests)
-   - Git
-
-2. **Clone and setup**
-   ```bash
-   git clone https://github.com/soren-n/typeset-rs.git
-   cd typeset-rs
-   ```
-
-3. **Install the OCaml test dependencies**
-   ```bash
-   opam install qcheck typeset
-   ```
-
-4. **Install git hooks**
-   Hooks are tracked in `.githooks/` but are not active in a fresh clone. Enable
-   them once:
-   ```bash
-   ./scripts/install-hooks.sh
-   ```
-   The pre-commit hook then runs formatting, linting, type checking, and both
-   test suites before each commit.
-
-## Commit Message Format
-
-We follow [Conventional Commits](https://conventionalcommits.org/) style for a
-readable, greppable history. Versioning is **not** automated — commit types no
-longer trigger version bumps (releases are cut by explicit tags, see
-[Release Process](#release-process)) — but consistent messages are still
-expected.
-
-### Format
-```
-<type>[optional scope]: <description>
-
-[optional body]
-
-[optional footer(s)]
-```
-
-### Types
-- `feat`: A new feature
-- `fix`: A bug fix
-- `docs`: Documentation only changes
-- `style`: Changes that do not affect the meaning of the code
-- `refactor`: A code change that neither fixes a bug nor adds a feature
-- `perf`: A code change that improves performance
-- `test`: Adding missing tests or correcting existing tests
-- `chore`: Changes to the build process or auxiliary tools
-
-### Examples
 ```bash
-feat: add new layout constructor for tables
-fix: resolve memory leak in compiler
-docs: update README with installation instructions
-feat!: change API for layout composition
+git clone https://github.com/soren-n/typeset-rs.git && cd typeset-rs
+opam install dune qcheck typeset   # the OCaml reference the tests compare against
+./scripts/install-hooks.sh         # the pre-commit gate
 ```
 
-## CI/CD Workflows
+Rust stable (MSRV 1.96.0) and opam are the prerequisites.
 
-### 1. CI Workflow (`.github/workflows/ci.yml`)
-**Triggers:** Every push and PR to main
-- Code formatting (`cargo fmt`)
-- Linting (`cargo clippy -- -D warnings`) and `cargo doc`
-- Rust tests (`cargo test`) on stable and MSRV
-- Differential job: builds the OCaml oracle and runs the QCheck property
-  suite plus the grp/seq-biased differential fuzzer
-- License and advisory policy (`cargo deny`)
+## The rule
 
-### 2. Release Workflow (`.github/workflows/release.yml`)
-**Triggers:** Pushing a `v*` tag
-- **Version guard**: verifies the tag matches the `Cargo.toml` version, fails on mismatch
-- **Build & test**: builds release and runs the full test suite
-- **Crate publishing**: publishes `typeset-parser`, then `typeset`, to crates.io
-- **GitHub release**: creates a release linking to `CHANGELOG.md`
+The compiler is a port of the OCaml `typeset` package and every change must
+render byte-identically to it. The pre-commit hook and CI run the oracle
+harness (`cd oracle && ./build.sh && ./_build/tester`); if it disagrees
+with you, the reference is right. Exact-output tests take their expected
+strings from the oracle, never from the Rust implementation.
 
-Version bumping and `CHANGELOG.md` are manual (see [Release Process](#release-process)).
+## Pull requests
 
-### 3. Dependency updates
-- **Dependabot** (`.github/dependabot.yml`): weekly grouped PRs for GitHub
-  Actions and both Cargo manifests; `dependabot-auto-merge.yml` merges them
-  once CI passes.
-- **Security Audit workflow** (`.github/workflows/dependencies.yml`): weekly
-  `cargo audit`, failing on any vulnerability.
+Keep commits focused and messages in conventional-commit style (`feat:`,
+`fix:`, `refactor:`, `docs:`, `test:`, `chore:`; `!` for a breaking change).
+The hook runs the same checks as CI, so a green hook is a green PR.
+Breaking API changes go in `CHANGELOG.md` under the unreleased version.
 
-## Testing
-
-### Local Testing
-```bash
-# Run all checks (same as CI)
-cargo fmt --check
-cargo clippy --all-targets --all-features
-cargo test --all --all-features
-
-# Differential harness against the OCaml reference
-cd oracle && ./build.sh && ./_build/tester
-
-# Quick formatting fix
-./scripts/fix-code-quality.sh
-```
-
-### Test Structure
-- **Rust tests**: Unit tests and doc tests in `cargo test`
-- **OCaml tests**: Property-based tests in `oracle/tester/`
-- **Integration**: Both test suites verify the same functionality
-
-## Security
-
-- **Dependency scanning**: Automated vulnerability detection
-- **License compliance**: Only approved licenses allowed
-- **Supply chain**: Dependencies verified and audited
-
-## Pull Request Process
-
-1. **Create feature branch**: `git checkout -b feat/your-feature`
-2. **Make changes** with conventional-commit-style messages
-3. **Ensure tests pass**: Pre-commit hooks will verify
-4. **Create PR**: CI will run full test suite
-5. **Review process**: Maintainer review required
-6. **Merge**: Squash and merge
-
-## Release Process
-
-Releases are cut explicitly by a maintainer; merging to main does not publish
-anything. Both crates share one version from `[workspace.package]`.
-
-1. **Bump the version**: `./scripts/update-version.sh 3.3.0`
-2. **Update the changelog**: edit `CHANGELOG.md` for the new version
-3. **Commit**: `git commit -am "chore(release): 3.3.0"`
-4. **Tag & push**: `git tag v3.3.0 && git push origin main --tags`
-
-Pushing the tag runs `release.yml`, which verifies the tag matches `Cargo.toml`,
-builds, tests, publishes both crates to crates.io, and creates the GitHub
-release. Pick the version number per [semver](https://semver.org/).
-
-## Tips
-
-- Follow conventional-commit style for a readable history
-- Pre-commit hooks catch issues early
-- CI runs the same checks as the git hooks, including the OCaml oracle
-  suite and the differential fuzzer, so a contributor without OCaml installed
-  still gets their change checked against the reference in CI
-- Dependency updates are automated weekly via Dependabot
-- `cargo deny` runs on every push; `cargo audit` weekly
-
-## Getting Help
-
-- Create an issue for bugs or feature requests
-- Check existing issues and PRs
-- Review the documentation in README.md and CLAUDE.md
-- CI logs provide detailed error information
+Releases are tags cut by a maintainer; see
+[docs/context/DEVELOPMENT.md](../docs/context/DEVELOPMENT.md).
