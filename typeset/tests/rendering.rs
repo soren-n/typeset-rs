@@ -3,7 +3,7 @@
 //! Every expected string here was produced by the OCaml reference
 //! implementation (`oracle/tester/bin/oracle.ml`) for the same layout, tab and
 //! width, so these pin the renderer to the oracle on the constructs the
-//! differential fuzzer exercises at random.
+//! oracle harness exercises at random.
 
 use typeset::*;
 

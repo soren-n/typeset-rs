@@ -1,5 +1,5 @@
 //! Scaling benchmarks: compile and render at sizes large enough to expose
-//! asymptotics (the `layout_performance` bench covers small-input latency).
+//! asymptotics.
 //!
 //! The workloads are shared with `perf_probe` and `alloc_probe`, the profiling
 //! companions to this bench.

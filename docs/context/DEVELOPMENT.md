@@ -75,7 +75,7 @@ fixes.
   `Cargo.lock` keeps the MSRV job deterministic.
 - `deny`: `cargo deny` (advisories, the license allow-list in `deny.toml`,
   duplicate versions, sources).
-- `differential`: installs OCaml, builds the oracle harness and runs the
+- `oracle`: installs OCaml, builds the oracle harness and runs the
   tester three times with three random seeds. A contributor without OCaml
   still gets their change checked against the reference here.
 

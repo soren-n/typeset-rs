@@ -36,7 +36,7 @@ confidence-threshold = 0.8
 exceptions = [
     { name = "typeset", allow = ["GPL-3.0-or-later"] },
     { name = "typeset-parser", allow = ["GPL-3.0-or-later"] },
-    { name = "typeset-differential", allow = ["GPL-3.0-or-later"] },
+    { name = "typeset-oracle-driver", allow = ["GPL-3.0-or-later"] },
 ]
 
 [bans]

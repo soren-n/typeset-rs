@@ -7,7 +7,7 @@ A Rust workspace of three crates:
   (`typeset::dsl`)
 - **typeset-parser**: the `layout!` procedural macro, a token adapter over
   `typeset::dsl`
-- **oracle/driver** (`typeset-differential`, unpublished): the binary the
+- **oracle/driver** (`typeset-oracle-driver`, unpublished): the binary the
   OCaml oracle harness renders through
 
 ## typeset crate (`typeset/src/`)
@@ -101,7 +101,7 @@ through that arena, so every list move is O(1). This is the reference
 implementation's formulation and its widening rules are defined over it; a
 tree rewrite would re-encode the same item ranges less directly.
 
-**lower.** The reference runs five tree rewrites here (denull, seq and grp
+**lower.** The reference runs five tree rewrites here (null removal, seq and grp
 identity elimination, reassociation, rescoping); `lower` applies the same
 rules, in the same non-confluent order, as three loops with side tables
 over the rebuilt arena:

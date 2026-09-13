@@ -50,7 +50,7 @@ let run cmd =
 
 let rust_impl layout_dsl tab width =
   let open Printf in
-  run (sprintf "./_build/differential '%s' %d %d" layout_dsl tab width)
+  run (sprintf "./_build/driver '%s' %d %d" layout_dsl tab width)
 
 (* Each case pairs a layout with a (tab, width) to render at. Fixing the
    dimensions per case (rather than always 2/80) is what exercises the breaking

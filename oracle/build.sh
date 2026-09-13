@@ -7,7 +7,7 @@
 set -e
 mkdir -p _build
 (cd tester && dune build)
-(cd .. && cargo build -p typeset-differential)
+(cd .. && cargo build -p typeset-oracle-driver)
 cp -f tester/_build/default/bin/main.exe _build/tester
 cp -f tester/_build/default/bin/oracle.exe _build/oracle
-cp -f ../target/debug/typeset-differential _build/differential
+cp -f ../target/debug/typeset-oracle-driver _build/driver

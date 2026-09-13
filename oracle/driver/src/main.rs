@@ -1,14 +1,14 @@
 //! Renders a layout given in the DSL, for comparison against the OCaml
 //! reference implementation (see `oracle/tester`).
 //!
-//! Usage: `typeset-differential '<layout dsl>' [tab] [width]`
+//! Usage: `typeset-oracle-driver '<layout dsl>' [tab] [width]`
 
 use std::process::exit;
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let Some(src) = args.next() else {
-        eprintln!("usage: typeset-differential '<layout dsl>' [tab] [width]");
+        eprintln!("usage: typeset-oracle-driver '<layout dsl>' [tab] [width]");
         exit(2);
     };
     let tab = args

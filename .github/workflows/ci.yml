@@ -63,8 +63,8 @@ jobs:
     - uses: actions/checkout@v7
     - uses: EmbarkStudios/cargo-deny-action@v2
 
-  differential:
-    name: Differential (Rust vs OCaml oracle)
+  oracle:
+    name: Oracle (Rust vs OCaml reference)
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -76,7 +76,7 @@ jobs:
     - name: Setup Rust cache
       uses: Swatinem/rust-cache@v2
       with:
-        key: differential
+        key: oracle
 
     - name: Setup OCaml
       uses: ocaml/setup-ocaml@v3
