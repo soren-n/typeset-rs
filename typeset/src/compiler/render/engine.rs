@@ -9,21 +9,20 @@
 //! heap-allocated frame stacks (`Vec<...Frame>`) of indices instead of on the
 //! native stack, so arbitrarily deep layouts render with a constant native stack.
 //!
-//! Pack marks live in a dense `Vec<usize>` threaded as `&mut`, indexed by pack
-//! index (compilation assigns them as dense DFS counters; `Doc::packs` is the
-//! slot count) with `NO_MARK` as the empty sentinel. In the real output pass
+//! Pack marks live in a dense `Vec<Option<usize>>` threaded as `&mut`, indexed
+//! by pack index (compilation assigns them as dense DFS counters; `Doc::packs`
+//! is the slot count). In the real output pass
 //! (`render_obj`) marks accumulate forward and are never rolled back. The
 //! head-of-line measuring fold (`will_fit` via `fold`) must not leak its
 //! marks into the caller, so it records the indices it inserts and clears them
 //! before returning — measurement only ever inserts a mark when the slot is
 //! empty, so clearing exactly those slots restores the caller's marks.
 
-use crate::compiler::types::{Doc, FixId, FixNode, ObjId, ObjNode, Row, Span, text_width};
+use crate::compiler::types::{Doc, FixId, FixNode, IdVec, ObjId, ObjNode, Range, Row, text_width};
 use std::cmp::max;
 
-/// Empty pack-mark slot. Marks record line positions, which are column counts
-/// bounded far below `usize::MAX`.
-const NO_MARK: usize = usize::MAX;
+/// The recorded column of each pack, by pack index; `None` until first seen.
+type Marks = [Option<usize>];
 
 /// The node slices and extent tables of a [`Doc`], passed by value (a few
 /// slice refs) so the traversals index objects, fixed objects, and precomputed
@@ -32,25 +31,25 @@ const NO_MARK: usize = usize::MAX;
 struct Arena<'a> {
     objs: &'a [ObjNode],
     fixes: &'a [FixNode],
-    /// The shared text buffer node spans resolve against.
+    /// The shared text buffer node ranges resolve against.
     text: &'a str,
     /// Per-object flat mid-line extent (see [`Doc::extents`]).
-    extents: &'a [usize],
+    extents: &'a IdVec<ObjNode, usize>,
     /// Per-object mid-line advance to the first composition boundary.
-    next_comps: &'a [usize],
+    next_comps: &'a IdVec<ObjNode, usize>,
 }
 
 impl<'a> Arena<'a> {
     fn obj(&self, id: ObjId) -> &'a ObjNode {
-        &self.objs[id as usize]
+        &self.objs[id.index()]
     }
 
     fn fix(&self, id: FixId) -> &'a FixNode {
-        &self.fixes[id as usize]
+        &self.fixes[id.index()]
     }
 
-    fn text(&self, span: Span) -> &'a str {
-        span.resolve(self.text)
+    fn text(&self, range: Range<str>) -> &'a str {
+        range.slice(self.text)
     }
 }
 
@@ -149,12 +148,12 @@ struct PackStep {
 /// diverge only in what they do with the result: output renders `offset` spaces
 /// and keeps the mark; the measuring folds ignore `offset` and drop a `fresh`
 /// mark before returning.
-fn resolve_pack(marks: &mut [usize], index: usize, state: State) -> PackStep {
+fn resolve_pack(marks: &mut Marks, index: usize, state: State) -> PackStep {
     let lvl = state.lvl;
     match marks[index] {
-        NO_MARK => {
+        None => {
             let pos = state.pos;
-            marks[index] = pos;
+            marks[index] = Some(pos);
             PackStep {
                 state: State {
                     lvl: max(lvl, pos),
@@ -164,7 +163,7 @@ fn resolve_pack(marks: &mut [usize], index: usize, state: State) -> PackStep {
                 fresh: true,
             }
         }
-        lvl1 => {
+        Some(lvl1) => {
             let state1 = State {
                 lvl: max(lvl, lvl1),
                 ..state
@@ -227,7 +226,7 @@ fn fold(
     arena: Arena,
     obj: ObjId,
     state: State,
-    marks: &mut [usize],
+    marks: &mut Marks,
     stack: &mut Vec<MFrame>,
     inserted: &mut Vec<usize>,
 ) -> usize {
@@ -242,7 +241,7 @@ fn fold(
         match frame {
             MFrame::Obj(o) => match arena.obj(o) {
                 // A text's flat extent is exactly its width; no need to rescan.
-                ObjNode::Text(_) => st = inc_pos(arena.extents[o as usize], st),
+                ObjNode::Text(_) => st = inc_pos(arena.extents[o], st),
                 ObjNode::Fix(fix) => stack.push(MFrame::Fix(*fix)),
                 ObjNode::Grp(obj1) | ObjNode::Seq(obj1) => stack.push(MFrame::Obj(*obj1)),
                 ObjNode::Nest(obj1) => {
@@ -273,7 +272,7 @@ fn fold(
                 }
             },
             MFrame::Fix(f) => match arena.fix(f) {
-                FixNode::Text(span) => st = inc_pos(text_width(arena.text(*span)), st),
+                FixNode::Text(range) => st = inc_pos(text_width(arena.text(*range)), st),
                 FixNode::Comp(left, right, pad) => {
                     stack.push(MFrame::FixCompMid(*right, *pad));
                     stack.push(MFrame::Fix(*left));
@@ -295,7 +294,7 @@ fn fold(
         }
     }
     for index in inserted.drain(..) {
-        marks[index] = NO_MARK;
+        marks[index] = None;
     }
     st.pos
 }
@@ -310,12 +309,12 @@ fn will_fit(
     arena: Arena,
     obj: ObjId,
     state: State,
-    marks: &mut [usize],
+    marks: &mut Marks,
     stack: &mut Vec<MFrame>,
     inserted: &mut Vec<usize>,
 ) -> bool {
     if !state.head {
-        return state.pos.saturating_add(arena.extents[obj as usize]) <= state.width;
+        return state.pos.saturating_add(arena.extents[obj]) <= state.width;
     }
     fold(arena, obj, state, marks, stack, inserted) <= state.width
 }
@@ -324,7 +323,7 @@ fn will_fit(
 /// width. Break decisions are made mid-line (`head` is false), where the
 /// precomputed boundary distance is exact — pure arithmetic, no traversal.
 fn should_break(arena: Arena, obj: ObjId, state: State) -> bool {
-    state.broken || state.width < state.pos.saturating_add(arena.next_comps[obj as usize])
+    state.broken || state.width < state.pos.saturating_add(arena.next_comps[obj])
 }
 
 /// Frame for the output-producing object traversal.
@@ -353,7 +352,7 @@ fn render_obj(
     arena: Arena,
     obj: ObjId,
     state: &mut State,
-    marks: &mut [usize],
+    marks: &mut Marks,
     scratch: &mut Scratch,
     result: &mut String,
 ) {
@@ -369,9 +368,9 @@ fn render_obj(
         match frame {
             RFrame::Obj(o) => match arena.obj(o) {
                 // A text's flat extent is exactly its width; no need to rescan.
-                ObjNode::Text(span) => {
-                    st = inc_pos(arena.extents[o as usize], st);
-                    result.push_str(arena.text(*span));
+                ObjNode::Text(range) => {
+                    st = inc_pos(arena.extents[o], st);
+                    result.push_str(arena.text(*range));
                 }
                 ObjNode::Fix(fix) => stack.push(RFrame::Fix(*fix)),
                 ObjNode::Grp(obj1) => {
@@ -418,8 +417,8 @@ fn render_obj(
                 }
             },
             RFrame::Fix(f) => match arena.fix(f) {
-                FixNode::Text(span) => {
-                    let data = arena.text(*span);
+                FixNode::Text(range) => {
+                    let data = arena.text(*range);
                     st = inc_pos(text_width(data), st);
                     result.push_str(data);
                 }
@@ -486,23 +485,23 @@ fn render_obj(
 /// ```
 pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
     let arena = Arena {
-        objs: doc.objs(),
-        fixes: doc.fixes(),
-        text: doc.text(),
-        extents: doc.extents(),
-        next_comps: doc.next_comps(),
+        objs: doc.objs.as_slice(),
+        fixes: doc.fixes.as_slice(),
+        text: &doc.text,
+        extents: &doc.extents,
+        next_comps: &doc.next_comps,
     };
     let mut st = make_state(width, tab);
-    let mut marks: Vec<usize> = vec![NO_MARK; doc.packs()];
+    let mut marks: Vec<Option<usize>> = vec![None; doc.packs];
     let mut scratch = Scratch::default();
     // The output is at least the document's text; reserving it (plus a
     // newline per row) leaves only indentation to grow into.
-    let mut result = String::with_capacity(doc.text_bytes() + doc.rows().len());
+    let mut result = String::with_capacity(doc.text.len() + doc.rows.len());
     // The document spine is a linear `Vec<Row>` in document order, so it is
     // walked with a plain loop. `marks` and `lvl` survive `reset`, so they carry
     // across lines exactly as the recursive formulation threaded them. A `Line`
     // row (always last) ends the document; `Eod` is running off the end.
-    for row in doc.rows() {
+    for row in &doc.rows {
         st = reset(st);
         match row {
             Row::Empty => result.push('\n'),

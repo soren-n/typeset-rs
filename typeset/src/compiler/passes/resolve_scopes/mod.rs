@@ -27,22 +27,16 @@ pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>, scopes: &[Scope]) -> RebuildDoc<'a
 mod tests {
     use super::*;
     use crate::compiler::types::{
-        FixRun, FixedComp, FixedItem, FixedLine, FixedSpan, NO_PATH, PathNode, Prop, RebuildFix,
-        RebuildObj, ScopeRange, Term, TermLeaf,
+        Arena, FixRun, FixedComp, FixedItem, FixedLine, PathNode, Prop, Range, RebuildFix,
+        RebuildObj, Term, TermLeaf,
     };
 
     /// Wraps `items` and `item_seps` arenas as a single-line [`FixedDoc`] with
     /// no fix runs — the shape most of these tests build.
     fn one_line(items: Vec<FixedItem<'static>>, item_seps: Vec<FixedComp>) -> FixedDoc<'static> {
         let line = FixedLine {
-            items: FixedSpan {
-                start: 0,
-                end: items.len() as u32,
-            },
-            seps: FixedSpan {
-                start: 0,
-                end: item_seps.len() as u32,
-            },
+            items: Range::new(0, items.len()),
+            seps: Range::new(0, item_seps.len()),
         };
         FixedDoc {
             lines: vec![line],
@@ -55,7 +49,7 @@ mod tests {
 
     fn text_term(text: &'static str) -> Term<'static> {
         Term {
-            path: NO_PATH,
+            path: None,
             leaf: TermLeaf::Text(text),
         }
     }
@@ -68,8 +62,8 @@ mod tests {
     fn sep() -> FixedComp {
         FixedComp {
             pad: false,
-            opens: ScopeRange { start: 0, end: 0 },
-            closes: ScopeRange { start: 0, end: 0 },
+            opens: Range::EMPTY,
+            closes: Range::EMPTY,
         }
     }
 
@@ -95,7 +89,7 @@ mod tests {
         };
         let mut count = 0usize;
         let mut cur = root;
-        while let RebuildObj::Comp(_left, right, _pad) = out.objs[cur as usize] {
+        while let RebuildObj::Comp(_left, right, _pad) = out.objs[cur] {
             count += 1;
             cur = right;
         }
@@ -105,15 +99,13 @@ mod tests {
     #[test]
     fn resolve_scopes_handles_deep_nest_term() {
         // A deep Nest path passes through graphify/rebuild by value.
-        let mut paths: Vec<PathNode> = Vec::new();
-        let mut path = NO_PATH;
+        let mut paths: Arena<PathNode> = Arena::new();
+        let mut path = None;
         for _ in 0..DEEP {
-            let id = paths.len() as u32;
-            paths.push(PathNode {
+            path = Some(paths.push(PathNode {
                 prop: Prop::Nest,
                 parent: path,
-            });
-            path = id;
+            }));
         }
         let term = Term {
             path,
@@ -124,15 +116,15 @@ mod tests {
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
-        let RebuildObj::Term(t) = out.objs[root as usize] else {
+        let RebuildObj::Term(t) = out.objs[root] else {
             panic!("expected a single term")
         };
         let mut count = 0usize;
         let mut cur = t.path;
-        while cur != NO_PATH {
-            assert!(matches!(paths[cur as usize].prop, Prop::Nest));
+        while let Some(id) = cur {
+            assert!(matches!(paths[id].prop, Prop::Nest));
             count += 1;
-            cur = paths[cur as usize].parent;
+            cur = paths[id].parent;
         }
         assert_eq!(count, DEEP);
     }
@@ -150,19 +142,13 @@ mod tests {
         // A single line whose one item is a fix run spanning the term and
         // run-separator arenas.
         let run = FixRun {
-            terms: FixedSpan {
-                start: 0,
-                end: terms.len() as u32,
-            },
-            seps: FixedSpan {
-                start: 0,
-                end: run_seps.len() as u32,
-            },
+            terms: Range::new(0, terms.len()),
+            seps: Range::new(0, run_seps.len()),
         };
         let doc = FixedDoc {
             lines: vec![FixedLine {
-                items: FixedSpan { start: 0, end: 1 },
-                seps: FixedSpan { start: 0, end: 0 },
+                items: Range::new(0, 1),
+                seps: Range::EMPTY,
             }],
             items: vec![FixedItem::Fix(run)],
             item_seps: Vec::new(),
@@ -173,12 +159,12 @@ mod tests {
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
-        let RebuildObj::Fix(rfix) = out.objs[root as usize] else {
+        let RebuildObj::Fix(rfix) = out.objs[root] else {
             panic!("expected a fix object")
         };
         let mut count = 0usize;
         let mut cur = rfix;
-        while let RebuildFix::Comp(_left, right, _pad) = out.fixes[cur as usize] {
+        while let RebuildFix::Comp(_left, right, _pad) = out.fixes[cur] {
             count += 1;
             cur = right;
         }
@@ -191,14 +177,11 @@ mod tests {
         let mut items: Vec<FixedItem> = Vec::new();
         let lines: Vec<FixedLine> = (0..DEEP)
             .map(|_| {
-                let start = items.len() as u32;
+                let start = items.len();
                 items.push(FixedItem::Term(text_term("x")));
                 FixedLine {
-                    items: FixedSpan {
-                        start,
-                        end: items.len() as u32,
-                    },
-                    seps: FixedSpan { start: 0, end: 0 },
+                    items: Range::new(start, items.len()),
+                    seps: Range::EMPTY,
                 }
             })
             .collect();

@@ -5,31 +5,20 @@
 //! [`RebuildDoc`] arena. Node payloads and pads are read straight from the
 //! borrowed `FixedDoc` line (nodes are index-aligned with the line's items).
 
-use super::graph::{GraphDoc, GraphLine, NONE, Property};
+use super::graph::{GraphDoc, GraphLine, Property};
 use crate::compiler::types::{
-    FixRun, FixedItem, RFixId, RObjId, RebuildDoc, RebuildFix, RebuildObj, push_node,
+    Arena, FixRun, FixedItem, RFixId, RObjId, Range, RebuildDoc, RebuildFix, RebuildObj,
 };
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
-/// indices always already exist.
+/// ids always already exist.
 struct Builder<'a> {
-    objs: Vec<RebuildObj<'a>>,
-    fixes: Vec<RebuildFix<'a>>,
+    objs: Arena<RebuildObj<'a>>,
+    fixes: Arena<RebuildFix<'a>>,
 }
 
-impl<'a> Builder<'a> {
-    fn obj(&mut self, node: RebuildObj<'a>) -> RObjId {
-        push_node(&mut self.objs, node)
-    }
-
-    fn fix(&mut self, node: RebuildFix<'a>) -> RFixId {
-        push_node(&mut self.fixes, node)
-    }
-}
-
-// Defunctionalized rebuild continuations (replacing the `partial` closure and
-// the RebuildCont closure stack used by `visit_line`), flattened into shared
-// buffers so threading them allocates nothing per scope.
+// Rebuild continuations, flattened into shared buffers so threading them
+// allocates nothing per scope.
 //
 // A partial is a left composition spine, stored innermost-last (the tail is
 // `[.., (xk,pk)]` with `(xk,pk)` innermost); `apply_rpartial` folds from the
@@ -42,28 +31,28 @@ impl<'a> Builder<'a> {
 /// A continuation step. A captured partial is a range into the shared
 /// partials buffer.
 #[derive(Debug, Copy, Clone)]
-enum RStep {
+enum RStep<'a> {
     Grp,
     Seq,
-    Partial(u32, u32),
+    Partial(Range<(RObjId<'a>, bool)>),
 }
 
 /// The flat continuation state, reused across lines: cleared per line, so its
 /// buffers amortize across the whole document.
-struct ContState {
+struct ContState<'a> {
     /// All live continuations' steps, concatenated in stack order.
-    steps: Vec<RStep>,
+    steps: Vec<RStep<'a>>,
     /// Start index in `steps` of each continuation, top's last. The first
     /// entry is always 0: the line's identity continuation.
-    bounds: Vec<u32>,
+    bounds: Vec<usize>,
     /// Partial spines: captured regions below `cur_start` (addressed by
     /// `RStep::Partial` ranges), the live partial from `cur_start` on.
-    partials: Vec<(RObjId, bool)>,
+    partials: Vec<(RObjId<'a>, bool)>,
     /// Start of the live partial region in `partials`.
-    cur_start: u32,
+    cur_start: usize,
 }
 
-impl ContState {
+impl ContState<'_> {
     /// Resets to one empty identity continuation and an empty live partial.
     fn reset(&mut self) {
         self.steps.clear();
@@ -75,10 +64,14 @@ impl ContState {
 }
 
 // Applies a partial spine to an object (innermost element first).
-fn apply_rpartial(b: &mut Builder, partial: &[(RObjId, bool)], obj: RObjId) -> RObjId {
+fn apply_rpartial<'a>(
+    b: &mut Builder<'a>,
+    partial: &[(RObjId<'a>, bool)],
+    obj: RObjId<'a>,
+) -> RObjId<'a> {
     let mut result = obj;
     for &(left, pad) in partial.iter().rev() {
-        result = b.obj(RebuildObj::Comp(left, result, pad));
+        result = b.objs.push(RebuildObj::Comp(left, result, pad));
     }
     result
 }
@@ -86,13 +79,18 @@ fn apply_rpartial(b: &mut Builder, partial: &[(RObjId, bool)], obj: RObjId) -> R
 // Applies the steps from `start` to the end of the step vector to an object
 // (innermost step first) and truncates them away — one continuation applied
 // and popped, or the final identity continuation for `start` 0.
-fn apply_steps(b: &mut Builder, st: &mut ContState, start: usize, obj: RObjId) -> RObjId {
+fn apply_steps<'a>(
+    b: &mut Builder<'a>,
+    st: &mut ContState<'a>,
+    start: usize,
+    obj: RObjId<'a>,
+) -> RObjId<'a> {
     let mut result = obj;
     for i in (start..st.steps.len()).rev() {
         result = match st.steps[i] {
-            RStep::Grp => b.obj(RebuildObj::Grp(result)),
-            RStep::Seq => b.obj(RebuildObj::Seq(result)),
-            RStep::Partial(s, e) => apply_rpartial(b, &st.partials[s as usize..e as usize], result),
+            RStep::Grp => b.objs.push(RebuildObj::Grp(result)),
+            RStep::Seq => b.objs.push(RebuildObj::Seq(result)),
+            RStep::Partial(range) => apply_rpartial(b, range.slice(&st.partials), result),
         };
     }
     st.steps.truncate(start);
@@ -100,10 +98,15 @@ fn apply_steps(b: &mut Builder, st: &mut ContState, start: usize, obj: RObjId) -
 }
 
 // Pops `count` continuations, applying each to the accumulating object.
-fn close(b: &mut Builder, st: &mut ContState, count: usize, term: RObjId) -> RObjId {
+fn close<'a>(
+    b: &mut Builder<'a>,
+    st: &mut ContState<'a>,
+    count: usize,
+    term: RObjId<'a>,
+) -> RObjId<'a> {
     let mut result = term;
     for _ in 0..count {
-        let start = st.bounds.pop().expect("Invariant") as usize;
+        let start = st.bounds.pop().expect("Invariant");
         result = apply_steps(b, st, start, result);
     }
     result
@@ -113,8 +116,8 @@ pub(super) fn rebuild<'a>(doc: &GraphDoc<'_, 'a>) -> RebuildDoc<'a> {
     // Every graph node yields at least one object, so the node total is a
     // capacity floor for the object arena.
     let mut b = Builder {
-        objs: Vec::with_capacity(doc.nodes.len()),
-        fixes: Vec::new(),
+        objs: Arena::with_capacity(doc.nodes.len()),
+        fixes: Arena::new(),
     };
     let mut st = ContState {
         steps: Vec::new(),
@@ -136,22 +139,22 @@ pub(super) fn rebuild<'a>(doc: &GraphDoc<'_, 'a>) -> RebuildDoc<'a> {
 
 /// Builds one graph node's payload (its line's like-indexed item) into the
 /// arena.
-fn visit_item<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, item: &FixedItem<'a>) -> RObjId {
+fn visit_item<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, item: &FixedItem<'a>) -> RObjId<'a> {
     match item {
         FixedItem::Fix(run) => {
             let fix1 = visit_fix(b, g, *run);
-            b.obj(RebuildObj::Fix(fix1))
+            b.objs.push(RebuildObj::Fix(fix1))
         }
-        FixedItem::Term(term) => b.obj(RebuildObj::Term(*term)),
+        FixedItem::Term(term) => b.objs.push(RebuildObj::Term(*term)),
     }
 }
 
 fn visit_line<'a>(
     b: &mut Builder<'a>,
     g: &GraphDoc<'_, 'a>,
-    gl: &GraphLine,
-    st: &mut ContState,
-) -> RObjId {
+    gl: &GraphLine<'a>,
+    st: &mut ContState<'a>,
+) -> RObjId<'a> {
     // Walk the nodes in order, threading the continuation stack and the live
     // partial spine. `line.seps[i].pad` is the pad between node `i` and
     // `i + 1`.
@@ -162,19 +165,19 @@ fn visit_line<'a>(
         .split_last()
         .expect("every line has at least one node");
     for (i, item) in rest.iter().enumerate() {
-        let node = &g.nodes[gl.nodes_start as usize + i];
+        let node = &g.nodes[gl.nodes.id_at(i)];
         let obj = visit_item(b, g, item);
         let in_deg = node.ins_len as usize;
         let pad = seps[i].pad;
-        match (in_deg, node.outs_head == NONE) {
+        match (in_deg, node.outs_head.is_none()) {
             // In-degree 0, no out-properties: extend the live partial spine.
             (0, true) => st.partials.push((obj, pad)),
             // In-degree > 0, no out-properties: close the incoming scopes,
             // then start a fresh partial from the closed object.
             (_, true) => {
-                let applied = apply_rpartial(b, &st.partials[st.cur_start as usize..], obj);
+                let applied = apply_rpartial(b, &st.partials[st.cur_start..], obj);
                 let obj2 = close(b, st, in_deg, applied);
-                st.partials.truncate(st.cur_start as usize);
+                st.partials.truncate(st.cur_start);
                 st.partials.push((obj2, pad));
             }
             // In-degree 0, has out-properties: capture the live partial onto
@@ -182,17 +185,17 @@ fn visit_line<'a>(
             // property (in list order), then start a fresh partial from this
             // object.
             (0, false) => {
-                let end = st.partials.len() as u32;
-                st.steps.push(RStep::Partial(st.cur_start, end));
+                let end = st.partials.len();
+                st.steps.push(RStep::Partial(Range::new(st.cur_start, end)));
                 st.cur_start = end;
                 let mut e = node.outs_head;
-                while e != NONE {
-                    st.bounds.push(st.steps.len() as u32);
-                    st.steps.push(match g.edges[e as usize].prop {
+                while let Some(edge) = e {
+                    st.bounds.push(st.steps.len());
+                    st.steps.push(match g.edges[edge].prop {
                         Property::Grp => RStep::Grp,
                         Property::Seq => RStep::Seq,
                     });
-                    e = g.edges[e as usize].next_out;
+                    e = g.edges[edge].next_out;
                 }
                 st.partials.push((obj, pad));
             }
@@ -201,13 +204,13 @@ fn visit_line<'a>(
     }
     // Final node of the line: it never has out-properties. Close any incoming
     // scopes, then apply the one remaining (identity) continuation.
-    let last_node = &g.nodes[gl.nodes_end as usize - 1];
+    let last_node = &g.nodes[gl.nodes.id_at(gl.nodes.len() - 1)];
     assert!(
-        last_node.outs_head == NONE,
+        last_node.outs_head.is_none(),
         "Invariant: line ends without open scopes"
     );
     let obj = visit_item(b, g, last_item);
-    let applied = apply_rpartial(b, &st.partials[st.cur_start as usize..], obj);
+    let applied = apply_rpartial(b, &st.partials[st.cur_start..], obj);
     let obj2 = close(b, st, last_node.ins_len as usize, applied);
     if st.bounds[..] != [0] {
         unreachable!("Invariant")
@@ -215,17 +218,17 @@ fn visit_line<'a>(
     apply_steps(b, st, 0, obj2)
 }
 
-fn visit_fix<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, run: FixRun) -> RFixId {
+fn visit_fix<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, run: FixRun<'a>) -> RFixId<'a> {
     // Rebuild the run as a right-nested fixed composition spine. Terms are
     // copied through by value; the pads are the run's separator pads. The run's
-    // terms and separators are ranges into the borrowed `FixedDoc`'s arenas.
+    // terms and separators are ranges into the borrowed `FixedDoc`'s buffers.
     let terms = run.terms.slice(&g.fixed.terms);
     let seps = run.seps.slice(&g.fixed.run_seps);
     let last = *terms.last().expect("a fix run has at least one term");
-    let mut rfix = b.fix(RebuildFix::Term(last));
+    let mut rfix = b.fixes.push(RebuildFix::Term(last));
     for k in (0..seps.len()).rev() {
-        let left = b.fix(RebuildFix::Term(terms[k]));
-        rfix = b.fix(RebuildFix::Comp(left, rfix, seps[k].pad));
+        let left = b.fixes.push(RebuildFix::Term(terms[k]));
+        rfix = b.fixes.push(RebuildFix::Comp(left, rfix, seps[k].pad));
     }
     rfix
 }

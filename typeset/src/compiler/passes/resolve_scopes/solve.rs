@@ -6,36 +6,36 @@
 //! a graph the rebuild phase can walk as a plain composition spine.
 //!
 //! The incident-edge lists are intrusive linked lists through the shared edge
-//! pool, so each move — pop an outs head, insert before a known edge, splice a
+//! arena, so each move — pop an outs head, insert before a known edge, splice a
 //! whole ins list in after a known edge — is O(1) pointer rewiring.
 
-use super::graph::{EdgeId, GraphDoc, NONE, NodeId, Property};
+use super::graph::{EdgeId, GraphDoc, NodeId, Property};
 
 /// Edges never cross lines, so the per-line resolution loop is one pass over
-/// the document-wide node array.
+/// the document-wide node arena.
 pub(super) fn solve(g: &mut GraphDoc<'_, '_>) {
-    for node in 0..g.nodes.len() as NodeId {
+    for node in g.nodes.ids() {
         solve_node(g, node);
     }
 }
 
 fn solve_node(g: &mut GraphDoc<'_, '_>, node: NodeId) {
-    if g.nodes[node as usize].ins_head == NONE || g.nodes[node as usize].outs_head == NONE {
+    let (Some(ins_head), Some(_)) = (g.nodes[node].ins_head, g.nodes[node].outs_head) else {
         return;
-    }
+    };
 
     // The incoming edge whose source is leftmost (first on ties: forward
     // iteration only replaces on strictly smaller sources).
-    let mut ins_first = NONE;
-    let mut best_src = NodeId::MAX;
-    let mut e = g.nodes[node as usize].ins_head;
-    while e != NONE {
-        let src = g.edges[e as usize].source;
+    let mut ins_first = ins_head;
+    let mut best_src = g.edges[ins_head].source;
+    let mut e = g.edges[ins_head].next_in;
+    while let Some(edge) = e {
+        let src = g.edges[edge].source;
         if src < best_src {
             best_src = src;
-            ins_first = e;
+            ins_first = edge;
         }
-        e = g.edges[e as usize].next_in;
+        e = g.edges[edge].next_in;
     }
 
     // Walk this node's outgoing edges, moving each leading seq edge out of
@@ -45,17 +45,16 @@ fn solve_node(g: &mut GraphDoc<'_, '_>, node: NodeId) {
     // edges stack up in front of `ins_first`.
     let mut edge = ins_first;
     let grp = loop {
-        let curr = g.nodes[node as usize].outs_head;
-        if curr == NONE {
-            break NONE;
-        }
-        match g.edges[curr as usize].prop {
-            Property::Grp => break curr,
+        let Some(curr) = g.nodes[node].outs_head else {
+            break None;
+        };
+        match g.edges[curr].prop {
+            Property::Grp => break Some(curr),
             Property::Seq => {
                 pop_out_head(g, node);
-                let src = g.edges[edge as usize].source;
+                let src = g.edges[edge].source;
                 insert_out_before(g, src, curr, edge);
-                g.edges[curr as usize].source = src;
+                g.edges[curr].source = src;
                 edge = curr;
             }
         }
@@ -64,53 +63,51 @@ fn solve_node(g: &mut GraphDoc<'_, '_>, node: NodeId) {
     // Hand this node's whole incoming list forward past the grp edge:
     // retarget every incoming edge to the grp's target and splice the list
     // immediately after the grp edge in that target's ins list.
-    if grp != NONE {
-        let head = g.nodes[node as usize].ins_head;
-        let tail = g.nodes[node as usize].ins_tail;
-        let len = g.nodes[node as usize].ins_len;
-        g.nodes[node as usize].ins_head = NONE;
-        g.nodes[node as usize].ins_tail = NONE;
-        g.nodes[node as usize].ins_len = 0;
+    if let Some(grp) = grp {
+        let head = g.nodes[node].ins_head;
+        let tail = g.nodes[node].ins_tail.expect("ins list has a tail");
+        let len = g.nodes[node].ins_len;
+        g.nodes[node].ins_head = None;
+        g.nodes[node].ins_tail = None;
+        g.nodes[node].ins_len = 0;
 
-        let target = g.edges[grp as usize].target;
+        let target = g.edges[grp].target;
         let mut e = head;
-        while e != NONE {
-            g.edges[e as usize].target = target;
-            e = g.edges[e as usize].next_in;
+        while let Some(edge) = e {
+            g.edges[edge].target = target;
+            e = g.edges[edge].next_in;
         }
 
-        let after = g.edges[grp as usize].next_in;
-        g.edges[grp as usize].next_in = head;
-        g.edges[tail as usize].next_in = after;
-        if after == NONE {
-            g.nodes[target as usize].ins_tail = tail;
+        let after = g.edges[grp].next_in;
+        g.edges[grp].next_in = head;
+        g.edges[tail].next_in = after;
+        if after.is_none() {
+            g.nodes[target].ins_tail = Some(tail);
         }
-        g.nodes[target as usize].ins_len += len;
+        g.nodes[target].ins_len += len;
     }
 }
 
 /// Detaches the head edge of `node`'s outs list.
 fn pop_out_head(g: &mut GraphDoc<'_, '_>, node: NodeId) {
-    let head = g.nodes[node as usize].outs_head;
-    let next = g.edges[head as usize].next_out;
-    g.nodes[node as usize].outs_head = next;
-    if next == NONE {
-        g.nodes[node as usize].outs_tail = NONE;
-    } else {
-        g.edges[next as usize].prev_out = NONE;
+    let head = g.nodes[node].outs_head.expect("outs list is non-empty");
+    let next = g.edges[head].next_out;
+    g.nodes[node].outs_head = next;
+    match next {
+        None => g.nodes[node].outs_tail = None,
+        Some(next) => g.edges[next].prev_out = None,
     }
-    g.edges[head as usize].next_out = NONE;
+    g.edges[head].next_out = None;
 }
 
 /// Inserts `new` immediately before `before` in `src`'s outs list.
 fn insert_out_before(g: &mut GraphDoc<'_, '_>, src: NodeId, new: EdgeId, before: EdgeId) {
-    let prev = g.edges[before as usize].prev_out;
-    g.edges[new as usize].prev_out = prev;
-    g.edges[new as usize].next_out = before;
-    g.edges[before as usize].prev_out = new;
-    if prev == NONE {
-        g.nodes[src as usize].outs_head = new;
-    } else {
-        g.edges[prev as usize].next_out = new;
+    let prev = g.edges[before].prev_out;
+    g.edges[new].prev_out = prev;
+    g.edges[new].next_out = Some(before);
+    g.edges[before].prev_out = Some(new);
+    match prev {
+        None => g.nodes[src].outs_head = Some(new),
+        Some(prev) => g.edges[prev].next_out = Some(new),
     }
 }

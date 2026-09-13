@@ -5,12 +5,10 @@
 //! single place that walks owning boxes: children are taken out of their boxes
 //! (leaving `Null` placeholders, so each box's own drop terminates in O(1))
 //! and every leaf's text is concatenated into one buffer, returned alongside
-//! the arena — text nodes hold a byte span into it and every later
-//! representation borrows from that buffer. The node arena owns no text, so it
-//! drops as soon as `resolve_breaks` has read it. All subsequent passes fold
-//! flat arenas with plain loops.
+//! the arena — text nodes hold a range into it and every later representation
+//! borrows from that buffer.
 
-use crate::compiler::types::{Attr, LayId, Layout, LayoutArena, LayoutNode, TextSpan, push_node};
+use crate::compiler::types::{Arena, Attr, LayId, Layout, LayoutArena, LayoutNode, Range};
 use std::mem;
 
 /// A unit of flattening work: visit a subtree, or build a parent node from
@@ -19,7 +17,7 @@ use std::mem;
 ///
 /// `Visit` carries the `Layout` by value (moved out of its box with `Null`
 /// left behind): taking the `Box` itself would allocate a placeholder box per
-/// child (`Box::default()`), doubling the tree-teardown allocator traffic.
+/// child, doubling the tree-teardown allocator traffic.
 enum Task {
     Visit(Layout),
     Unary(fn(LayId) -> LayoutNode),
@@ -36,8 +34,8 @@ fn visit_unary(tasks: &mut Vec<Task>, ctor: fn(LayId) -> LayoutNode, child: &mut
 }
 
 pub fn flatten(layout: Layout) -> (LayoutArena, String) {
-    let mut nodes: Vec<LayoutNode> = Vec::new();
-    // Every leaf's text concatenated in document order; text nodes span into
+    let mut nodes: Arena<LayoutNode> = Arena::new();
+    // Every leaf's text concatenated in document order; text nodes range into
     // this buffer, which outlives the node arena and feeds the whole pipeline.
     let mut text = String::new();
 
@@ -46,15 +44,11 @@ pub fn flatten(layout: Layout) -> (LayoutArena, String) {
     while let Some(task) = tasks.pop() {
         match task {
             Task::Visit(mut cur) => match &mut cur {
-                Layout::Null => ids.push(push_node(&mut nodes, LayoutNode::Null)),
+                Layout::Null => ids.push(nodes.push(LayoutNode::Null)),
                 Layout::Text(data) => {
-                    let start = text.len() as u32;
+                    let start = text.len();
                     text.push_str(data);
-                    let end = text.len() as u32;
-                    ids.push(push_node(
-                        &mut nodes,
-                        LayoutNode::Text(TextSpan { start, end }),
-                    ));
+                    ids.push(nodes.push(LayoutNode::Text(Range::new(start, text.len()))));
                 }
                 Layout::Fix(child) => visit_unary(&mut tasks, LayoutNode::Fix, child),
                 Layout::Grp(child) => visit_unary(&mut tasks, LayoutNode::Grp, child),
@@ -74,17 +68,17 @@ pub fn flatten(layout: Layout) -> (LayoutArena, String) {
             },
             Task::Unary(ctor) => {
                 let child = ids.pop().expect("unary operand");
-                ids.push(push_node(&mut nodes, ctor(child)));
+                ids.push(nodes.push(ctor(child)));
             }
             Task::Line => {
                 let right = ids.pop().expect("line: right operand");
                 let left = ids.pop().expect("line: left operand");
-                ids.push(push_node(&mut nodes, LayoutNode::Line(left, right)));
+                ids.push(nodes.push(LayoutNode::Line(left, right)));
             }
             Task::Comp(attr) => {
                 let right = ids.pop().expect("comp: right operand");
                 let left = ids.pop().expect("comp: left operand");
-                ids.push(push_node(&mut nodes, LayoutNode::Comp(left, right, attr)));
+                ids.push(nodes.push(LayoutNode::Comp(left, right, attr)));
             }
         }
     }
@@ -97,7 +91,7 @@ pub fn flatten(layout: Layout) -> (LayoutArena, String) {
 mod tests {
     use super::*;
     use crate::compiler::constructors::{comp, nest, text};
-    use crate::compiler::types::{Break, Pad};
+    use crate::compiler::types::{Break, Id, Pad};
 
     /// Deeper than a native-stack recursion could survive.
     const DEEP: usize = 50_000;
@@ -107,11 +101,14 @@ mod tests {
         let layout = comp(text("a"), nest(text("b")), Pad::Padded, Break::Breakable);
         let (arena, buf) = flatten(*layout);
         // Postorder: a, b, Nest(b), Comp — the root is last.
-        assert_eq!(arena.root as usize, arena.nodes.len() - 1);
-        assert!(matches!(arena.nodes[0], LayoutNode::Text(s) if s.slice(&buf) == "a"));
-        assert!(matches!(arena.nodes[1], LayoutNode::Text(s) if s.slice(&buf) == "b"));
-        assert!(matches!(arena.nodes[2], LayoutNode::Nest(1)));
-        assert!(matches!(arena.nodes[3], LayoutNode::Comp(0, 2, _)));
+        let nodes = arena.nodes.as_slice();
+        assert_eq!(arena.root.index(), nodes.len() - 1);
+        assert!(matches!(nodes[0], LayoutNode::Text(s) if s.slice(&buf) == "a"));
+        assert!(matches!(nodes[1], LayoutNode::Text(s) if s.slice(&buf) == "b"));
+        assert!(matches!(nodes[2], LayoutNode::Nest(c) if c == Id::from_index(1)));
+        assert!(
+            matches!(nodes[3], LayoutNode::Comp(l, r, _) if l == Id::from_index(0) && r == Id::from_index(2))
+        );
         // Text is concatenated in document order.
         assert_eq!(buf, "ab");
     }
@@ -124,7 +121,7 @@ mod tests {
         }
         let (arena, buf) = flatten(*layout);
         assert_eq!(arena.nodes.len(), 2 * DEEP + 1);
-        assert_eq!(arena.root as usize, arena.nodes.len() - 1);
+        assert_eq!(arena.root.index(), arena.nodes.len() - 1);
         // One 'x' plus DEEP 'y's, all concatenated.
         assert_eq!(buf.len(), DEEP + 1);
     }

@@ -1,39 +1,21 @@
+use super::arena::{Arena, Id, Range};
 use super::layout::Attr;
 
 // The flat layout arena.
 //
 // `flatten` lowers the public `Box`-recursive [`Layout`](super::layout::Layout)
-// tree into this postorder arena (children precede parents) as the pipeline's
-// entry step — the one place that walks owning boxes. All text is concatenated
-// into one buffer here (returned alongside the arena) and text nodes hold a
-// byte span into it; every later representation borrows from that buffer. The
-// node arena itself owns no text, so it drops as soon as `resolve_breaks` has
-// consumed it, while the small text buffer lives on down the pipeline.
+// tree into this postorder arena (children precede parents). All text is
+// concatenated into one buffer (returned alongside the arena) and text nodes
+// hold a range into it; every later representation borrows from that buffer,
+// so the node arena owns no text and drops as soon as `resolve_breaks` has
+// consumed it.
 
-/// Index into a [`LayoutArena`]'s node list.
-pub type LayId = u32;
-
-/// A byte range into the layout text buffer that `flatten` concatenates and
-/// every downstream representation borrows from. Storing a span rather than an
-/// owned `String` per text node keeps the node arena text-free (so it can drop
-/// early) and puts all text in one contiguous allocation.
-#[derive(Debug, Copy, Clone)]
-pub struct TextSpan {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl TextSpan {
-    /// The slice this span selects from the layout text buffer.
-    pub fn slice<'t>(&self, text: &'t str) -> &'t str {
-        &text[self.start as usize..self.end as usize]
-    }
-}
+pub(crate) type LayId = Id<LayoutNode>;
 
 #[derive(Debug)]
-pub enum LayoutNode {
+pub(crate) enum LayoutNode {
     Null,
-    Text(TextSpan),
+    Text(Range<str>),
     Fix(LayId),
     Grp(LayId),
     Seq(LayId),
@@ -44,39 +26,38 @@ pub enum LayoutNode {
 }
 
 #[derive(Debug)]
-pub struct LayoutArena {
+pub(crate) struct LayoutArena {
     /// Node arena in postorder: children precede parents.
-    pub nodes: Vec<LayoutNode>,
-    pub root: LayId,
+    pub(crate) nodes: Arena<LayoutNode>,
+    pub(crate) root: LayId,
 }
 
 // Edsl.
 //
 // Like the layout arena, but with hard line breaks resolved: compositions
 // inside a broken sequence have become `Line`s and already-broken seq wrappers
-// are gone. Owned; text is borrowed from the layout text buffer.
+// are gone. Text is borrowed from the layout text buffer.
 
-/// Index into an [`EdslDoc`]'s node list.
-pub type EdslId = u32;
+pub(crate) type EdslId<'a> = Id<EdslNode<'a>>;
 
 #[derive(Debug)]
-pub enum EdslNode<'a> {
+pub(crate) enum EdslNode<'a> {
     Null,
     Text(&'a str),
-    Fix(EdslId),
-    Grp(EdslId),
-    Seq(EdslId),
-    Nest(EdslId),
-    Pack(EdslId),
-    Line(EdslId, EdslId),
-    Comp(EdslId, EdslId, Attr),
+    Fix(EdslId<'a>),
+    Grp(EdslId<'a>),
+    Seq(EdslId<'a>),
+    Nest(EdslId<'a>),
+    Pack(EdslId<'a>),
+    Line(EdslId<'a>, EdslId<'a>),
+    Comp(EdslId<'a>, EdslId<'a>, Attr),
 }
 
 #[derive(Debug)]
-pub struct EdslDoc<'a> {
+pub(crate) struct EdslDoc<'a> {
     /// Node arena in postorder: children precede parents.
-    pub nodes: Vec<EdslNode<'a>>,
-    pub root: EdslId,
+    pub(crate) nodes: Arena<EdslNode<'a>>,
+    pub(crate) root: EdslId<'a>,
 }
 
 // SerialDoc.
@@ -85,19 +66,18 @@ pub struct EdslDoc<'a> {
 // it glues to what follows. The entry list is always non-empty and its final
 // entry is always `Last`. The document owns the path arena the entries' terms
 // point into and the scope buffer their deltas range into, and borrows only
-// the layout text buffer — `serialize`'s internal scope-chain arena does not
-// escape.
+// the layout text buffer.
 #[derive(Debug)]
-pub struct SerialDoc<'a> {
-    pub entries: Vec<SerialEntry<'a>>,
+pub(crate) struct SerialDoc<'a> {
+    pub(crate) entries: Vec<SerialEntry<'a>>,
     /// The shared nest/pack path arena every [`Term`]'s `path` points into.
-    pub paths: Vec<PathNode>,
-    /// The shared scope buffer every delta's [`ScopeRange`] indexes.
-    pub scopes: Vec<Scope>,
+    pub(crate) paths: Arena<PathNode>,
+    /// The shared scope buffer every delta ranges into.
+    pub(crate) scopes: Vec<Scope>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum SerialEntry<'a> {
+pub(crate) enum SerialEntry<'a> {
     /// A term followed by a composition — a hard line break
     /// (`SerialComp::Line`) or a composition separator (`SerialComp::Comp`).
     Next(Term<'a>, SerialComp),
@@ -105,40 +85,34 @@ pub enum SerialEntry<'a> {
     Last(Term<'a>),
 }
 
-/// Index into a [`SerialDoc`]'s path arena.
-pub type PathId = u32;
-
-/// Sentinel for the empty path (no nest/pack wrappers).
-pub const NO_PATH: PathId = u32::MAX;
+pub(crate) type PathId = Id<PathNode>;
 
 /// One nest/pack wrapper on the DFS path to a leaf. `serialize` pushes one
 /// node per `Nest`/`Pack` layout node it descends through, so sibling leaves
-/// under the same wrappers *share* their path spine: total path storage is
-/// O(input tree), not O(leaves × depth) as the old per-leaf wrapper chains
-/// were.
+/// under the same wrappers share their path spine: total path storage is
+/// O(input tree), not O(leaves × depth).
 #[derive(Debug, Copy, Clone)]
-pub struct PathNode {
-    pub prop: Prop,
-    /// The enclosing (next-outer) wrapper, or [`NO_PATH`] at the outermost.
-    pub parent: PathId,
+pub(crate) struct PathNode {
+    pub(crate) prop: Prop,
+    /// The enclosing (next-outer) wrapper, `None` at the outermost.
+    pub(crate) parent: Option<PathId>,
 }
 
 /// A layout term: its innermost nest/pack wrapper (a path into the shared
-/// path arena, [`NO_PATH`] for none) over a `Null`/`Text` leaf.
+/// path arena, `None` for no wrappers) over a `Null`/`Text` leaf.
 ///
 /// This shape is invariant across the `SerialDoc`, `FixedDoc`, and
 /// `RebuildDoc` representations — the passes between them rewrite the
 /// surrounding composition structure but leave terms untouched — so a single
 /// type serves all three, and terms flow through those passes by value.
-/// (`DenullTerm` drops `Null` post-denulling, so it stays distinct.)
 #[derive(Debug, Copy, Clone)]
-pub struct Term<'a> {
-    pub path: PathId,
-    pub leaf: TermLeaf<'a>,
+pub(crate) struct Term<'a> {
+    pub(crate) path: Option<PathId>,
+    pub(crate) leaf: TermLeaf<'a>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum TermLeaf<'a> {
+pub(crate) enum TermLeaf<'a> {
     Null,
     Text(&'a str),
 }
@@ -150,234 +124,177 @@ pub enum TermLeaf<'a> {
 ///
 /// Carrying open/close deltas (total size O(number of scopes)) rather than each
 /// composition's full enclosing scope stack (O(depth) per composition) is what
-/// keeps the grp/seq passes — serialize, split_lines, resolve_scopes — linear
-/// on deeply nested scopes instead of O(n^2).
+/// keeps the grp/seq passes linear on deeply nested scopes.
 #[derive(Debug, Copy, Clone)]
-pub enum Scope {
+pub(crate) enum Scope {
     Grp(u64),
     Seq(u64),
 }
 
-/// A range of scopes in the document's shared scope buffer
-/// ([`SerialDoc::scopes`]).
 #[derive(Debug, Copy, Clone)]
-pub struct ScopeRange {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl ScopeRange {
-    /// The scopes this range selects from the document's shared buffer.
-    pub fn slice<'s>(&self, buf: &'s [Scope]) -> &'s [Scope] {
-        &buf[self.start as usize..self.end as usize]
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum SerialComp {
+pub(crate) enum SerialComp {
     Line,
     /// A composition: its attributes, the scopes opening here, and the scopes
     /// closing here (ranges into the document's shared scope buffer).
-    Comp(Attr, ScopeRange, ScopeRange),
+    Comp(Attr, Range<Scope>, Range<Scope>),
 }
 
 // FixedDoc.
 //
-// An owned flat structure: lines in document order, each line its items with
-// the non-fixed compositions separating them, and maximal runs of terms joined
-// by fixed compositions coalesced into single fix items. (This replaces the
-// former LinearDoc + cons-list FixedDoc pair — splitting lines and coalescing
-// fixed runs happen in one sweep over the serial entries.)
+// Lines in document order, each line its items with the non-fixed
+// compositions separating them, and maximal runs of terms joined by fixed
+// compositions coalesced into single fix items.
 //
-// `lines` is the top-level index; the four element arenas (items, item_seps,
+// `lines` is the top-level index; the four element buffers (items, item_seps,
 // run terms, run_seps) are shared across all lines and fix runs, and a line or
-// fix run is just a pair of ranges into them. So `split_lines` appends instead
-// of allocating a `Vec` per line and per coalesced run (the former shape cost
-// ~2 allocations per fixed run — the compile path's last per-node allocator).
-
-/// A half-open range `[start, end)` into one of [`FixedDoc`]'s arenas.
-#[derive(Debug, Copy, Clone)]
-pub struct FixedSpan {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl FixedSpan {
-    /// The elements this range selects from one of `FixedDoc`'s arenas.
-    pub fn slice<'s, T>(&self, buf: &'s [T]) -> &'s [T] {
-        &buf[self.start as usize..self.end as usize]
-    }
-}
+// fix run is just a pair of ranges into them, so building the document
+// appends instead of allocating per line or per run.
 
 /// A composition: its pad flag, the scopes opening here, and the scopes
 /// closing here (ranges into the serial document's shared scope buffer).
 #[derive(Debug, Copy, Clone)]
-pub struct FixedComp {
-    pub pad: bool,
-    pub opens: ScopeRange,
-    pub closes: ScopeRange,
+pub(crate) struct FixedComp {
+    pub(crate) pad: bool,
+    pub(crate) opens: Range<Scope>,
+    pub(crate) closes: Range<Scope>,
 }
 
 /// A maximal run of terms joined by fixed compositions, coalesced into one
 /// unbreakable item. `terms` and `seps` are ranges into [`FixedDoc`]'s shared
-/// `terms` and `run_seps` arenas; `seps[i]` sits between `terms[i]` and
+/// `terms` and `run_seps` buffers; `seps[i]` sits between `terms[i]` and
 /// `terms[i + 1]` (so `terms.len() == seps.len() + 1`).
 #[derive(Debug, Copy, Clone)]
-pub struct FixRun {
-    pub terms: FixedSpan,
-    pub seps: FixedSpan,
+pub(crate) struct FixRun<'a> {
+    pub(crate) terms: Range<Term<'a>>,
+    pub(crate) seps: Range<FixedComp>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum FixedItem<'a> {
+pub(crate) enum FixedItem<'a> {
     Term(Term<'a>),
-    Fix(FixRun),
+    Fix(FixRun<'a>),
 }
 
-/// One line: ranges into [`FixedDoc`]'s `items` and `item_seps` arenas.
+/// One line: ranges into [`FixedDoc`]'s `items` and `item_seps` buffers.
 /// `item_seps[seps.start + i]` is the non-fixed composition between the line's
 /// item `i` and item `i + 1`.
 #[derive(Debug, Copy, Clone)]
-pub struct FixedLine {
-    pub items: FixedSpan,
-    pub seps: FixedSpan,
+pub(crate) struct FixedLine<'a> {
+    pub(crate) items: Range<FixedItem<'a>>,
+    pub(crate) seps: Range<FixedComp>,
 }
 
 /// The whole document, flattened. `lines` holds each line's ranges; the four
-/// element arenas are shared across all lines (items and their separators) and
-/// all fix runs (run terms and their separators).
+/// element buffers are shared across all lines (items and their separators)
+/// and all fix runs (run terms and their separators).
 #[derive(Debug)]
-pub struct FixedDoc<'a> {
-    pub lines: Vec<FixedLine>,
-    pub items: Vec<FixedItem<'a>>,
-    pub item_seps: Vec<FixedComp>,
-    pub terms: Vec<Term<'a>>,
-    pub run_seps: Vec<FixedComp>,
+pub(crate) struct FixedDoc<'a> {
+    pub(crate) lines: Vec<FixedLine<'a>>,
+    pub(crate) items: Vec<FixedItem<'a>>,
+    pub(crate) item_seps: Vec<FixedComp>,
+    pub(crate) terms: Vec<Term<'a>>,
+    pub(crate) run_seps: Vec<FixedComp>,
 }
 
 // RebuildDoc.
 //
 // A flat postorder arena, like the final `Doc`: objects and fixed objects live
-// in index-linked `Vec`s where children always precede their parents, and the
+// in index-linked arenas where children always precede their parents, and the
 // document spine is one root object per line. Consumers fold it bottom-up with
 // a plain forward loop over the arena — by the time a node is visited its
 // children's results are already computed — so no walk needs a frame stack.
 
-/// Index into a [`RebuildDoc`]'s object arena.
-pub type RObjId = u32;
-
-/// Index into a [`RebuildDoc`]'s fixed-object arena.
-pub type RFixId = u32;
+pub(crate) type RObjId<'a> = Id<RebuildObj<'a>>;
+pub(crate) type RFixId<'a> = Id<RebuildFix<'a>>;
 
 #[derive(Debug, Copy, Clone)]
-pub enum RebuildObj<'a> {
+pub(crate) enum RebuildObj<'a> {
     Term(Term<'a>),
-    Fix(RFixId),
-    Grp(RObjId),
-    Seq(RObjId),
-    Comp(RObjId, RObjId, bool),
+    Fix(RFixId<'a>),
+    Grp(RObjId<'a>),
+    Seq(RObjId<'a>),
+    Comp(RObjId<'a>, RObjId<'a>, bool),
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum RebuildFix<'a> {
+pub(crate) enum RebuildFix<'a> {
     Term(Term<'a>),
-    Comp(RFixId, RFixId, bool),
+    Comp(RFixId<'a>, RFixId<'a>, bool),
 }
 
 #[derive(Debug)]
-pub struct RebuildDoc<'a> {
+pub(crate) struct RebuildDoc<'a> {
     /// One root object per line, in document order.
-    pub lines: Vec<RObjId>,
+    pub(crate) lines: Vec<RObjId<'a>>,
     /// Object arena in postorder: children precede parents.
-    pub objs: Vec<RebuildObj<'a>>,
+    pub(crate) objs: Arena<RebuildObj<'a>>,
     /// Fixed-object arena in postorder: children precede parents.
-    pub fixes: Vec<RebuildFix<'a>>,
+    pub(crate) fixes: Arena<RebuildFix<'a>>,
 }
 
 // DenullDoc.
 //
-// A flat postorder arena like `RebuildDoc`, but owned (no bump arena backs
-// it): nulls are gone, so terms are a stripped `(props, text)` pair rather
-// than a wrapper chain, and the spine is a row list with the same semantics
-// as the final `Doc` (a `Line` row is always last; a document ending in `Eod`
-// simply has no `Line` row).
+// A flat postorder arena like `RebuildDoc`: nulls are gone, so terms are a
+// stripped `(props, text)` pair rather than a wrapper chain, and the spine is
+// a row list with the same semantics as the final `Doc` (a `Line` row is
+// always last; a document ending in `Eod` simply has no `Line` row).
 
-/// Index into a [`DenullDoc`]'s object arena.
-pub type DObjId = u32;
-
-/// Index into a [`DenullDoc`]'s fixed-object arena.
-pub type DFixId = u32;
+pub(crate) type DObjId<'a> = Id<DenullObj<'a>>;
+pub(crate) type DFixId<'a> = Id<DenullFix<'a>>;
 
 /// A nest/pack wrapper on a term, outermost first.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Prop {
+pub(crate) enum Prop {
     Nest,
     Pack(u64),
 }
 
-/// A term's prop list: a `start..end` range into the document's shared prop
-/// buffer ([`DenullDoc::props`]). Every prop-list operation downstream —
-/// `rescope`'s prefix factoring splits a list into a common prefix and two
-/// leftover suffixes — yields subranges, so ranges into one shared buffer
-/// replace a per-term `Vec` without any copying.
-#[derive(Debug, Copy, Clone)]
-pub struct Props {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl Props {
-    /// The props this range selects from the document's shared buffer.
-    pub fn slice<'p>(&self, buf: &'p [Prop]) -> &'p [Prop] {
-        &buf[self.start as usize..self.end as usize]
-    }
-}
-
 /// A denulled term: its nest/pack wrappers (outermost first, as a range into
-/// the document's shared prop buffer) over a non-empty text leaf. The chain
-/// shape of [`Term`] carries no other information, so post-denulling it is
-/// stored stripped — `rescope` factors these prop lists directly.
+/// the document's shared prop buffer) over a non-empty text leaf. Every
+/// prop-list operation downstream — `rescope`'s prefix factoring splits a list
+/// into a common prefix and two leftover suffixes — yields subranges, so ranges
+/// into one shared buffer replace a per-term `Vec` without any copying.
 #[derive(Debug, Copy, Clone)]
-pub struct DenullTerm<'a> {
-    pub props: Props,
-    pub text: &'a str,
+pub(crate) struct DenullTerm<'a> {
+    pub(crate) props: Range<Prop>,
+    pub(crate) text: &'a str,
 }
 
-#[derive(Debug, Clone)]
-pub enum DenullObj<'a> {
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum DenullObj<'a> {
     Term(DenullTerm<'a>),
-    Fix(DFixId),
-    Grp(DObjId),
-    Seq(DObjId),
-    Comp(DObjId, DObjId, bool),
+    Fix(DFixId<'a>),
+    Grp(DObjId<'a>),
+    Seq(DObjId<'a>),
+    Comp(DObjId<'a>, DObjId<'a>, bool),
 }
 
-#[derive(Debug, Clone)]
-pub enum DenullFix<'a> {
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum DenullFix<'a> {
     Term(DenullTerm<'a>),
-    Comp(DFixId, DFixId, bool),
+    Comp(DFixId<'a>, DFixId<'a>, bool),
 }
 
 /// One row of the denulled document spine, in document order. Same semantics
 /// as the final `Doc`'s rows: `Line` is always the last row, and a document
 /// with no `Line` row ends in `Eod`.
 #[derive(Debug, Copy, Clone)]
-pub enum DenullRow {
+pub(crate) enum DenullRow<'a> {
     Empty,
-    Break(DObjId),
-    Line(DObjId),
+    Break(DObjId<'a>),
+    Line(DObjId<'a>),
 }
 
 #[derive(Debug)]
-pub struct DenullDoc<'a> {
+pub(crate) struct DenullDoc<'a> {
     /// The spine rows, in document order.
-    pub rows: Vec<DenullRow>,
+    pub(crate) rows: Vec<DenullRow<'a>>,
     /// Object arena in postorder: children precede parents.
-    pub objs: Vec<DenullObj<'a>>,
+    pub(crate) objs: Arena<DenullObj<'a>>,
     /// Fixed-object arena in postorder: children precede parents.
-    pub fixes: Vec<DenullFix<'a>>,
+    pub(crate) fixes: Arena<DenullFix<'a>>,
     /// The shared prop buffer every [`DenullTerm`]'s `props` range indexes.
-    pub props: Vec<Prop>,
+    pub(crate) props: Vec<Prop>,
 }
 
 // The final pass, `rescope`, lowers `DenullDoc` straight into the owned heap

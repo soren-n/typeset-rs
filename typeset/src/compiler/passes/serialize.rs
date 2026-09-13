@@ -1,13 +1,10 @@
 //! serialize: EdslDoc → SerialDoc (serialize in order to normalize)
 //!
-//! Flattens the Edsl arena into the flat serial entry list. The original threaded
-//! four accumulator closures (terms, comps, glue, result) plus counters
-//! through a CPS recursion on the native stack, which aborts on deep inputs.
+//! Flattens the Edsl arena into the flat serial entry list with an explicit
+//! left-to-right DFS:
 //!
-//! Here the same computation runs as an explicit left-to-right DFS:
-//!
-//! - `i`/`j` (group/seq and pack indices) are mutable counters advanced in DFS
-//!   pre-order, exactly as the recursion threaded them.
+//! - `i`/`j` (group/seq and pack indices) are counters advanced in DFS
+//!   pre-order.
 //! - The nest/pack path accumulator `terms` is an id into the output's shared
 //!   path arena — descending through a wrapper pushes one arena node, so
 //!   sibling leaves share their path spine and a term is just (path id, leaf).
@@ -20,12 +17,11 @@
 //!
 //! Each leaf emits one `(glue, term)` entry; a final forward pass resolves the
 //! entries (in leaf order) into the `SerialEntry` list, computing each
-//! composition's scope open/close deltas in the same sweep — byte-identical to
-//! the recursive version.
+//! composition's scope open/close deltas in the same sweep.
 
 use crate::compiler::types::{
-    Attr, Break, EdslDoc, EdslId, EdslNode, NO_PATH, PathId, PathNode, Prop, Scope, ScopeRange,
-    SerialComp, SerialDoc, SerialEntry, Term, TermLeaf,
+    Arena, Attr, Break, EdslDoc, EdslId, EdslNode, Id, PathId, PathNode, Prop, Scope, SerialComp,
+    SerialDoc, SerialEntry, Term, TermLeaf, append_range,
 };
 
 /// A grp/seq wrapper accumulated on the path to a composition.
@@ -35,14 +31,12 @@ enum CompWrap {
     Seq(u64),
 }
 
-/// Index into the comp arena; [`NO_COMP`] is the empty (root) accumulator.
-type CompId = u32;
-
-/// The empty comp accumulator: no enclosing grp/seq.
-const NO_COMP: CompId = u32::MAX;
+/// A comp accumulator: the innermost enclosing grp/seq wrapper, `None` at the
+/// root.
+type CompId = Option<Id<CompNode>>;
 
 /// One grp/seq wrapper in the shared comp arena. `parent` links to the
-/// next-outer wrapper ([`NO_COMP`] at the outermost) and `depth` is the chain
+/// next-outer wrapper (`None` at the outermost) and `depth` is the chain
 /// length (root = 0), so two comps' enclosing chains — which share their outer
 /// spine by id — can be diffed by an O(delta) longest-common-suffix walk
 /// (advance the deeper to equal depth, then step in lockstep to the shared id).
@@ -64,8 +58,8 @@ enum Glue {
     Comp { comps: CompId, attr: Attr },
 }
 
-/// One emitted leaf: its term (text borrowed from the layout arena, `'a`) and
-/// how it glues to what follows (an id into the comp arena).
+/// One emitted leaf: its term (text borrowed from the layout buffer, `'a`) and
+/// how it glues to what follows.
 struct Entry<'a> {
     glue: Glue,
     term: Term<'a>,
@@ -73,32 +67,32 @@ struct Entry<'a> {
 
 /// A pending subtree to visit, with its scoped path state. `i`/`j` are global
 /// counters and deliberately not carried here.
-struct Work {
-    node: EdslId,
-    terms: PathId,
+struct Work<'a> {
+    node: EdslId<'a>,
+    terms: Option<PathId>,
     comps: CompId,
     glue: Glue,
     fixed: bool,
 }
 
-/// The output borrows only the layout arena's text (`'a`). Every accumulator is
-/// a flat arena owned by this pass, so nothing outlives the return.
+/// The output borrows only the layout text (`'a`). Every accumulator is a flat
+/// arena owned by this pass, so nothing else outlives the return.
 pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
     let mut i: u64 = 0;
     let mut j: u64 = 0;
     let mut entries: Vec<Entry<'a>> = Vec::new();
-    let mut paths: Vec<PathNode> = Vec::new();
+    let mut paths: Arena<PathNode> = Arena::new();
     // Shared parent-linked arena of grp/seq wrappers; a `comps` accumulator is
     // an id into it (see [`CompNode`]).
-    let mut comp_arena: Vec<CompNode> = Vec::new();
+    let mut comp_arena: Arena<CompNode> = Arena::new();
 
     // Right-to-left visitation is achieved by a stack: pushing the right child
     // before the left makes the left pop (and fully process) first, so the
-    // counters thread left-to-right just as the recursion did.
-    let mut stack: Vec<Work> = vec![Work {
+    // counters thread left-to-right.
+    let mut stack: Vec<Work<'a>> = vec![Work {
         node: doc.root,
-        terms: NO_PATH,
-        comps: NO_COMP,
+        terms: None,
+        comps: None,
         glue: Glue::Last,
         fixed: false,
     }];
@@ -111,7 +105,7 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
             glue,
             fixed,
         } = work;
-        match &doc.nodes[node as usize] {
+        match &doc.nodes[node] {
             // A leaf: emit its term under the accumulated wrapper path.
             leaf @ (EdslNode::Null | EdslNode::Text(_)) => {
                 let leaf = match leaf {
@@ -139,21 +133,16 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
                     EdslNode::Grp(_) => CompWrap::Grp(index),
                     _ => CompWrap::Seq(index),
                 };
-                let parent_depth = if comps == NO_COMP {
-                    0
-                } else {
-                    comp_arena[comps as usize].depth
-                };
-                let id = comp_arena.len() as CompId;
-                comp_arena.push(CompNode {
+                let depth = comps.map_or(0, |id| comp_arena[id].depth) + 1;
+                let id = comp_arena.push(CompNode {
                     wrap,
                     parent: comps,
-                    depth: parent_depth + 1,
+                    depth,
                 });
                 stack.push(Work {
                     node: *child,
                     terms,
-                    comps: id,
+                    comps: Some(id),
                     glue,
                     fixed,
                 });
@@ -169,14 +158,13 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
                         Prop::Pack(index)
                     }
                 };
-                let path = paths.len() as PathId;
-                paths.push(PathNode {
+                let path = paths.push(PathNode {
                     prop,
                     parent: terms,
                 });
                 stack.push(Work {
                     node: *child,
-                    terms: path,
+                    terms: Some(path),
                     comps,
                     glue,
                     fixed,
@@ -238,15 +226,15 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
     // copied into the shared scope buffer as a range.
     let mut opens: Vec<Scope> = Vec::new();
     let mut closes: Vec<Scope> = Vec::new();
-    let mut prev: CompId = NO_COMP;
+    let mut prev: CompId = None;
     for entry in entries.iter() {
         let item = match entry.glue {
             Glue::Last => {
-                prev = NO_COMP;
+                prev = None;
                 SerialEntry::Last(entry.term)
             }
             Glue::Line => {
-                prev = NO_COMP;
+                prev = None;
                 SerialEntry::Next(entry.term, SerialComp::Line)
             }
             Glue::Comp { comps, attr } => {
@@ -256,8 +244,8 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
                 prev = comps;
                 let comp = SerialComp::Comp(
                     attr,
-                    append_scopes(&mut scopes, &opens),
-                    append_scopes(&mut scopes, &closes),
+                    append_range(&mut scopes, &opens),
+                    append_range(&mut scopes, &closes),
                 );
                 SerialEntry::Next(entry.term, comp)
             }
@@ -271,23 +259,13 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
     }
 }
 
-/// Appends `delta` to the shared scope buffer, returning its range.
-fn append_scopes(scopes: &mut Vec<Scope>, delta: &[Scope]) -> ScopeRange {
-    let start = scopes.len() as u32;
-    scopes.extend_from_slice(delta);
-    ScopeRange {
-        start,
-        end: scopes.len() as u32,
-    }
-}
-
 /// Diffs two enclosing-scope chains (innermost-first, sharing an outer spine by
 /// id) into the scopes that *open* (in `cur`, not `prev`) and *close* (in
 /// `prev`, not `cur`) at this composition, appended to the caller's scratch.
 /// Order within each chain is irrelevant: resolve_scopes keys scopes by index.
 /// O(number of scopes that differ).
 fn diff_comps(
-    arena: &[CompNode],
+    arena: &Arena<CompNode>,
     prev: CompId,
     cur: CompId,
     opens: &mut Vec<Scope>,
@@ -299,34 +277,28 @@ fn diff_comps(
             CompWrap::Seq(index) => Scope::Seq(index),
         }
     }
-    fn depth(arena: &[CompNode], id: CompId) -> u32 {
-        if id == NO_COMP {
-            0
-        } else {
-            arena[id as usize].depth
-        }
-    }
+    let depth = |id: CompId| id.map_or(0, |id| arena[id].depth);
     let mut a = prev; // contributes closes
     let mut b = cur; // contributes opens
-    let (mut da, mut db) = (depth(arena, a), depth(arena, b));
+    let (mut da, mut db) = (depth(a), depth(b));
     // Drop the deeper chain's excess head down to the shallower chain's depth.
     while da > db {
-        let node = arena[a as usize];
+        let node = arena[a.expect("deeper chain is non-empty")];
         closes.push(scope_of(node.wrap));
         a = node.parent;
         da -= 1;
     }
     while db > da {
-        let node = arena[b as usize];
+        let node = arena[b.expect("deeper chain is non-empty")];
         opens.push(scope_of(node.wrap));
         b = node.parent;
         db -= 1;
     }
     // Equal depth: step in lockstep until the shared spine — the first id both
-    // chains agree on (or both `NO_COMP`) — everything above it differs.
+    // chains agree on (or both `None`) — everything above it differs.
     while a != b {
-        let na = arena[a as usize];
-        let nb = arena[b as usize];
+        let na = arena[a.expect("chains of equal depth")];
+        let nb = arena[b.expect("chains of equal depth")];
         closes.push(scope_of(na.wrap));
         opens.push(scope_of(nb.wrap));
         a = na.parent;
@@ -337,18 +309,21 @@ fn diff_comps(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{Pad, push_node};
+    use crate::compiler::types::Pad;
 
     /// Deeper than a native-stack recursion could survive (~hundreds of levels
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
     const DEEP: usize = 50_000;
 
     /// Wraps a `Text` leaf in `DEEP` layers of `wrap`.
-    fn deep_unary(text: &'static str, wrap: fn(EdslId) -> EdslNode<'static>) -> EdslDoc<'static> {
-        let mut nodes: Vec<EdslNode> = Vec::new();
-        let mut cur = push_node(&mut nodes, EdslNode::Text(text));
+    fn deep_unary(
+        text: &'static str,
+        wrap: fn(EdslId<'static>) -> EdslNode<'static>,
+    ) -> EdslDoc<'static> {
+        let mut nodes: Arena<EdslNode> = Arena::new();
+        let mut cur = nodes.push(EdslNode::Text(text));
         for _ in 0..DEEP {
-            cur = push_node(&mut nodes, wrap(cur));
+            cur = nodes.push(wrap(cur));
         }
         EdslDoc { nodes, root: cur }
     }
@@ -360,11 +335,11 @@ mod tests {
             brk: Break::Breakable,
         };
         // Right-nested Comp chain of DEEP compositions over DEEP + 1 texts.
-        let mut nodes: Vec<EdslNode> = Vec::new();
-        let mut cur = push_node(&mut nodes, EdslNode::Text("z"));
+        let mut nodes: Arena<EdslNode> = Arena::new();
+        let mut cur = nodes.push(EdslNode::Text("z"));
         for _ in 0..DEEP {
-            let left = push_node(&mut nodes, EdslNode::Text("y"));
-            cur = push_node(&mut nodes, EdslNode::Comp(left, cur, attr));
+            let left = nodes.push(EdslNode::Text("y"));
+            cur = nodes.push(EdslNode::Comp(left, cur, attr));
         }
         let doc = EdslDoc { nodes, root: cur };
         let serial = serialize(&doc);
@@ -388,10 +363,10 @@ mod tests {
         };
         let mut count = 0usize;
         let mut cur = term.path;
-        while cur != NO_PATH {
-            assert!(matches!(serial.paths[cur as usize].prop, Prop::Nest));
+        while let Some(id) = cur {
+            assert!(matches!(serial.paths[id].prop, Prop::Nest));
             count += 1;
-            cur = serial.paths[cur as usize].parent;
+            cur = serial.paths[id].parent;
         }
         assert_eq!(count, DEEP);
     }
@@ -408,11 +383,11 @@ mod tests {
         // walking outward counts back down to 0.
         let mut expected = DEEP as u64;
         let mut cur = term.path;
-        while cur != NO_PATH {
+        while let Some(id) = cur {
             let PathNode {
                 prop: Prop::Pack(index),
                 parent,
-            } = serial.paths[cur as usize]
+            } = serial.paths[id]
             else {
                 panic!("expected a pack wrapper")
             };

@@ -5,18 +5,18 @@
 //! composition's two operands back out around the composition (rescoping),
 //! applying the leftover props to each operand individually.
 //!
-//! This is the last pass, so it builds the owned heap [`Doc`] directly:
+//! This is the last pass, so it builds the owned [`Doc`] directly:
 //! object/fixed-object nodes are pushed into a [`DocBuilder`] children-first,
-//! so a parent's child indices always already exist. The input is a flat
+//! so a parent's child ids always already exist. The input is a flat
 //! postorder arena, so both walks are plain forward folds — children's results
 //! are already computed when a parent is visited — and the spine is a row map.
 
 use crate::compiler::types::{
-    DenullDoc, DenullFix, DenullObj, DenullRow, Doc, DocBuilder, FixId, FixNode, ObjId, ObjNode,
-    Prop, Props, Row,
+    DenullDoc, DenullFix, DenullObj, DenullRow, Doc, DocBuilder, FixId, FixNode, IdVec, ObjId,
+    ObjNode, Prop, Range, Row,
 };
 
-/// Rescope nest and pack, lowering the flat `DenullDoc` into the heap `Doc`.
+/// Rescope nest and pack, lowering the flat `DenullDoc` into the `Doc`.
 pub fn rescope(doc: DenullDoc) -> Box<Doc> {
     let DenullDoc {
         rows,
@@ -32,16 +32,16 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
     // Fold the fixed-object arena bottom-up. A fix composition keeps only its
     // left operand's props (the right operand's are dropped). Prop lists are
     // ranges into the shared buffer, so results are plain copyable pairs.
-    let mut fix_res: Vec<(Props, FixId)> = Vec::with_capacity(fixes.len());
-    for node in fixes {
-        let val = match node {
+    let mut fix_res: IdVec<DenullFix, (Range<Prop>, FixId)> = IdVec::with_capacity(fixes.len());
+    for (_, node) in fixes.iter() {
+        let val = match *node {
             DenullFix::Term(term) => {
                 let span = b.text(term.text);
                 (term.props, b.fix(FixNode::Text(span)))
             }
             DenullFix::Comp(left, right, pad) => {
-                let (l_props, left1) = fix_res[left as usize];
-                let right1 = fix_res[right as usize].1;
+                let (l_props, left1) = fix_res[left];
+                let right1 = fix_res[right].1;
                 (l_props, b.fix(FixNode::Comp(left1, right1, pad)))
             }
         };
@@ -50,28 +50,28 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
 
     // Fold the object arena bottom-up the same way; compositions factor the
     // common prop prefix out around themselves.
-    let mut obj_res: Vec<(Props, ObjId)> = Vec::with_capacity(objs.len());
-    for node in objs {
-        let val = match node {
+    let mut obj_res: IdVec<DenullObj, (Range<Prop>, ObjId)> = IdVec::with_capacity(objs.len());
+    for (_, node) in objs.iter() {
+        let val = match *node {
             DenullObj::Term(term) => {
                 let span = b.text(term.text);
                 (term.props, b.obj(ObjNode::Text(span)))
             }
             DenullObj::Fix(fix) => {
-                let (fix_props, fix1) = fix_res[fix as usize];
+                let (fix_props, fix1) = fix_res[fix];
                 (fix_props, b.obj(ObjNode::Fix(fix1)))
             }
             DenullObj::Grp(obj1) => {
-                let (obj_props, id1) = obj_res[obj1 as usize];
+                let (obj_props, id1) = obj_res[obj1];
                 (obj_props, b.obj(ObjNode::Grp(id1)))
             }
             DenullObj::Seq(obj1) => {
-                let (obj_props, id1) = obj_res[obj1 as usize];
+                let (obj_props, id1) = obj_res[obj1];
                 (obj_props, b.obj(ObjNode::Seq(id1)))
             }
             DenullObj::Comp(left, right, pad) => {
-                let (l_props, left1) = obj_res[left as usize];
-                let (r_props, right1) = obj_res[right as usize];
+                let (l_props, left1) = obj_res[left];
+                let (r_props, right1) = obj_res[right];
                 // Factor the common prop prefix out around the composition;
                 // apply the leftovers to each operand individually. Prefix and
                 // leftovers are subranges of the operands' ranges.
@@ -81,10 +81,7 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
                 let left2 = wrap_props(&mut b, &l[k..], left1);
                 let right2 = wrap_props(&mut b, &r[k..], right1);
                 let comp = b.obj(ObjNode::Comp(left2, right2, pad));
-                let prefix = Props {
-                    start: l_props.start,
-                    end: l_props.start + k as u32,
-                };
+                let prefix = Range::new(l_props.start(), l_props.start() + k);
                 (prefix, comp)
             }
         };
@@ -95,8 +92,8 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
     let rows: Vec<Row> = rows
         .into_iter()
         .map(|row| {
-            let mut finish = |id: u32| {
-                let (root_props, root) = obj_res[id as usize];
+            let mut finish = |id| {
+                let (root_props, root) = obj_res[id];
                 wrap_props(&mut b, root_props.slice(&props), root)
             };
             match row {
@@ -115,8 +112,8 @@ fn common_prefix_len(l: &[Prop], r: &[Prop]) -> usize {
     l.iter().zip(r.iter()).take_while(|(a, b)| a == b).count()
 }
 
-/// Wraps an object with its props (index 0 outermost), returning the arena index
-/// of the outermost wrapper.
+/// Wraps an object with its props (index 0 outermost), returning the id of the
+/// outermost wrapper.
 fn wrap_props(b: &mut DocBuilder, props: &[Prop], term: ObjId) -> ObjId {
     // Apply from the tail so the first prop ends up outermost.
     let mut obj = term;
@@ -132,10 +129,10 @@ fn wrap_props(b: &mut DocBuilder, props: &[Prop], term: ObjId) -> ObjId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{DObjId, DenullTerm, push_node};
+    use crate::compiler::types::{Arena, DObjId, DenullTerm};
 
     /// Far past where a native-stack recursion could survive; with flat arenas
-    /// the folds are plain loops, so this now guards sizing behavior only.
+    /// the folds are plain loops, so this guards sizing behavior only.
     const DEEP: usize = 50_000;
 
     /// Pushes `props` onto the shared buffer and returns a term over them.
@@ -144,13 +141,10 @@ mod tests {
         props: impl IntoIterator<Item = Prop>,
         text: &'static str,
     ) -> DenullObj<'static> {
-        let start = buf.len() as u32;
+        let start = buf.len();
         buf.extend(props);
         DenullObj::Term(DenullTerm {
-            props: Props {
-                start,
-                end: buf.len() as u32,
-            },
+            props: Range::new(start, buf.len()),
             text,
         })
     }
@@ -159,19 +153,23 @@ mod tests {
         prop_term(buf, std::iter::repeat_n(Prop::Nest, depth), text)
     }
 
-    fn line_doc(objs: Vec<DenullObj>, props: Vec<Prop>, root: DObjId) -> DenullDoc {
+    fn line_doc<'a>(
+        objs: Arena<DenullObj<'a>>,
+        props: Vec<Prop>,
+        root: DObjId<'a>,
+    ) -> DenullDoc<'a> {
         DenullDoc {
             rows: vec![DenullRow::Line(root)],
             objs,
-            fixes: Vec::new(),
+            fixes: Arena::new(),
             props,
         }
     }
 
-    /// The single object index a one-line document holds.
+    /// The single object id a one-line document holds.
     fn line_root(doc: &Doc) -> ObjId {
-        match doc.rows() {
-            [Row::Line(id)] => *id,
+        match doc.rows[..] {
+            [Row::Line(id)] => id,
             _ => panic!("expected a single-line document"),
         }
     }
@@ -179,17 +177,17 @@ mod tests {
     #[test]
     fn rescope_reapplies_deep_nest_props() {
         let mut buf: Vec<Prop> = Vec::new();
-        let mut objs: Vec<DenullObj> = Vec::new();
-        let root = push_node(&mut objs, nest_term(&mut buf, DEEP, "x"));
+        let mut objs: Arena<DenullObj> = Arena::new();
+        let root = objs.push(nest_term(&mut buf, DEEP, "x"));
         let out = rescope(line_doc(objs, buf, root));
         // The stripped nests are re-applied around the text.
         let mut count = 0usize;
         let mut cur = line_root(&out);
-        while let ObjNode::Nest(inner) = out.objs()[cur as usize] {
+        while let ObjNode::Nest(inner) = out.objs[cur] {
             count += 1;
             cur = inner;
         }
-        assert!(matches!(out.objs()[cur as usize], ObjNode::Text(_)));
+        assert!(matches!(out.objs[cur], ObjNode::Text(_)));
         assert_eq!(count, DEEP);
     }
 
@@ -198,24 +196,24 @@ mod tests {
         // Both operands share a Nest^DEEP prefix: rescoping lifts all of it
         // out around the composition.
         let mut buf: Vec<Prop> = Vec::new();
-        let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push_node(&mut objs, nest_term(&mut buf, DEEP, "a"));
-        let bx = push_node(&mut objs, nest_term(&mut buf, DEEP, "b"));
-        let root = push_node(&mut objs, DenullObj::Comp(a, bx, false));
+        let mut objs: Arena<DenullObj> = Arena::new();
+        let a = objs.push(nest_term(&mut buf, DEEP, "a"));
+        let bx = objs.push(nest_term(&mut buf, DEEP, "b"));
+        let root = objs.push(DenullObj::Comp(a, bx, false));
         let out = rescope(line_doc(objs, buf, root));
         let mut count = 0usize;
         let mut cur = line_root(&out);
-        while let ObjNode::Nest(inner) = out.objs()[cur as usize] {
+        while let ObjNode::Nest(inner) = out.objs[cur] {
             count += 1;
             cur = inner;
         }
         // The common nests wrap a single composition of the bare texts.
         assert_eq!(count, DEEP);
-        let ObjNode::Comp(left, right, _) = out.objs()[cur as usize] else {
+        let ObjNode::Comp(left, right, _) = out.objs[cur] else {
             panic!("expected the lifted comp")
         };
-        assert!(matches!(out.objs()[left as usize], ObjNode::Text(_)));
-        assert!(matches!(out.objs()[right as usize], ObjNode::Text(_)));
+        assert!(matches!(out.objs[left], ObjNode::Text(_)));
+        assert!(matches!(out.objs[right], ObjNode::Text(_)));
     }
 
     #[test]
@@ -223,33 +221,33 @@ mod tests {
         // Left is Nest(text), right is Pack(text): no common prefix, so each
         // operand keeps its own wrapper under the composition.
         let mut buf: Vec<Prop> = Vec::new();
-        let mut objs: Vec<DenullObj> = Vec::new();
-        let a = push_node(&mut objs, prop_term(&mut buf, [Prop::Nest], "a"));
-        let bx = push_node(&mut objs, prop_term(&mut buf, [Prop::Pack(3)], "b"));
-        let root = push_node(&mut objs, DenullObj::Comp(a, bx, true));
+        let mut objs: Arena<DenullObj> = Arena::new();
+        let a = objs.push(prop_term(&mut buf, [Prop::Nest], "a"));
+        let bx = objs.push(prop_term(&mut buf, [Prop::Pack(3)], "b"));
+        let root = objs.push(DenullObj::Comp(a, bx, true));
         let out = rescope(line_doc(objs, buf, root));
-        let ObjNode::Comp(left, right, pad) = out.objs()[line_root(&out) as usize] else {
+        let ObjNode::Comp(left, right, pad) = out.objs[line_root(&out)] else {
             panic!("expected a comp root")
         };
         assert!(pad);
-        assert!(matches!(out.objs()[left as usize], ObjNode::Nest(_)));
-        assert!(matches!(out.objs()[right as usize], ObjNode::Pack(3, _)));
+        assert!(matches!(out.objs[left], ObjNode::Nest(_)));
+        assert!(matches!(out.objs[right], ObjNode::Pack(3, _)));
     }
 
     #[test]
     fn rescope_handles_deep_comp_object() {
         // Right-nested comp of plain terms.
         let mut buf: Vec<Prop> = Vec::new();
-        let mut objs: Vec<DenullObj> = Vec::new();
-        let mut cur = push_node(&mut objs, nest_term(&mut buf, 0, "z"));
+        let mut objs: Arena<DenullObj> = Arena::new();
+        let mut cur = objs.push(nest_term(&mut buf, 0, "z"));
         for _ in 0..DEEP {
-            let left = push_node(&mut objs, nest_term(&mut buf, 0, "y"));
-            cur = push_node(&mut objs, DenullObj::Comp(left, cur, false));
+            let left = objs.push(nest_term(&mut buf, 0, "y"));
+            cur = objs.push(DenullObj::Comp(left, cur, false));
         }
         let out = rescope(line_doc(objs, buf, cur));
         let mut count = 0usize;
         let mut walk = line_root(&out);
-        while let ObjNode::Comp(_left, right, _) = out.objs()[walk as usize] {
+        while let ObjNode::Comp(_left, right, _) = out.objs[walk] {
             count += 1;
             walk = right;
         }
@@ -258,26 +256,20 @@ mod tests {
 
     #[test]
     fn rescope_fix_comp_keeps_left_props_only() {
-        let mut objs: Vec<DenullObj> = Vec::new();
-        let mut fixes: Vec<DenullFix> = Vec::new();
+        let mut objs: Arena<DenullObj> = Arena::new();
+        let mut fixes: Arena<DenullFix> = Arena::new();
         // Both fix terms carry one Nest; their ranges share the buffer.
         let buf = vec![Prop::Nest, Prop::Nest];
-        let fa = push_node(
-            &mut fixes,
-            DenullFix::Term(DenullTerm {
-                props: Props { start: 0, end: 1 },
-                text: "a",
-            }),
-        );
-        let fb = push_node(
-            &mut fixes,
-            DenullFix::Term(DenullTerm {
-                props: Props { start: 1, end: 2 },
-                text: "b",
-            }),
-        );
-        let fc = push_node(&mut fixes, DenullFix::Comp(fa, fb, false));
-        let root = push_node(&mut objs, DenullObj::Fix(fc));
+        let fa = fixes.push(DenullFix::Term(DenullTerm {
+            props: Range::new(0, 1),
+            text: "a",
+        }));
+        let fb = fixes.push(DenullFix::Term(DenullTerm {
+            props: Range::new(1, 2),
+            text: "b",
+        }));
+        let fc = fixes.push(DenullFix::Comp(fa, fb, false));
+        let root = objs.push(DenullObj::Fix(fc));
         let doc = DenullDoc {
             rows: vec![DenullRow::Line(root)],
             objs,
@@ -288,38 +280,35 @@ mod tests {
         // The left operand's nest surfaces around the fix; the right's is
         // dropped inside it.
         let mut cur = line_root(&out);
-        let ObjNode::Nest(inner) = out.objs()[cur as usize] else {
+        let ObjNode::Nest(inner) = out.objs[cur] else {
             panic!("expected the left props around the fix")
         };
         cur = inner;
-        assert!(matches!(out.objs()[cur as usize], ObjNode::Fix(_)));
+        assert!(matches!(out.objs[cur], ObjNode::Fix(_)));
     }
 
     #[test]
     fn rescope_handles_long_doc_spine() {
         let mut buf: Vec<Prop> = Vec::new();
-        let mut objs: Vec<DenullObj> = Vec::new();
+        let mut objs: Arena<DenullObj> = Arena::new();
         let mut rows: Vec<DenullRow> = Vec::new();
         for _ in 0..DEEP {
-            rows.push(DenullRow::Break(push_node(
-                &mut objs,
-                nest_term(&mut buf, 0, "x"),
-            )));
+            rows.push(DenullRow::Break(objs.push(nest_term(&mut buf, 0, "x"))));
         }
         let doc = DenullDoc {
             rows,
             objs,
-            fixes: Vec::new(),
+            fixes: Arena::new(),
             props: buf,
         };
         let out = rescope(doc);
         // Eod-terminated spine: DEEP Break rows and no Line row.
         let count = out
-            .rows()
+            .rows
             .iter()
             .filter(|r| matches!(r, Row::Break(_)))
             .count();
-        assert!(!out.rows().iter().any(|r| matches!(r, Row::Line(_))));
+        assert!(!out.rows.iter().any(|r| matches!(r, Row::Line(_))));
         assert_eq!(count, DEEP);
     }
 }
