@@ -12,8 +12,8 @@
 
 use super::graph::{EdgeData, GraphDoc, GraphLine, NodeData, NodeId};
 use crate::arena::{Arena, Range};
-use crate::ir::{Scope, ScopeKind};
-use crate::serialize::{FixedComp, FixedDoc, FixedItem, FixedLine};
+use crate::serialize::{FixedComp, FixedDoc, FixedLine};
+use crate::serialize::{Scope, ScopeKind};
 use std::collections::BTreeMap;
 
 // The scopes open across the current point of a line, keyed by scope index:
@@ -65,9 +65,9 @@ pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>) -> GraphDoc<'b, 'a> {
 }
 
 /// Graphifies one line: assigns a node per item and replays each
-/// composition's scope deltas at that node. A fix item's internal comps and
-/// its trailing separator all share the item's node, exactly as document
-/// order threads them.
+/// composition's scope deltas at that node. A run's internal comps and its
+/// trailing separator all share the item's node, exactly as document order
+/// threads them.
 fn visit_line<'b, 'a>(
     g: &mut GraphDoc<'b, 'a>,
     doc: &FixedDoc<'a>,
@@ -80,12 +80,10 @@ fn visit_line<'b, 'a>(
     edges.clear();
     let items = line.items.slice(&doc.items);
     let seps = line.seps.slice(&doc.item_seps);
-    for (i, item) in items.iter().enumerate() {
+    for (i, run) in items.iter().enumerate() {
         let node = g.nodes.push(NodeData::new());
-        if let FixedItem::Fix(run) = item {
-            for sep in run.seps.slice(&doc.run_seps) {
-                apply_comp(node, sep, scopes, &mut open, edges);
-            }
+        for sep in run.seps.slice(&doc.run_seps) {
+            apply_comp(node, sep, scopes, &mut open, edges);
         }
         if let Some(sep) = seps.get(i) {
             apply_comp(node, sep, scopes, &mut open, edges);

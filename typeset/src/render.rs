@@ -9,7 +9,7 @@
 //! commits pack marks; `fold` only measures, and undoes any marks it recorded
 //! before returning so the caller's marks are untouched.
 
-use crate::doc::{Doc, FixId, FixNode, ObjId, ObjNode, text_width};
+use crate::doc::{Doc, ObjId, ObjNode};
 
 use crate::layout::Pad;
 use std::cmp::max;
@@ -89,26 +89,20 @@ impl Cursor {
 /// and any cursor field to restore once a child subtree has been folded.
 enum MFrame {
     Obj(ObjId),
-    Fix(FixId),
     RestoreLvl(usize),
     RestoreHead(bool),
     /// After the left of a `Comp`: pad, drop `head`, visit the right, then
     /// restore `head`.
     CompMid(ObjId, Pad),
-    /// After the left of a fixed `Comp`: pad, then visit the right.
-    FixCompMid(FixId, Pad),
 }
 
 /// Frame for the output traversal ([`Renderer::render_obj`]).
 enum RFrame {
     Obj(ObjId),
-    Fix(FixId),
     RestoreLvl(usize),
     RestoreBreak(bool),
     /// After the left of a `Comp`: decide the break, then render the right.
     CompMid(ObjId, Pad),
-    /// After the left of a fixed `Comp`: pad, then render the right.
-    FixCompMid(FixId, Pad),
 }
 
 /// Outcome of resolving a `Pack` mark.
@@ -189,13 +183,7 @@ impl<'a> Renderer<'a> {
     /// and the caller only compares the result against the width, so the fold
     /// stops as soon as the position passes it.
     fn fold(&mut self, obj: ObjId, mut cur: Cursor) -> usize {
-        let Doc {
-            objs,
-            fixes,
-            text,
-            extents,
-            ..
-        } = self.doc;
+        let Doc { objs, extents, .. } = self.doc;
         let mut stack = std::mem::take(&mut self.fold_stack);
         stack.clear();
         self.inserted.clear();
@@ -206,8 +194,7 @@ impl<'a> Renderer<'a> {
             }
             match frame {
                 MFrame::Obj(o) => match &objs[o] {
-                    ObjNode::Text(_) => cur.advance(extents[o]),
-                    ObjNode::Fix(fix) => stack.push(MFrame::Fix(*fix)),
+                    ObjNode::Run(_) => cur.advance(extents[o]),
                     ObjNode::Grp(child) | ObjNode::Seq(child) => stack.push(MFrame::Obj(*child)),
                     ObjNode::Nest(child) => {
                         stack.push(MFrame::RestoreLvl(cur.lvl));
@@ -229,13 +216,6 @@ impl<'a> Renderer<'a> {
                         stack.push(MFrame::Obj(*left));
                     }
                 },
-                MFrame::Fix(f) => match &fixes[f] {
-                    FixNode::Text(range) => cur.advance(text_width(range.slice(text))),
-                    FixNode::Comp(left, right, pad) => {
-                        stack.push(MFrame::FixCompMid(*right, *pad));
-                        stack.push(MFrame::Fix(*left));
-                    }
-                },
                 MFrame::RestoreLvl(lvl) => cur.lvl = lvl,
                 MFrame::RestoreHead(head) => cur.head = head,
                 MFrame::CompMid(right, pad) => {
@@ -243,10 +223,6 @@ impl<'a> Renderer<'a> {
                     stack.push(MFrame::RestoreHead(cur.head));
                     cur.head = false;
                     stack.push(MFrame::Obj(right));
-                }
-                MFrame::FixCompMid(right, pad) => {
-                    cur.advance(pad.width());
-                    stack.push(MFrame::Fix(right));
                 }
             }
         }
@@ -280,7 +256,7 @@ impl<'a> Renderer<'a> {
     fn render_obj(&mut self, obj: ObjId, cur: &mut Cursor) {
         let Doc {
             objs,
-            fixes,
+            runs,
             text,
             extents,
             ..
@@ -291,11 +267,13 @@ impl<'a> Renderer<'a> {
         while let Some(frame) = stack.pop() {
             match frame {
                 RFrame::Obj(o) => match &objs[o] {
-                    ObjNode::Text(range) => {
+                    ObjNode::Run(range) => {
+                        for run in range.slice(runs) {
+                            self.push_spaces(run.pad.width());
+                            self.out.push_str(run.text.slice(text));
+                        }
                         cur.advance(extents[o]);
-                        self.out.push_str(range.slice(text));
                     }
-                    ObjNode::Fix(fix) => stack.push(RFrame::Fix(*fix)),
                     ObjNode::Grp(child) => {
                         stack.push(RFrame::RestoreBreak(cur.broken));
                         cur.broken = false;
@@ -329,17 +307,6 @@ impl<'a> Renderer<'a> {
                         stack.push(RFrame::Obj(*left));
                     }
                 },
-                RFrame::Fix(f) => match &fixes[f] {
-                    FixNode::Text(range) => {
-                        let data = range.slice(text);
-                        cur.advance(text_width(data));
-                        self.out.push_str(data);
-                    }
-                    FixNode::Comp(left, right, pad) => {
-                        stack.push(RFrame::FixCompMid(*right, *pad));
-                        stack.push(RFrame::Fix(*left));
-                    }
-                },
                 RFrame::RestoreLvl(lvl) => cur.lvl = lvl,
                 RFrame::RestoreBreak(broken) => cur.broken = broken,
                 RFrame::CompMid(right, pad) => {
@@ -359,11 +326,6 @@ impl<'a> Renderer<'a> {
                         *cur = joined;
                     }
                     stack.push(RFrame::Obj(right));
-                }
-                RFrame::FixCompMid(right, pad) => {
-                    self.push_spaces(pad.width());
-                    cur.advance(pad.width());
-                    stack.push(RFrame::Fix(right));
                 }
             }
         }

@@ -104,14 +104,11 @@
 
 mod arena;
 mod constructors;
-mod denull;
 mod doc;
 pub mod dsl;
-mod ir;
 mod layout;
-mod normalize;
+mod lower;
 mod render;
-mod rescope;
 mod resolve_scopes;
 mod serialize;
 
@@ -130,11 +127,9 @@ pub use self::constructors::{
 //
 // | Pass             | Lowers                    | Does |
 // |------------------|---------------------------|------|
-// | `serialize`      | `Layout` → `FixedDoc`     | split into lines at hard breaks (and inside broken sequences), coalesce fixed runs, record scope open/close deltas |
+// | `serialize`      | `Layout` → `FixedDoc`     | split into lines at hard breaks (and inside broken sequences), coalesce runs of fixed compositions, record scope open/close deltas |
 // | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve, and read back the grp/seq scope graph |
-// | `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms, strip term wrappers to prop lists |
-// | `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq, right-associate compositions |
-// | `rescope`        | `DenullDoc` → `Doc`       | factor shared nest/pack prefixes, build the `Doc` and its extent tables |
+// | `lower`          | `RebuildDoc` → `Doc`      | drop empty terms, eliminate trivial grp/seq, right-associate, factor shared nest/pack prefixes, build the `Doc` and its extent tables |
 //
 // Every representation, the input [`Layout`] included, is a flat structure —
 // postorder index arenas or plain vectors — so every pass is a loop (or an
@@ -142,11 +137,9 @@ pub use self::constructors::{
 // stack: no layout is too deep to compile, and depth shows up as O(depth)
 // heap instead. Every pass builds its accumulators in flat `Vec`-backed
 // arenas it owns and frees on return. The layout's text buffer is borrowed by
-// every representation down the pipeline; every intermediate drops as soon as
-// the next representation is built, so peak memory is a narrow window around
-// the largest pair of adjacent IRs rather than the sum of all of them. The
-// output [`Doc`] is a flat arena whose `Clone`/`Drop`/`Debug` are derived and
-// non-recursive by construction.
+// every representation down the pipeline, and the layout's node arena drops
+// as soon as it is serialized. The output [`Doc`] is a flat arena whose
+// `Clone`/`Drop`/`Debug` are derived and non-recursive by construction.
 
 /// Compiles a layout into an optimized document.
 ///
@@ -168,14 +161,8 @@ pub fn compile(layout: Layout) -> Doc {
     let Layout { nodes, text } = layout;
     let fixed = serialize::serialize(&nodes, &text);
     drop(nodes);
-
-    let denull_doc = {
-        let scoped_doc = resolve_scopes::resolve_scopes(&fixed);
-        denull::denull(&scoped_doc, &fixed.paths)
-    };
-    drop(fixed);
-
-    rescope::rescope(normalize::normalize(denull_doc))
+    let rebuilt = resolve_scopes::resolve_scopes(&fixed);
+    lower::lower(&rebuilt, &fixed)
 }
 
 impl Layout {
@@ -219,6 +206,28 @@ mod tests {
         let output = render(&doc, 2, 1);
         assert!(output.contains('\n'));
         assert!(output.ends_with('b'));
+    }
+
+    #[test]
+    fn deep_wrappers_compile_renders_and_drops() {
+        // nest/grp/seq wrappers stacked far deeper than a recursive fold
+        // could survive; every wrapper but the nests collapses.
+        let mut layout = text("x");
+        for _ in 0..DEEP {
+            layout = nest(grp(seq(layout)));
+        }
+        let doc = compile(layout);
+        assert_eq!(render(&doc, 1, 80).trim_start(), "x");
+    }
+
+    #[test]
+    fn deep_fixed_chain_renders() {
+        let mut layout = text("z");
+        for _ in 0..DEEP {
+            layout = comp(text("y"), layout, Pad::Unpadded, Break::Fixed);
+        }
+        let doc = compile(layout);
+        assert_eq!(render(&doc, 2, 1).len(), DEEP + 1);
     }
 
     #[test]

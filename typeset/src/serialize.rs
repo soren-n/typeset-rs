@@ -1,16 +1,17 @@
-//! serialize: Layout → FixedDoc (lines of items, scopes as deltas)
+//! serialize: Layout → FixedDoc (lines of runs, scopes as deltas)
 //!
 //! One left-to-right DFS over the layout arena emits the document as lines of
-//! items with the compositions between them:
+//! runs with the breakable compositions between them:
 //!
 //! - A hard line break ends a line. So does every breakable composition
 //!   inside a *broken* sequence — a `seq` whose subtree contains a hard line
 //!   is unconditionally broken, so its wrapper is dropped and its breakable
 //!   compositions become lines. `fix` and `grp` reset that context.
-//! - Maximal runs of terms joined by fixed compositions (including every
-//!   composition under a `fix`) coalesce into single fix items.
+//! - Every item is a run: a maximal sequence of terms joined by fixed
+//!   compositions (including every composition under a `fix`). A lone term
+//!   is a run of one.
 //! - Each `nest`/`pack` descended through pushes one node onto the shared
-//!   path arena, so a term is just (path id, leaf) and sibling leaves share
+//!   path arena, so a term is just (path id, text) and sibling leaves share
 //!   their path spine.
 //! - Each `grp`/`seq` descended through pushes one node onto a parent-linked
 //!   scope-chain arena (assigning the scope's index in DFS pre-order). A
@@ -23,12 +24,59 @@
 //! the scope graph by scope index.
 
 use crate::arena::{Arena, Id, IdVec, Range, append_range};
-
-use crate::ir::{PathId, PathNode, Prop, Scope, ScopeKind, Term, TermLeaf};
-
 use crate::layout::{Attr, Break, LayId, LayoutNode, Pad};
 
-/// A composition between two items: its padding and the scopes opening and
+pub(crate) type PathId = Id<PathNode>;
+
+/// One nest/pack wrapper on the DFS path to a leaf. Sibling leaves under the
+/// same wrappers share their path spine, so total path storage is O(input
+/// tree), not O(leaves × depth).
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct PathNode {
+    pub(crate) prop: Prop,
+    /// The enclosing (next-outer) wrapper, `None` at the outermost.
+    pub(crate) parent: Option<PathId>,
+}
+
+/// A nest/pack wrapper on a term. Pack indices are dense DFS counters.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum Prop {
+    Nest,
+    Pack(u32),
+}
+
+/// A layout leaf: its innermost nest/pack wrapper (a path into the shared
+/// path arena, `None` for no wrappers) over its text. The empty layout is the
+/// empty text; both vanish in `lower`.
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct Term<'a> {
+    pub(crate) path: Option<PathId>,
+    pub(crate) text: &'a str,
+}
+
+/// A grp or seq scope, identified by the index `serialize` assigns it in
+/// document pre-order. Each composition point records which scopes *open* and
+/// which *close* at it, relative to the previous composition on the same line;
+/// `resolve_scopes` replays those deltas to rebuild the scope graph.
+///
+/// Carrying open/close deltas (total size O(number of scopes)) rather than each
+/// composition's full enclosing scope stack (O(depth) per composition) is what
+/// keeps the grp/seq passes linear on deeply nested scopes.
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct Scope {
+    pub(crate) kind: ScopeKind,
+    pub(crate) index: u32,
+}
+
+/// Which of the two breaking disciplines a scope imposes: `Grp` breaks its
+/// compositions all-or-nothing, `Seq` cascades a break forward.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum ScopeKind {
+    Grp,
+    Seq,
+}
+
+/// A composition between two terms: its padding and the scopes opening and
 /// closing here (ranges into the document's shared scope buffer).
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct FixedComp {
@@ -37,41 +85,35 @@ pub(crate) struct FixedComp {
     pub(crate) closes: Range<Scope>,
 }
 
-/// A maximal run of terms joined by fixed compositions, coalesced into one
-/// unbreakable item. `terms` and `seps` are ranges into [`FixedDoc`]'s shared
-/// `terms` and `run_seps` buffers; `seps[i]` sits between `terms[i]` and
-/// `terms[i + 1]` (so `terms.len() == seps.len() + 1`).
+/// One item of a line: a maximal run of terms joined by fixed compositions,
+/// which never breaks. `terms` and `seps` are ranges into [`FixedDoc`]'s
+/// shared `terms` and `run_seps` buffers; `seps[i]` sits between `terms[i]`
+/// and `terms[i + 1]` (so `terms.len() == seps.len() + 1`).
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct FixRun<'a> {
+pub(crate) struct Run<'a> {
     pub(crate) terms: Range<Term<'a>>,
     pub(crate) seps: Range<FixedComp>,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum FixedItem<'a> {
-    Term(Term<'a>),
-    Fix(FixRun<'a>),
-}
-
 /// One line: ranges into [`FixedDoc`]'s `items` and `item_seps` buffers.
-/// `item_seps[seps.start + i]` is the non-fixed composition between the line's
-/// item `i` and item `i + 1`.
+/// `item_seps[seps.start + i]` is the breakable composition between the
+/// line's item `i` and item `i + 1`.
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct FixedLine<'a> {
-    pub(crate) items: Range<FixedItem<'a>>,
+    pub(crate) items: Range<Run<'a>>,
     pub(crate) seps: Range<FixedComp>,
 }
 
-/// The document as lines of items. `lines` is the top-level index; the four
+/// The document as lines of runs. `lines` is the top-level index; the four
 /// element buffers are shared across all lines (items and their separators)
-/// and all fix runs (run terms and their separators), so building the
-/// document appends instead of allocating per line or per run. The document
-/// also owns the path arena its terms point into and the scope buffer its
-/// compositions' deltas range into; it borrows only the layout's text.
+/// and all runs (run terms and their separators), so building the document
+/// appends instead of allocating per line or per run. The document also owns
+/// the path arena its terms point into and the scope buffer its compositions'
+/// deltas range into; it borrows only the layout's text.
 #[derive(Debug)]
 pub(crate) struct FixedDoc<'a> {
     pub(crate) lines: Vec<FixedLine<'a>>,
-    pub(crate) items: Vec<FixedItem<'a>>,
+    pub(crate) items: Vec<Run<'a>>,
     pub(crate) item_seps: Vec<FixedComp>,
     pub(crate) terms: Vec<Term<'a>>,
     pub(crate) run_seps: Vec<FixedComp>,
@@ -121,44 +163,39 @@ struct Work {
     broken: bool,
 }
 
-/// Accumulates the lines. Items, line separators, run terms and run
-/// separators are appended straight into the shared buffers; the line and fix
-/// run being built are tracked as start offsets, so a line or run costs no
-/// allocation of its own.
+/// Accumulates the lines. Terms, run separators, items and item separators
+/// are appended straight into the shared buffers; the line and run being
+/// built are tracked as start offsets, so a line or run costs no allocation
+/// of its own.
 struct LineAccum<'a> {
     doc: FixedDoc<'a>,
     line_items_start: usize,
     line_seps_start: usize,
-    /// Start offsets of the fix run being coalesced, if one is.
-    run_start: Option<(usize, usize)>,
+    run_terms_start: usize,
+    run_seps_start: usize,
 }
 
 impl<'a> LineAccum<'a> {
-    /// Extends (or starts) the open fix run with `term` and the fixed
-    /// composition `comp` that follows it.
+    /// Extends the open run with `term` and the fixed composition `comp` that
+    /// follows it.
     fn push_fixed(&mut self, term: Term<'a>, comp: FixedComp) {
-        if self.run_start.is_none() {
-            self.run_start = Some((self.doc.terms.len(), self.doc.run_seps.len()));
-        }
         self.doc.terms.push(term);
         self.doc.run_seps.push(comp);
     }
 
-    /// Appends `term` as the line's next item: as the final term of the open
-    /// fix run if one is being built, else as a plain term.
+    /// Ends the open run with `term` as its last term and appends it as the
+    /// line's next item.
     fn push_item(&mut self, term: Term<'a>) {
-        let Some((terms_start, seps_start)) = self.run_start.take() else {
-            self.doc.items.push(FixedItem::Term(term));
-            return;
-        };
         self.doc.terms.push(term);
-        self.doc.items.push(FixedItem::Fix(FixRun {
-            terms: Range::new(terms_start, self.doc.terms.len()),
-            seps: Range::new(seps_start, self.doc.run_seps.len()),
-        }));
+        self.doc.items.push(Run {
+            terms: Range::new(self.run_terms_start, self.doc.terms.len()),
+            seps: Range::new(self.run_seps_start, self.doc.run_seps.len()),
+        });
+        self.run_terms_start = self.doc.terms.len();
+        self.run_seps_start = self.doc.run_seps.len();
     }
 
-    /// Ends the current line with `term` as its last item.
+    /// Ends the current line with `term` as its last term.
     fn flush_line(&mut self, term: Term<'a>) {
         self.push_item(term);
         self.doc.lines.push(FixedLine {
@@ -172,13 +209,13 @@ impl<'a> LineAccum<'a> {
 
 /// `nodes` is a layout's postorder arena (root last) and `text` its text
 /// buffer; the output borrows only `text`.
-pub fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDoc<'a> {
+pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDoc<'a> {
     // Whether each subtree contains a hard line break: a bottom-up fold, so a
     // `seq` can be classified as broken when the DFS reaches it.
     let mut has_line: IdVec<LayoutNode, bool> = IdVec::with_capacity(nodes.len());
     for (_, node) in nodes.iter() {
         let flag = match *node {
-            LayoutNode::Null | LayoutNode::Text(_) => false,
+            LayoutNode::Text(_) => false,
             LayoutNode::Fix(c)
             | LayoutNode::Grp(c)
             | LayoutNode::Seq(c)
@@ -217,12 +254,9 @@ pub fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDoc<'a> {
             broken,
         } = work;
         match &nodes[node] {
-            leaf @ (LayoutNode::Null | LayoutNode::Text(_)) => {
-                let leaf = match leaf {
-                    LayoutNode::Text(range) => TermLeaf::Text(range.slice(text)),
-                    _ => TermLeaf::Null,
-                };
-                leaves.push((glue, Term { path, leaf }));
+            LayoutNode::Text(range) => {
+                let text = range.slice(text);
+                leaves.push((glue, Term { path, text }));
             }
             LayoutNode::Fix(child) => stack.push(Work {
                 node: *child,
@@ -352,7 +386,8 @@ pub fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDoc<'a> {
         },
         line_items_start: 0,
         line_seps_start: 0,
-        run_start: None,
+        run_terms_start: 0,
+        run_seps_start: 0,
     };
     // Scratch for one composition's deltas, reused across compositions.
     let mut opens: Vec<Scope> = Vec::new();
@@ -439,7 +474,7 @@ mod tests {
     }
 
     /// The items of the single line of `doc`.
-    fn one_line<'a>(doc: &'a FixedDoc<'a>) -> (&'a [FixedItem<'a>], &'a [FixedComp]) {
+    fn one_line<'a>(doc: &'a FixedDoc<'a>) -> (&'a [Run<'a>], &'a [FixedComp]) {
         let [line] = &doc.lines[..] else {
             panic!("expected a single line")
         };
@@ -449,15 +484,13 @@ mod tests {
         )
     }
 
-    fn texts<'a>(items: &[FixedItem<'a>]) -> Vec<&'a str> {
+    /// The texts of single-term runs.
+    fn texts<'a>(doc: &FixedDoc<'a>, items: &[Run<'a>]) -> Vec<&'a str> {
         items
             .iter()
-            .map(|item| match item {
-                FixedItem::Term(Term {
-                    leaf: TermLeaf::Text(t),
-                    ..
-                }) => *t,
-                other => panic!("expected a text term, found {other:?}"),
+            .map(|run| match run.terms.slice(&doc.terms) {
+                [term] => term.text,
+                other => panic!("expected a single-term run, found {other:?}"),
             })
             .collect()
     }
@@ -486,7 +519,7 @@ mod tests {
 
     #[test]
     fn fixed_comp_survives_inside_broken_seq() {
-        // seq((a !+ b) + (c @ d)): the fixed comp stays a fix run on the
+        // seq((a !+ b) + (c @ d)): the fixed comp stays a two-term run on the
         // first line even though the enclosing seq is broken.
         let layout = seq(comp(
             comp(text("a"), text("b"), Pad::Padded, Break::Fixed),
@@ -496,11 +529,10 @@ mod tests {
         ));
         let doc = run(&layout);
         assert_eq!(doc.lines.len(), 3);
-        let first = doc.lines[0].items.slice(&doc.items);
-        let [FixedItem::Fix(run)] = first else {
-            panic!("expected the first line to be one fix run")
+        let [first] = doc.lines[0].items.slice(&doc.items) else {
+            panic!("expected the first line to be one run")
         };
-        assert_eq!(run.terms.len(), 2);
+        assert_eq!(first.terms.len(), 2);
     }
 
     #[test]
@@ -523,7 +555,7 @@ mod tests {
         let layout = seq(comp(text("a"), text("b"), Pad::Padded, Break::Breakable));
         let doc = run(&layout);
         let (items, seps) = one_line(&doc);
-        assert_eq!(texts(items), ["a", "b"]);
+        assert_eq!(texts(&doc, items), ["a", "b"]);
         let [sep] = seps else {
             panic!("expected one separator")
         };
@@ -549,7 +581,7 @@ mod tests {
         );
         let doc = run(&layout);
         let (items, seps) = one_line(&doc);
-        assert_eq!(texts(items), ["a", "b", "c"]);
+        assert_eq!(texts(&doc, items), ["a", "b", "c"]);
         assert_eq!(seps.len(), 2);
         assert_eq!(seps[0].opens.len(), 1);
         assert_eq!(seps[1].closes.len(), 1);
@@ -558,7 +590,7 @@ mod tests {
 
     #[test]
     fn fix_coalesces_everything_under_it() {
-        // fix(a + (b & c)) & d: one fix run of three terms, then a plain term.
+        // fix(a + (b & c)) & d: one run of three terms, then a run of one.
         let layout = comp(
             fix(comp(
                 text("a"),
@@ -572,11 +604,12 @@ mod tests {
         );
         let doc = run(&layout);
         let (items, seps) = one_line(&doc);
-        let [FixedItem::Fix(run), FixedItem::Term(_)] = items else {
-            panic!("expected a fix run then a plain term")
+        let [abc, d] = items else {
+            panic!("expected two runs")
         };
-        assert_eq!(run.terms.len(), 3);
-        assert_eq!(run.seps.len(), 2);
+        assert_eq!(abc.terms.len(), 3);
+        assert_eq!(abc.seps.len(), 2);
+        assert_eq!(d.terms.len(), 1);
         assert_eq!(seps.len(), 1);
     }
 
@@ -593,10 +626,7 @@ mod tests {
         let (items, _) = one_line(&doc);
         let paths: Vec<Option<PathId>> = items
             .iter()
-            .map(|item| match item {
-                FixedItem::Term(term) => term.path,
-                _ => panic!("expected terms"),
-            })
+            .map(|run| run.terms.slice(&doc.terms)[0].path)
             .collect();
         assert_eq!(paths[0], paths[1]);
         let inner = doc.paths[paths[0].expect("wrapped")];
@@ -626,8 +656,8 @@ mod tests {
         }
         let doc = run(&layout);
         let (items, _) = one_line(&doc);
-        let [FixedItem::Fix(run)] = items else {
-            panic!("expected a single fix run")
+        let [run] = items else {
+            panic!("expected a single run")
         };
         assert_eq!(run.terms.len(), DEEP + 1);
     }
@@ -640,11 +670,11 @@ mod tests {
         }
         let doc = run(&layout);
         let (items, _) = one_line(&doc);
-        let [FixedItem::Term(term)] = items else {
-            panic!("expected a single term")
+        let [run] = items else {
+            panic!("expected a single run")
         };
         let mut depth = 0;
-        let mut cur = term.path;
+        let mut cur = run.terms.slice(&doc.terms)[0].path;
         while let Some(id) = cur {
             depth += 1;
             cur = doc.paths[id].parent;

@@ -22,7 +22,8 @@ use crate::layout::{Attr, Break, Layout, LayoutNode, Pad};
 // --- Primitives ------------------------------------------------------------
 
 /// The empty layout: produces no output and is neutral in compositions. Useful
-/// as a placeholder when building layouts conditionally.
+/// as a placeholder when building layouts conditionally. It is the empty
+/// text, and vanishes from the document along with any wrappers on it.
 ///
 /// ```rust
 /// use typeset::*;
@@ -30,7 +31,7 @@ use crate::layout::{Attr, Break, Layout, LayoutNode, Pad};
 /// assert_eq!(format_layout(result, 2, 80), "content");
 /// ```
 pub fn null() -> Layout {
-    Layout::leaf(LayoutNode::Null)
+    text("")
 }
 
 /// A text literal: the fundamental visible content. Text is a single unit that

@@ -53,10 +53,9 @@ pub(crate) struct Attr {
 pub(crate) type LayId = Id<LayoutNode>;
 
 /// One node of a [`Layout`]: children are arena ids, text is a range into
-/// the layout's text buffer.
+/// the layout's text buffer. The empty layout is the empty text.
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum LayoutNode {
-    Null,
     Text(Range<str>),
     Fix(LayId),
     Grp(LayId),
@@ -73,7 +72,6 @@ impl LayoutNode {
     fn offset(self, nodes: usize, text: usize) -> LayoutNode {
         let id = |id: LayId| Id::from_index(id.index() + nodes);
         match self {
-            LayoutNode::Null => LayoutNode::Null,
             LayoutNode::Text(r) => LayoutNode::Text(Range::new(r.start() + text, r.end() + text)),
             LayoutNode::Fix(c) => LayoutNode::Fix(id(c)),
             LayoutNode::Grp(c) => LayoutNode::Grp(id(c)),
@@ -103,16 +101,6 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// A single-node layout.
-    pub(crate) fn leaf(node: LayoutNode) -> Layout {
-        let mut nodes = Arena::with_capacity(1);
-        nodes.push(node);
-        Layout {
-            nodes,
-            text: String::new(),
-        }
-    }
-
     /// A text leaf.
     pub(crate) fn text(text: String) -> Layout {
         let mut nodes = Arena::with_capacity(1);

@@ -16,24 +16,33 @@ mod rebuild;
 mod solve;
 
 use crate::arena::{Arena, Id};
-use crate::ir::{Fix, Obj, Term};
-use crate::serialize::FixedDoc;
+use crate::layout::Pad;
+use crate::serialize::{FixedDoc, Run};
 
-pub(crate) type RObjId<'a> = Id<Obj<Term<'a>>>;
-pub(crate) type RFixId<'a> = Id<Fix<Term<'a>>>;
+pub(crate) type ObjId<'a> = Id<Obj<'a>>;
 
-/// The document rebuilt as one composition tree per line, over terms that
-/// still carry their nest/pack paths. Both arenas are postorder (children
-/// precede parents), so consumers fold them with a forward loop.
+/// An object in a per-line composition tree. A run is a leaf (its terms are
+/// ranges into the borrowed `FixedDoc`); a composition's left operand is
+/// always a leaf or a wrapper, never another composition.
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum Obj<'a> {
+    Run(Run<'a>),
+    Grp(ObjId<'a>),
+    Seq(ObjId<'a>),
+    Comp(ObjId<'a>, ObjId<'a>, Pad),
+}
+
+/// The document rebuilt as one composition tree per line, over runs whose
+/// terms still carry their nest/pack paths. The arena is postorder (children
+/// precede parents), so consumers fold it with a forward loop.
 #[derive(Debug)]
 pub(crate) struct RebuildDoc<'a> {
     /// One root object per line, in document order.
-    pub(crate) lines: Vec<RObjId<'a>>,
-    pub(crate) objs: Arena<Obj<Term<'a>>>,
-    pub(crate) fixes: Arena<Fix<Term<'a>>>,
+    pub(crate) lines: Vec<ObjId<'a>>,
+    pub(crate) objs: Arena<Obj<'a>>,
 }
 
-pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
+pub(crate) fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
     let mut graph = graphify::graphify(doc);
     solve::solve(&mut graph);
     rebuild::rebuild(&graph)
@@ -43,40 +52,39 @@ pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
 mod tests {
     use super::*;
     use crate::constructors::{comp, fix, grp, seq, text};
-    use crate::ir::TermLeaf;
-    use crate::layout::{Break, Layout, Pad};
+    use crate::layout::{Break, Layout};
     use crate::serialize::serialize;
 
     /// The rebuilt tree of a one-line layout, printed as nested constructor
-    /// names over the texts.
+    /// names over the texts; a run of several terms prints as `Fix(a b c)`.
     fn shape(layout: &Layout) -> String {
         let fixed = serialize(&layout.nodes, &layout.text);
         let out = resolve_scopes(&fixed);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
-        fn obj(out: &RebuildDoc, id: RObjId) -> String {
+        fn obj<'a>(fixed: &FixedDoc<'a>, out: &RebuildDoc<'a>, id: ObjId<'a>) -> String {
             match out.objs[id] {
-                Obj::Term(t) => term(t),
-                Obj::Fix(f) => format!("Fix({})", fix_obj(out, f)),
-                Obj::Grp(c) => format!("Grp({})", obj(out, c)),
-                Obj::Seq(c) => format!("Seq({})", obj(out, c)),
-                Obj::Comp(l, r, _) => format!("Comp({}, {})", obj(out, l), obj(out, r)),
+                Obj::Run(run) => {
+                    let texts: Vec<&str> = run
+                        .terms
+                        .slice(&fixed.terms)
+                        .iter()
+                        .map(|t| t.text)
+                        .collect();
+                    match texts[..] {
+                        [one] => one.to_string(),
+                        _ => format!("Fix({})", texts.join(" ")),
+                    }
+                }
+                Obj::Grp(c) => format!("Grp({})", obj(fixed, out, c)),
+                Obj::Seq(c) => format!("Seq({})", obj(fixed, out, c)),
+                Obj::Comp(l, r, _) => {
+                    format!("Comp({}, {})", obj(fixed, out, l), obj(fixed, out, r))
+                }
             }
         }
-        fn fix_obj(out: &RebuildDoc, id: RFixId) -> String {
-            match out.fixes[id] {
-                Fix::Term(t) => term(t),
-                Fix::Comp(l, r, _) => format!("Comp({}, {})", fix_obj(out, l), fix_obj(out, r)),
-            }
-        }
-        fn term(t: Term) -> String {
-            match t.leaf {
-                TermLeaf::Text(s) => s.to_string(),
-                TermLeaf::Null => "null".to_string(),
-            }
-        }
-        obj(&out, root)
+        obj(&fixed, &out, root)
     }
 
     fn pad(l: Layout, r: Layout) -> Layout {
@@ -101,7 +109,7 @@ mod tests {
         // grp(a + b) !+ c: the fixed composition coalesces b and c into one
         // item, so the grp cannot end between them; it widens to include c.
         let layout = fixed(grp(pad(text("a"), text("b"))), text("c"));
-        assert_eq!(shape(&layout), "Grp(Comp(a, Fix(Comp(b, c))))");
+        assert_eq!(shape(&layout), "Grp(Comp(a, Fix(b c)))");
     }
 
     #[test]
@@ -113,15 +121,12 @@ mod tests {
             seq(pad(text("a"), text("b"))),
             grp(pad(text("c"), text("d"))),
         );
-        assert_eq!(
-            shape(&layout),
-            "Seq(Comp(a, Grp(Comp(Fix(Comp(b, c)), d))))"
-        );
+        assert_eq!(shape(&layout), "Seq(Comp(a, Grp(Comp(Fix(b c), d))))");
     }
 
     #[test]
-    fn fix_runs_are_right_nested_fixed_compositions() {
+    fn a_fix_is_one_run() {
         let layout = fix(pad(pad(text("a"), text("b")), text("c")));
-        assert_eq!(shape(&layout), "Fix(Comp(a, Comp(b, c)))");
+        assert_eq!(shape(&layout), "Fix(a b c)");
     }
 }

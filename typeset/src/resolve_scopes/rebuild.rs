@@ -6,17 +6,15 @@
 //! borrowed `FixedDoc` line (nodes are index-aligned with the line's items).
 
 use super::graph::{GraphDoc, GraphLine};
-use super::{RFixId, RObjId, RebuildDoc};
+use super::{Obj, ObjId as RObjId, RebuildDoc};
 use crate::arena::{Arena, Range};
-use crate::ir::{Fix, Obj, ScopeKind, Term};
 use crate::layout::Pad;
-use crate::serialize::{FixRun, FixedItem};
+use crate::serialize::ScopeKind;
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
 /// ids always already exist.
 struct Builder<'a> {
-    objs: Arena<Obj<Term<'a>>>,
-    fixes: Arena<Fix<Term<'a>>>,
+    objs: Arena<Obj<'a>>,
 }
 
 // Rebuild continuations, flattened into shared buffers so threading them
@@ -119,7 +117,6 @@ pub(super) fn rebuild<'a>(doc: &GraphDoc<'_, 'a>) -> RebuildDoc<'a> {
     // capacity floor for the object arena.
     let mut b = Builder {
         objs: Arena::with_capacity(doc.nodes.len()),
-        fixes: Arena::new(),
     };
     let mut st = ContState {
         steps: Vec::new(),
@@ -135,19 +132,6 @@ pub(super) fn rebuild<'a>(doc: &GraphDoc<'_, 'a>) -> RebuildDoc<'a> {
     RebuildDoc {
         lines,
         objs: b.objs,
-        fixes: b.fixes,
-    }
-}
-
-/// Builds one graph node's payload (its line's like-indexed item) into the
-/// arena.
-fn visit_item<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, item: &FixedItem<'a>) -> RObjId<'a> {
-    match item {
-        FixedItem::Fix(run) => {
-            let fix1 = visit_fix(b, g, *run);
-            b.objs.push(Obj::Fix(fix1))
-        }
-        FixedItem::Term(term) => b.objs.push(Obj::Term(*term)),
     }
 }
 
@@ -168,7 +152,7 @@ fn visit_line<'a>(
         .expect("every line has at least one node");
     for (i, item) in rest.iter().enumerate() {
         let node = &g.nodes[gl.nodes.id_at(i)];
-        let obj = visit_item(b, g, item);
+        let obj = b.objs.push(Obj::Run(*item));
         let in_deg = node.ins_len as usize;
         let pad = seps[i].pad;
         match (in_deg, node.outs_head.is_none()) {
@@ -211,26 +195,11 @@ fn visit_line<'a>(
         last_node.outs_head.is_none(),
         "Invariant: line ends without open scopes"
     );
-    let obj = visit_item(b, g, last_item);
+    let obj = b.objs.push(Obj::Run(*last_item));
     let applied = apply_rpartial(b, &st.partials[st.cur_start..], obj);
     let obj2 = close(b, st, last_node.ins_len as usize, applied);
     if st.bounds[..] != [0] {
         unreachable!("Invariant")
     }
     apply_steps(b, st, 0, obj2)
-}
-
-fn visit_fix<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, run: FixRun<'a>) -> RFixId<'a> {
-    // Rebuild the run as a right-nested fixed composition spine. Terms are
-    // copied through by value; the pads are the run's separator pads. The run's
-    // terms and separators are ranges into the borrowed `FixedDoc`'s buffers.
-    let terms = run.terms.slice(&g.fixed.terms);
-    let seps = run.seps.slice(&g.fixed.run_seps);
-    let last = *terms.last().expect("a fix run has at least one term");
-    let mut rfix = b.fixes.push(Fix::Term(last));
-    for k in (0..seps.len()).rev() {
-        let left = b.fixes.push(Fix::Term(terms[k]));
-        rfix = b.fixes.push(Fix::Comp(left, rfix, seps[k].pad));
-    }
-    rfix
 }

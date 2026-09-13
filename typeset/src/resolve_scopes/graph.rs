@@ -14,7 +14,7 @@
 //! the graph allocates nothing per node or edge.
 
 use crate::arena::{Arena, Id, Range};
-use crate::ir::ScopeKind;
+use crate::serialize::ScopeKind;
 use crate::serialize::{FixedDoc, FixedLine};
 
 pub(super) type NodeId = Id<NodeData>;

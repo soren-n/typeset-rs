@@ -113,14 +113,6 @@ impl<T> Arena<T> {
         (0..self.items.len()).map(Id::from_index)
     }
 
-    /// Consumes the arena, yielding the elements in id order with their ids.
-    pub(crate) fn into_iter(self) -> impl Iterator<Item = (Id<T>, T)> {
-        self.items
-            .into_iter()
-            .enumerate()
-            .map(|(i, item)| (Id::from_index(i), item))
-    }
-
     /// Appends every element of `other`, passed through `map` (which
     /// typically shifts the element's ids by this arena's former length).
     pub(crate) fn append(&mut self, other: Arena<T>, map: impl FnMut(T) -> T) {
