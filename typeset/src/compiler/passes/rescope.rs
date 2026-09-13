@@ -12,14 +12,14 @@
 //! are already computed when a parent is visited — and the spine is a row map.
 
 use crate::compiler::types::{
-    DenullDoc, DenullFix, DenullObj, DenullRow, Doc, DocBuilder, FixId, FixNode, IdVec, ObjId,
-    ObjNode, Prop, Range, Row,
+    DenullDoc, DenullFix, DenullObj, Doc, DocBuilder, FixId, FixNode, IdVec, ObjId, ObjNode, Prop,
+    Range,
 };
 
 /// Rescope nest and pack, lowering the flat `DenullDoc` into the `Doc`.
 pub fn rescope(doc: DenullDoc) -> Box<Doc> {
     let DenullDoc {
-        rows,
+        lines,
         objs,
         fixes,
         props,
@@ -88,23 +88,18 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
         obj_res.push(val);
     }
 
-    // Map the spine rows, re-applying each root's remaining prop prefix.
-    let rows: Vec<Row> = rows
+    // Map each line's root, re-applying its remaining prop prefix.
+    let lines = lines
         .into_iter()
-        .map(|row| {
-            let mut finish = |id| {
+        .map(|root| {
+            root.map(|id| {
                 let (root_props, root) = obj_res[id];
                 wrap_props(&mut b, root_props.slice(&props), root)
-            };
-            match row {
-                DenullRow::Empty => Row::Empty,
-                DenullRow::Break(id) => Row::Break(finish(id)),
-                DenullRow::Line(id) => Row::Line(finish(id)),
-            }
+            })
         })
         .collect();
 
-    Box::new(b.finish(rows))
+    Box::new(b.finish(lines))
 }
 
 /// Length of the common prop prefix of `l` and `r`.
@@ -159,7 +154,7 @@ mod tests {
         root: DObjId<'a>,
     ) -> DenullDoc<'a> {
         DenullDoc {
-            rows: vec![DenullRow::Line(root)],
+            lines: vec![Some(root)],
             objs,
             fixes: Arena::new(),
             props,
@@ -168,8 +163,8 @@ mod tests {
 
     /// The single object id a one-line document holds.
     fn line_root(doc: &Doc) -> ObjId {
-        match doc.rows[..] {
-            [Row::Line(id)] => id,
+        match doc.lines[..] {
+            [Some(id)] => id,
             _ => panic!("expected a single-line document"),
         }
     }
@@ -271,7 +266,7 @@ mod tests {
         let fc = fixes.push(DenullFix::Comp(fa, fb, false));
         let root = objs.push(DenullObj::Fix(fc));
         let doc = DenullDoc {
-            rows: vec![DenullRow::Line(root)],
+            lines: vec![Some(root)],
             objs,
             fixes,
             props: buf,
@@ -291,24 +286,18 @@ mod tests {
     fn rescope_handles_long_doc_spine() {
         let mut buf: Vec<Prop> = Vec::new();
         let mut objs: Arena<DenullObj> = Arena::new();
-        let mut rows: Vec<DenullRow> = Vec::new();
+        let mut lines = Vec::new();
         for _ in 0..DEEP {
-            rows.push(DenullRow::Break(objs.push(nest_term(&mut buf, 0, "x"))));
+            lines.push(Some(objs.push(nest_term(&mut buf, 0, "x"))));
         }
         let doc = DenullDoc {
-            rows,
+            lines,
             objs,
             fixes: Arena::new(),
             props: buf,
         };
         let out = rescope(doc);
-        // Eod-terminated spine: DEEP Break rows and no Line row.
-        let count = out
-            .rows
-            .iter()
-            .filter(|r| matches!(r, Row::Break(_)))
-            .count();
-        assert!(!out.rows.iter().any(|r| matches!(r, Row::Line(_))));
-        assert_eq!(count, DEEP);
+        assert_eq!(out.lines.len(), DEEP);
+        assert!(out.lines.iter().all(Option::is_some));
     }
 }

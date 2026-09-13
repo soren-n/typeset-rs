@@ -14,7 +14,7 @@
 //! in reverse order), and a forward pass computing the bottom-up rebuild
 //! (children precede parents in forward order).
 
-use crate::compiler::types::{Arena, DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, IdVec};
+use crate::compiler::types::{Arena, DObjId, DenullDoc, DenullFix, DenullObj, IdVec};
 
 /// Normalize the grp/seq composition algebra.
 pub fn normalize(doc: DenullDoc) -> DenullDoc {
@@ -39,15 +39,6 @@ fn add(left: Count, right: Count) -> Count {
         (Count::Zero, _) => right,
         (_, Count::Zero) => left,
         (Count::Many, _) | (_, Count::Many) | (Count::One, Count::One) => Count::Many,
-    }
-}
-
-/// Remap a spine row through the fold's old-id → new-id table.
-fn map_row<'a>(row: DenullRow<'a>, out: &IdVec<DenullObj<'a>, DObjId<'a>>) -> DenullRow<'a> {
-    match row {
-        DenullRow::Empty => DenullRow::Empty,
-        DenullRow::Break(id) => DenullRow::Break(out[id]),
-        DenullRow::Line(id) => DenullRow::Line(out[id]),
     }
 }
 
@@ -120,7 +111,11 @@ fn elim_seqs(doc: DenullDoc) -> DenullDoc {
         out.push(id);
     }
     DenullDoc {
-        rows: doc.rows.into_iter().map(|r| map_row(r, &out)).collect(),
+        lines: doc
+            .lines
+            .iter()
+            .map(|root| root.map(|id| out[id]))
+            .collect(),
         objs,
         fixes: doc.fixes,
         props: doc.props,
@@ -138,11 +133,8 @@ fn elim_grps(doc: DenullDoc) -> DenullDoc {
     // group. Roots are; a comp's left operand inherits, its right does not;
     // seq resets.
     let mut head: IdVec<DenullObj, bool> = IdVec::filled(false, n);
-    for row in &doc.rows {
-        match row {
-            DenullRow::Break(id) | DenullRow::Line(id) => head[*id] = true,
-            DenullRow::Empty => {}
-        }
+    for root in doc.lines.iter().flatten() {
+        head[*root] = true;
     }
     for (i, node) in doc.objs.iter().rev() {
         match *node {
@@ -189,7 +181,11 @@ fn elim_grps(doc: DenullDoc) -> DenullDoc {
         out.push(id);
     }
     DenullDoc {
-        rows: doc.rows.into_iter().map(|r| map_row(r, &out)).collect(),
+        lines: doc
+            .lines
+            .iter()
+            .map(|root| root.map(|id| out[id]))
+            .collect(),
         objs,
         fixes: doc.fixes,
         props: doc.props,
@@ -286,22 +282,16 @@ fn reassoc(doc: DenullDoc) -> DenullDoc {
         }
     }
 
-    let rows = doc
-        .rows
-        .into_iter()
-        .map(|row| match row {
-            DenullRow::Empty => DenullRow::Empty,
-            DenullRow::Break(id) => DenullRow::Break(materialize(
-                &mut objs, &atom_out, &next, head[id], &mut atoms, &mut pads,
-            )),
-            DenullRow::Line(id) => DenullRow::Line(materialize(
-                &mut objs, &atom_out, &next, head[id], &mut atoms, &mut pads,
-            )),
+    let lines = doc
+        .lines
+        .iter()
+        .map(|root| {
+            root.map(|id| materialize(&mut objs, &atom_out, &next, head[id], &mut atoms, &mut pads))
         })
         .collect();
 
     DenullDoc {
-        rows,
+        lines,
         objs,
         fixes: doc.fixes,
         props: doc.props,
@@ -326,7 +316,7 @@ mod tests {
 
     fn line_doc<'a>(objs: Arena<DenullObj<'a>>, root: DObjId<'a>) -> DenullDoc<'a> {
         DenullDoc {
-            rows: vec![DenullRow::Line(root)],
+            lines: vec![Some(root)],
             objs,
             fixes: Arena::new(),
             props: Vec::new(),
@@ -344,7 +334,7 @@ mod tests {
             cur = objs.push(DenullObj::Comp(cur, right, false));
         }
         let out = normalize(line_doc(objs, cur));
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a line");
         };
         let mut count = 0usize;
@@ -366,7 +356,7 @@ mod tests {
             cur = objs.push(DenullObj::Seq(cur));
         }
         let out = normalize(line_doc(objs, cur));
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a line");
         };
         assert!(matches!(out.objs[root], DenullObj::Term(_)));
@@ -380,7 +370,7 @@ mod tests {
             cur = objs.push(DenullObj::Grp(cur));
         }
         let out = normalize(line_doc(objs, cur));
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a line");
         };
         assert!(matches!(out.objs[root], DenullObj::Term(_)));
@@ -389,18 +379,18 @@ mod tests {
     #[test]
     fn normalize_handles_long_doc_spine() {
         let mut objs: Arena<DenullObj> = Arena::new();
-        let mut rows: Vec<DenullRow> = Vec::new();
+        let mut lines = Vec::new();
         for _ in 0..DEEP {
-            rows.push(DenullRow::Break(objs.push(term("x"))));
+            lines.push(Some(objs.push(term("x"))));
         }
         let doc = DenullDoc {
-            rows,
+            lines,
             objs,
             fixes: Arena::new(),
             props: Vec::new(),
         };
         let out = normalize(doc);
-        assert_eq!(out.rows.len(), DEEP);
+        assert_eq!(out.lines.len(), DEEP);
     }
 
     #[test]
@@ -413,7 +403,7 @@ mod tests {
         let comp = objs.push(DenullObj::Comp(a, b, false));
         let one = objs.push(DenullObj::Seq(comp));
         let out = elim_seqs(line_doc(objs, one));
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a line");
         };
         assert!(
@@ -429,7 +419,7 @@ mod tests {
         let abc = objs.push(DenullObj::Comp(ab, c, false));
         let two = objs.push(DenullObj::Seq(abc));
         let out = elim_seqs(line_doc(objs, two));
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a line");
         };
         assert!(

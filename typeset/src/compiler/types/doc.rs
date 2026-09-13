@@ -4,9 +4,10 @@
 //! (the `Comp`/`Grp`/`Nest`/… nodes) is stored in two flat arenas — one for
 //! objects, one for fixed objects — with children referenced by arena id
 //! rather than by owning box, and all text concatenated in one shared `String`
-//! that text nodes range into. The spine is a `Vec<Row>` in document order,
-//! and two side tables hold each object's precomputed mid-line extents for the
-//! renderer's O(1) break decisions.
+//! that text nodes range into. The spine is one optional root object per
+//! line in document order (`None` for an empty line), and two side tables
+//! hold each object's precomputed mid-line extents for the renderer's O(1)
+//! break decisions.
 //!
 //! The point of the flat representation is that deep-safety is *structural*
 //! rather than hand-maintained: dropping, cloning, or debug-printing a `Doc`
@@ -49,28 +50,19 @@ pub(crate) fn text_width(data: &str) -> usize {
     data.chars().count()
 }
 
-/// One row of the document spine, in document order.
-///
-/// A `Line` row is always the last row (nothing follows a line); a document that
-/// ends in `Eod` simply has no `Line` row. The spine is walked front-to-back by
-/// the renderer, stopping at a `Line` or running off the end (`Eod`).
-#[derive(Clone, Debug)]
-pub(crate) enum Row {
-    Empty,
-    Break(ObjId),
-    Line(ObjId),
-}
-
 /// Final document representation - output of the compiler.
 ///
-/// A flat arena: the spine is a `Vec<Row>` and the object graph lives in two
-/// id-linked arenas. Callers never construct or inspect a `Doc`; they pass it
+/// A flat arena: the spine is one optional root object per line and the
+/// object graph lives in two id-linked arenas. Callers never construct or inspect a `Doc`; they pass it
 /// to [`render`](crate::render()). `Clone`, `Drop`, and `Debug` are derived and
 /// structurally deep-safe (they touch only flat `Vec`s), so no amount of
 /// document nesting can overflow the stack.
 #[derive(Clone, Debug)]
 pub struct Doc {
-    pub(crate) rows: Vec<Row>,
+    /// One entry per line, in document order; `None` is an empty line. Lines
+    /// are joined by newlines when rendered, so there is no trailing newline
+    /// unless the document ends in an empty line.
+    pub(crate) lines: Vec<Option<ObjId>>,
     pub(crate) objs: Arena<ObjNode>,
     pub(crate) fixes: Arena<FixNode>,
     /// All node text, concatenated; nodes hold ranges into it.
@@ -141,7 +133,7 @@ impl DocBuilder {
     /// precede parents), so one forward loop each suffices. Sums saturate: a
     /// saturated extent is already wider than any target width, which is all
     /// the comparisons ask.
-    pub(crate) fn finish(self, rows: Vec<Row>) -> Doc {
+    pub(crate) fn finish(self, lines: Vec<Option<ObjId>>) -> Doc {
         let mut packs: usize = 0;
 
         let mut fix_extents: IdVec<FixNode, usize> = IdVec::with_capacity(self.fixes.len());
@@ -192,7 +184,7 @@ impl DocBuilder {
         }
 
         Doc {
-            rows,
+            lines,
             objs: self.objs,
             fixes: self.fixes,
             text: self.text,
@@ -218,7 +210,7 @@ mod tests {
         for _ in 0..depth {
             id = b.obj(ObjNode::Nest(id));
         }
-        b.finish(vec![Row::Line(id)])
+        b.finish(vec![Some(id)])
     }
 
     #[test]

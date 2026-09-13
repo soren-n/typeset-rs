@@ -7,8 +7,8 @@
 //! visited its children's results are already computed.
 
 use crate::compiler::types::{
-    Arena, DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullRow, DenullTerm, IdVec, PathNode,
-    Prop, Range, RebuildDoc, RebuildFix, RebuildObj, Term, TermLeaf,
+    Arena, DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullTerm, IdVec, PathNode, Prop,
+    Range, RebuildDoc, RebuildFix, RebuildObj, Term, TermLeaf,
 };
 
 /// Result of denulling an object: nothing survived (`None`); an object
@@ -78,31 +78,18 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>, paths: &Arena<PathNode>) -> DenullDoc<'a
         obj_res.push(res);
     }
 
-    // Emit the spine rows in document order: a line whose object survived is a
-    // Break, an emptied line is an Empty. Then resolve the tail: the final
-    // surviving object is a Line row, and a final emptied line is the document
-    // end (no row at all).
-    let mut rows: Vec<DenullRow> = doc
+    // A line whose object survived keeps it; an emptied line is `None`.
+    let lines = doc
         .lines
         .iter()
         .map(|&root| match obj_res[root] {
-            Res::None => DenullRow::Empty,
-            Res::Some(obj1) | Res::NextNone(_, obj1) => DenullRow::Break(obj1),
+            Res::None => None,
+            Res::Some(obj1) | Res::NextNone(_, obj1) => Some(obj1),
         })
         .collect();
-    match rows.last() {
-        Some(DenullRow::Empty) => {
-            rows.pop();
-        }
-        Some(DenullRow::Break(obj1)) => {
-            let last = DenullRow::Line(*obj1);
-            *rows.last_mut().expect("non-empty rows") = last;
-        }
-        _ => {}
-    }
 
     DenullDoc {
-        rows,
+        lines,
         objs,
         fixes,
         props,
@@ -224,7 +211,7 @@ mod tests {
         };
         let out = denull(&doc, &Arena::new());
         // Count the surviving comps in the single line.
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a single line");
         };
         let mut count = 0usize;
@@ -258,7 +245,7 @@ mod tests {
             fixes: Arena::new(),
         };
         let out = denull(&doc, &paths);
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a single line");
         };
         let DenullObj::Term(t) = &out.objs[root] else {
@@ -286,7 +273,7 @@ mod tests {
             fixes: Arena::new(),
         };
         let out = denull(&doc, &Arena::new());
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a single line");
         };
         let DenullObj::Comp(_, _, pad) = out.objs[root] else {
@@ -308,20 +295,14 @@ mod tests {
             fixes: Arena::new(),
         };
         let out = denull(&doc, &Arena::new());
-        assert_eq!(out.rows.len(), DEEP);
-        assert!(matches!(out.rows.last(), Some(DenullRow::Line(_))));
-        let breaks = out
-            .rows
-            .iter()
-            .filter(|r| matches!(r, DenullRow::Break(_)))
-            .count();
-        assert_eq!(breaks, DEEP - 1);
+        assert_eq!(out.lines.len(), DEEP);
+        assert!(out.lines.iter().all(Option::is_some));
     }
 
     #[test]
-    fn denull_emptied_lines_become_empty_rows_and_a_trailing_one_ends_the_doc() {
-        // Lines: [Text "a", Null, Null]. The first null line becomes an Empty
-        // row; the trailing one is the document end and emits no row.
+    fn denull_emptied_lines_become_none() {
+        // Lines: [Text "a", Null, Null]: the null lines denull to `None` and
+        // keep their place, so the document still ends in two empty lines.
         let mut objs: Arena<RebuildObj> = Arena::new();
         let a = objs.push(RebuildObj::Term(text_term("a")));
         let n1 = objs.push(RebuildObj::Term(null_term()));
@@ -332,10 +313,7 @@ mod tests {
             fixes: Arena::new(),
         };
         let out = denull(&doc, &Arena::new());
-        assert!(matches!(
-            out.rows[..],
-            [DenullRow::Break(_), DenullRow::Empty]
-        ));
+        assert!(matches!(out.lines[..], [Some(_), None, None]));
     }
 
     #[test]
@@ -354,7 +332,7 @@ mod tests {
             fixes,
         };
         let out = denull(&doc, &Arena::new());
-        let [DenullRow::Line(root)] = out.rows[..] else {
+        let [Some(root)] = out.lines[..] else {
             panic!("expected a single line");
         };
         let DenullObj::Fix(fix1) = out.objs[root] else {

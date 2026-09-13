@@ -244,8 +244,8 @@ pub(crate) struct RebuildDoc<'a> {
 //
 // A flat postorder arena like `RebuildDoc`: nulls are gone, so terms are a
 // stripped `(props, text)` pair rather than a wrapper chain, and the spine is
-// a row list with the same semantics as the final `Doc` (a `Line` row is
-// always last; a document ending in `Eod` simply has no `Line` row).
+// one optional root per line, as in the final `Doc` (`None` is a line that
+// denulled to nothing).
 
 pub(crate) type DObjId<'a> = Id<DenullObj<'a>>;
 pub(crate) type DFixId<'a> = Id<DenullFix<'a>>;
@@ -283,20 +283,10 @@ pub(crate) enum DenullFix<'a> {
     Comp(DFixId<'a>, DFixId<'a>, bool),
 }
 
-/// One row of the denulled document spine, in document order. Same semantics
-/// as the final `Doc`'s rows: `Line` is always the last row, and a document
-/// with no `Line` row ends in `Eod`.
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum DenullRow<'a> {
-    Empty,
-    Break(DObjId<'a>),
-    Line(DObjId<'a>),
-}
-
 #[derive(Debug)]
 pub(crate) struct DenullDoc<'a> {
-    /// The spine rows, in document order.
-    pub(crate) rows: Vec<DenullRow<'a>>,
+    /// One entry per line, in document order; `None` is an emptied line.
+    pub(crate) lines: Vec<Option<DObjId<'a>>>,
     /// Object arena in postorder: children precede parents.
     pub(crate) objs: Arena<DenullObj<'a>>,
     /// Fixed-object arena in postorder: children precede parents.

@@ -18,7 +18,7 @@
 //! before returning — measurement only ever inserts a mark when the slot is
 //! empty, so clearing exactly those slots restores the caller's marks.
 
-use crate::compiler::types::{Doc, FixId, FixNode, IdVec, ObjId, ObjNode, Range, Row, text_width};
+use crate::compiler::types::{Doc, FixId, FixNode, IdVec, ObjId, ObjNode, Range, text_width};
 use std::cmp::max;
 
 /// The recorded column of each pack, by pack index; `None` until first seen.
@@ -495,24 +495,17 @@ pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
     let mut marks: Vec<Option<usize>> = vec![None; doc.packs];
     let mut scratch = Scratch::default();
     // The output is at least the document's text; reserving it (plus a
-    // newline per row) leaves only indentation to grow into.
-    let mut result = String::with_capacity(doc.text.len() + doc.rows.len());
-    // The document spine is a linear `Vec<Row>` in document order, so it is
-    // walked with a plain loop. `marks` and `lvl` survive `reset`, so they carry
-    // across lines exactly as the recursive formulation threaded them. A `Line`
-    // row (always last) ends the document; `Eod` is running off the end.
-    for row in &doc.rows {
+    // newline per line) leaves only indentation to grow into.
+    let mut result = String::with_capacity(doc.text.len() + doc.lines.len());
+    // Lines are joined by newlines. `marks` and `lvl` survive `reset`, so they
+    // carry across lines.
+    for (i, line) in doc.lines.iter().enumerate() {
+        if i > 0 {
+            result.push('\n');
+        }
         st = reset(st);
-        match row {
-            Row::Empty => result.push('\n'),
-            Row::Break(obj) => {
-                render_obj(arena, *obj, &mut st, &mut marks, &mut scratch, &mut result);
-                result.push('\n');
-            }
-            Row::Line(obj) => {
-                render_obj(arena, *obj, &mut st, &mut marks, &mut scratch, &mut result);
-                break;
-            }
+        if let Some(obj) = line {
+            render_obj(arena, *obj, &mut st, &mut marks, &mut scratch, &mut result);
         }
     }
     result
