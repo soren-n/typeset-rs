@@ -103,7 +103,16 @@ it). `solve` resolves those by widening: leading seq out-edges are re-sourced
 onto the incoming side, and the incoming list is handed forward past the first
 grp out-edge. `rebuild` then reads each line back as a composition spine with
 grp/seq wrappers, using a flat continuation stack. Adjacency is intrusive
-linked lists through one shared edge arena, so every list move is O(1).
+linked lists through one shared edge arena, so every list move is O(1), which
+keeps a line with tens of thousands of nested scopes linear.
+
+This list-then-graph round trip is not incidental. Scopes are ranges over
+*items*, and items only exist after fix runs coalesce leaves, so a scope's
+extent cannot be read off the tree; the graph is the direct representation of
+those ranges, and the widening rules (including their tie-breaks, which
+depend on edge-list order) are what the reference implementation defines. A
+tree-rewrite formulation was evaluated and would re-encode the same ranges
+less directly.
 
 **denull, normalize, rescope** are plain folds over `Obj`/`Fix` arenas. Nest
 and pack props are ranges into one shared prop buffer, memoized per path id,
