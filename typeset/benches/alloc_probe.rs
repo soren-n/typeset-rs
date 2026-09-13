@@ -1,9 +1,9 @@
 //! Allocation probe: counts heap traffic (allocs/frees/reallocs/bytes) for
-//! each phase — build, clone, drop, compile, render — via a counting global
-//! allocator. Companion to `perf_probe.rs`; used to attribute the
+//! each phase — clone, drop, compile, render — via a counting global
+//! allocator. Companion to `perf_probe`; used to attribute the
 //! allocator-bound compile profile.
 //!
-//! Usage: alloc_probe WORKLOAD SIZE [d=DEPTH] [width=W]
+//! Usage: cargo bench -p typeset --bench alloc_probe -- WORKLOAD SIZE [d=DEPTH] [width=W]
 
 // The counting allocator is the one place the workspace needs unsafe; it just
 // forwards to `System` around atomic counters.
@@ -13,6 +13,9 @@ use std::alloc::{GlobalAlloc, Layout as AllocLayout, System};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Instant;
 use typeset::*;
+use workloads::{chain, fixed, json, json_nodes};
+
+mod workloads;
 
 struct Counting;
 
@@ -78,51 +81,9 @@ fn report(label: &str, before: Snap, elapsed_ns: u128, nodes: u64) {
     );
 }
 
-fn chain(n: usize, brk: Break) -> Layout {
-    let mut layout = text("w0");
-    for i in 1..n {
-        layout = comp(layout, text(format!("w{i}")), Pad::Padded, brk);
-    }
-    layout
-}
-
-fn json(d: usize, fan: usize) -> Layout {
-    if d == 0 {
-        return text("\"value\"");
-    }
-    let mut body: Option<Layout> = None;
-    for k in 0..fan {
-        let entry = comp(
-            text(format!("\"key_{k}\":")),
-            json(d - 1, fan),
-            Pad::Padded,
-            Break::Breakable,
-        );
-        body = Some(match body {
-            None => entry,
-            Some(prev) => comp(
-                comp(prev, text(","), Pad::Unpadded, Break::Fixed),
-                entry,
-                Pad::Padded,
-                Break::Breakable,
-            ),
-        });
-    }
-    grp(comp(
-        comp(
-            text("{"),
-            seq(nest(body.expect("fan > 0"))),
-            Pad::Unpadded,
-            Break::Breakable,
-        ),
-        text("}"),
-        Pad::Unpadded,
-        Break::Breakable,
-    ))
-}
-
 fn main() {
-    let mut argv = std::env::args().skip(1);
+    // `cargo bench` passes `--bench` to a harness-less target; ignore it.
+    let mut argv = std::env::args().skip(1).filter(|a| a != "--bench");
     let workload = argv.next().expect("workload");
     let n: usize = argv.next().expect("size").parse().unwrap();
     let mut d = 5usize;
@@ -136,20 +97,11 @@ fn main() {
         }
     }
 
-    // Node counts derived from the generators: chain(n) = n texts + (n-1)
-    // comps; json adds per level: fan entries (text + comp) + comma fixes +
-    // grp/seq/nest/braces.
+    // Node counts follow the generators: chain(n) is n texts and n-1 comps.
     let (layout, nodes): (Layout, u64) = match workload.as_str() {
         "wide" => (chain(n, Break::Breakable), (2 * n - 1) as u64),
-        "fixed" => (fix(chain(n, Break::Fixed)), (2 * n) as u64),
-        "json" => {
-            // nodes(0) = 1; nodes(k) = fan * (2 + nodes(k-1)) + (fan-1)*2 + 6
-            let mut count = 1u64;
-            for _ in 0..d {
-                count = (n as u64) * (2 + count) + (n as u64 - 1) * 2 + 6;
-            }
-            (json(d, n), count)
-        }
+        "fixed" => (fixed(n), (2 * n) as u64),
+        "json" => (json(d, n), json_nodes(d, n)),
         other => panic!("unknown workload {other}"),
     };
     println!("workload={workload} n={n} d={d} width={width} tree_nodes={nodes}");

@@ -55,7 +55,7 @@ cd oracle && ./run.sh
 cargo bench -p typeset --bench scaling
 ```
 
-Profiling probes (`examples/perf_probe.rs`, `examples/alloc_probe.rs`) and the
+Profiling probes (`benches/perf_probe.rs`, `benches/alloc_probe.rs`) and the
 full benchmarking/profiling guide live in
 [PERFORMANCE.md](PERFORMANCE.md).
 
@@ -72,7 +72,6 @@ cargo run --example <name> -p typeset          # Layout examples
 - `json_formatter.rs`: JSON pretty printer
 - `lisp_formatter.rs`: Lisp-style formatter
 - `code_formatter.rs`: Source code formatting
-- `perf_probe.rs`, `alloc_probe.rs`: profiling probes (see PERFORMANCE.md)
 
 `typeset-parser`:
 - `full.rs`: every `layout!` operator and constructor in one macro invocation
@@ -81,7 +80,7 @@ cargo run --example <name> -p typeset          # Layout examples
 
 ### Automated Fixes
 ```bash
-./scripts/fix-code-quality.sh    # Auto-fix formatting and clippy issues
+cargo fmt && cargo clippy --fix --allow-dirty   # apply the mechanical fixes
 ```
 
 ### Manual Quality Checks

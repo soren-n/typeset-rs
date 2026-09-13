@@ -2,7 +2,7 @@
 //! harness, used to check the pipeline's asymptotics and to give CPU/memory
 //! profilers a long-running, representative target.
 //!
-//! Usage: perf_probe WORKLOAD SIZE [key=val ...]
+//! Usage: cargo bench -p typeset --bench perf_probe -- WORKLOAD SIZE [key=val ...]
 //!   keys: d=DEPTH width=W iters=K phase=compile|render|all loop=1
 //!
 //! Prints one CSV line per run:
@@ -10,102 +10,9 @@
 
 use std::time::Instant;
 use typeset::*;
+use workloads::{deepgrp, fixed, json, lines, nestwide, packs, wide};
 
-fn chain(n: usize, brk: Break) -> Layout {
-    let mut layout = text("w0");
-    for i in 1..n {
-        layout = comp(layout, text(format!("w{i}")), Pad::Padded, brk);
-    }
-    layout
-}
-
-/// Right-leaning breakable comp chain of `n` words.
-fn wide(n: usize) -> Layout {
-    chain(n, Break::Breakable)
-}
-
-/// One fix run of `n` words.
-fn fixed(n: usize) -> Layout {
-    fix(chain(n, Break::Fixed))
-}
-
-/// `n` hard lines (document spine).
-fn lines(n: usize) -> Layout {
-    let mut layout = text("l0");
-    for i in 1..n {
-        layout = line(layout, text(format!("l{i}")));
-    }
-    layout
-}
-
-/// nest^d over a breakable chain of `m` words: stresses distributing the
-/// nest wrappers over every leaf and re-factoring them back out.
-fn nestwide(d: usize, m: usize) -> Layout {
-    let mut layout = chain(m, Break::Breakable);
-    for _ in 0..d {
-        layout = nest(layout);
-    }
-    layout
-}
-
-/// grp(nest(...))^d around a small chain: deep scope nesting.
-fn deepgrp(d: usize) -> Layout {
-    let mut layout = chain(4, Break::Breakable);
-    for _ in 0..d {
-        layout = grp(nest(layout));
-    }
-    layout
-}
-
-/// `n` pack-aligned groups of short chains: stresses the renderer's marks map.
-fn packs(n: usize) -> Layout {
-    let mut layout = pack(chain(4, Break::Breakable));
-    for _ in 1..n {
-        layout = comp(
-            layout,
-            pack(chain(4, Break::Breakable)),
-            Pad::Padded,
-            Break::Breakable,
-        );
-    }
-    layout
-}
-
-/// Balanced JSON-ish tree: objects of `fan` entries, `d` levels deep, with
-/// grp/seq/nest structure like a real formatter would emit.
-fn json(d: usize, fan: usize) -> Layout {
-    fn value(d: usize, fan: usize, i: usize) -> Layout {
-        if d == 0 {
-            return text(format!("\"value_{i}\""));
-        }
-        let mut body: Option<Layout> = None;
-        for k in 0..fan {
-            let entry = comp(
-                text(format!("\"key_{k}\":")),
-                value(d - 1, fan, k),
-                Pad::Padded,
-                Break::Breakable,
-            );
-            body = Some(match body {
-                None => entry,
-                Some(prev) => comp(
-                    comp(prev, text(","), Pad::Unpadded, Break::Fixed),
-                    entry,
-                    Pad::Padded,
-                    Break::Breakable,
-                ),
-            });
-        }
-        let body = body.expect("fan > 0");
-        grp(comp(
-            comp(text("{"), seq(nest(body)), Pad::Unpadded, Break::Breakable),
-            text("}"),
-            Pad::Unpadded,
-            Break::Breakable,
-        ))
-    }
-    value(d, fan, 0)
-}
+mod workloads;
 
 struct Args {
     workload: String,
@@ -118,7 +25,8 @@ struct Args {
 }
 
 fn parse_args() -> Args {
-    let mut argv = std::env::args().skip(1);
+    // `cargo bench` passes `--bench` to a harness-less target; ignore it.
+    let mut argv = std::env::args().skip(1).filter(|a| a != "--bench");
     let workload = argv.next().expect("workload name");
     let n: usize = argv.next().expect("size").parse().expect("size int");
     let mut args = Args {

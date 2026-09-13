@@ -24,11 +24,9 @@ cargo test --all
 cd oracle && ./build.sh && ./_build/tester
 ./compare.sh '"a" + grp ("b" + "c")' 2 3    # one expression, both implementations
 
-# Fix code quality issues
-./scripts/fix-code-quality.sh
-
-# Run examples
+# Run examples; profiling probes are harness-less benches
 cargo run --example <name> -p typeset
+cargo bench -p typeset --bench perf_probe -- json 8 d=5
 ```
 
 ### Pre-commit Requirements

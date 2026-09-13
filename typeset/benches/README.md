@@ -33,7 +33,7 @@ HTML reports are written to `target/criterion/` automatically (the
 - Compile dominates render by roughly 15-25x at width 80, so the compile-once,
   render-many pattern in `reuse_efficiency` should win clearly.
 - Compile is allocator-bound and performs a constant number of heap
-  allocations regardless of document size; use `examples/alloc_probe.rs` to
+  allocations regardless of document size; use `benches/alloc_probe.rs` to
   check that rather than inferring it from timing.
 
 ## Interpreting criterion output

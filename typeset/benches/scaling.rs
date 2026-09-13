@@ -1,84 +1,13 @@
 //! Scaling benchmarks: compile and render at sizes large enough to expose
 //! asymptotics (the `layout_performance` bench covers small-input latency).
 //!
-//! Workloads mirror `examples/perf_probe.rs`, which is the profiling companion
-//! to this bench (run it under `sample`/`samply` or `/usr/bin/time -l`).
+//! The workloads are shared with `perf_probe` and `alloc_probe`, the profiling
+//! companions to this bench.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use typeset::*;
+use workloads::{json, nestwide, packs, wide};
 
-/// Right-leaning breakable comp chain of `n` words.
-fn wide(n: usize) -> Layout {
-    let mut layout = text("w0");
-    for i in 1..n {
-        layout = comp(layout, text(format!("w{i}")), Pad::Padded, Break::Breakable);
-    }
-    layout
-}
-
-/// nest^d over a breakable chain of `m` words: stresses distributing nest
-/// wrappers over every leaf (compile cost is O(m * d)).
-fn nestwide(d: usize, m: usize) -> Layout {
-    let mut layout = wide(m);
-    for _ in 0..d {
-        layout = nest(layout);
-    }
-    layout
-}
-
-/// `n` pack-aligned groups: stresses the renderer's pack marks map.
-fn packs(n: usize) -> Layout {
-    let group = |i: usize| {
-        pack(comp(
-            text(format!("k{i}")),
-            text(format!("v{i}")),
-            Pad::Padded,
-            Break::Breakable,
-        ))
-    };
-    let mut layout = group(0);
-    for i in 1..n {
-        layout = comp(layout, group(i), Pad::Padded, Break::Breakable);
-    }
-    layout
-}
-
-/// Balanced JSON-ish tree: objects of `fan` entries, `d` levels deep, with the
-/// grp/seq/nest structure a real formatter emits. Leaf count is `fan^d`.
-fn json(d: usize, fan: usize) -> Layout {
-    if d == 0 {
-        return text("\"value\"");
-    }
-    let mut body: Option<Layout> = None;
-    for k in 0..fan {
-        let entry = comp(
-            text(format!("\"key_{k}\":")),
-            json(d - 1, fan),
-            Pad::Padded,
-            Break::Breakable,
-        );
-        body = Some(match body {
-            None => entry,
-            Some(prev) => comp(
-                comp(prev, text(","), Pad::Unpadded, Break::Fixed),
-                entry,
-                Pad::Padded,
-                Break::Breakable,
-            ),
-        });
-    }
-    grp(comp(
-        comp(
-            text("{"),
-            seq(nest(body.expect("fan > 0"))),
-            Pad::Unpadded,
-            Break::Breakable,
-        ),
-        text("}"),
-        Pad::Unpadded,
-        Break::Breakable,
-    ))
-}
+mod workloads;
 
 fn bench_compile_scaling(c: &mut Criterion) {
     let mut group = c.benchmark_group("compile_scaling");

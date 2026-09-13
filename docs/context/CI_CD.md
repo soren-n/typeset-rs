@@ -132,7 +132,7 @@ are not installed automatically — see [GIT_HOOKS.md](GIT_HOOKS.md).
 
 **Quick fixes**:
 ```bash
-./scripts/fix-code-quality.sh    # Auto-fix formatting and clippy issues
+cargo fmt && cargo clippy --fix --allow-dirty   # apply the mechanical fixes
 ```
 
 ## Release Management

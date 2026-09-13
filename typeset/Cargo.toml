@@ -22,3 +22,12 @@ criterion.workspace = true
 [[bench]]
 name = "scaling"
 harness = false
+
+# Profiling probes, not criterion benches: `cargo bench --bench perf_probe -- json 8 d=5`.
+[[bench]]
+name = "perf_probe"
+harness = false
+
+[[bench]]
+name = "alloc_probe"
+harness = false

@@ -13,7 +13,7 @@ cd "$REPO_ROOT"
 
 fail() {
     echo "pre-commit: $1" >&2
-    echo "pre-commit: commit aborted. Run ./scripts/fix-code-quality.sh for fmt/clippy fixes." >&2
+    echo "pre-commit: commit aborted. cargo fmt and cargo clippy --fix apply the mechanical fixes." >&2
     exit 1
 }
 

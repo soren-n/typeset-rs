@@ -17,13 +17,11 @@ resource-usage audit found. Numbers below are from an Apple Silicon Mac
 
 ### Profiling probe
 
-`typeset/examples/perf_probe.rs` generates scalable workloads and prints CSV
+`typeset/benches/perf_probe.rs` generates scalable workloads and prints CSV
 (`workload,n,d,width,build_ns,compile_ns,render_ns,output_bytes`):
 
 ```bash
-cargo build --release --example perf_probe \
-  --config 'profile.release.debug=true' --config 'profile.release.strip=false'
-target/release/examples/perf_probe json 8 d=5 iters=5
+cargo bench -p typeset --bench perf_probe -- json 8 d=5 iters=5
 ```
 
 Workloads: `wide N` (breakable word chain), `fixed N` (one fix run), `lines N`
@@ -32,22 +30,24 @@ Workloads: `wide N` (breakable word chain), `fixed N` (one fix run), `lines N`
 FAN^D leaves). `loop=1 phase=compile|render` runs one phase forever so a
 sampling profiler can attach.
 
-`typeset/examples/alloc_probe.rs` counts heap traffic (allocs/frees/reallocs/
+`typeset/benches/alloc_probe.rs` counts heap traffic (allocs/frees/reallocs/
 bytes, absolute and per input node) for build, clone, drop, compile, and
 render via a counting global allocator — use it to attribute allocator-bound
 profiles before reaching for dhat:
 
 ```bash
-cargo run --release --example alloc_probe -- json 8 d=5
+cargo bench -p typeset --bench alloc_probe -- json 8 d=5
 ```
 
 ### CPU profiling (macOS)
 
-The built-in sampler works without any install (build with the debug/strip
-flags above so frames symbolicate; run `dsymutil` on the binary if needed):
+The built-in sampler works without any install (set
+`profile.bench.debug = true` so frames symbolicate; run `dsymutil` on the
+binary if needed):
 
 ```bash
-target/release/examples/perf_probe json 8 d=5 loop=1 phase=compile & PID=$!
+cargo bench -p typeset --bench perf_probe --no-run   # prints the binary path
+target/release/deps/perf_probe-* json 8 d=5 loop=1 phase=compile & PID=$!
 sample $PID 5 1 -file profile.txt; kill $PID
 ```
 
