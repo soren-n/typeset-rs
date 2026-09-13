@@ -2,8 +2,7 @@ use super::traversal::DismantleTree;
 use std::fmt;
 use std::mem;
 
-/// The two axes of a composition: padding and breakability. Carried as the
-/// public [`Pad`]/[`Break`] enums end to end — no shadow boolean encoding.
+/// The two axes of a composition: padding and breakability.
 #[derive(Debug, Copy, Clone)]
 pub struct Attr {
     pub pad: Pad,
@@ -34,16 +33,20 @@ pub enum Break {
 }
 
 impl Pad {
-    /// The internal boolean encoding (`Padded` is `true`).
-    pub(crate) fn is_padded(self) -> bool {
-        matches!(self, Pad::Padded)
+    /// The columns a composition's padding occupies: one space or none.
+    pub(crate) fn width(self) -> usize {
+        match self {
+            Pad::Unpadded => 0,
+            Pad::Padded => 1,
+        }
     }
-}
 
-impl Break {
-    /// Whether this is the fixed (never-breaking) axis value.
-    pub(crate) fn is_fixed(self) -> bool {
-        matches!(self, Break::Fixed)
+    /// The padding two merged compositions share: padded if either is.
+    pub(crate) fn merge(self, other: Pad) -> Pad {
+        match (self, other) {
+            (Pad::Unpadded, Pad::Unpadded) => Pad::Unpadded,
+            _ => Pad::Padded,
+        }
     }
 }
 

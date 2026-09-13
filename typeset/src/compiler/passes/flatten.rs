@@ -8,8 +8,33 @@
 //! the arena — text nodes hold a range into it and every later representation
 //! borrows from that buffer.
 
-use crate::compiler::types::{Arena, Attr, LayId, Layout, LayoutArena, LayoutNode, Range};
+use crate::compiler::types::{Arena, Attr, Id, Layout, Range};
 use std::mem;
+
+pub(crate) type LayId = Id<LayoutNode>;
+
+/// A layout node in the flat arena: the public [`Layout`] shape with children
+/// as arena ids and text as a range into the shared text buffer.
+#[derive(Debug)]
+pub(crate) enum LayoutNode {
+    Null,
+    Text(Range<str>),
+    Fix(LayId),
+    Grp(LayId),
+    Seq(LayId),
+    Nest(LayId),
+    Pack(LayId),
+    Line(LayId, LayId),
+    Comp(LayId, LayId, Attr),
+}
+
+/// The flat layout tree: a postorder node arena (children precede parents)
+/// and its root. Text lives in a separate buffer that outlives the arena.
+#[derive(Debug)]
+pub(crate) struct LayoutArena {
+    pub(crate) nodes: Arena<LayoutNode>,
+    pub(crate) root: LayId,
+}
 
 /// A unit of flattening work: visit a subtree, or build a parent node from
 /// already-flattened children (their ids sit on the result stack). A unary
@@ -91,7 +116,7 @@ pub fn flatten(layout: Layout) -> (LayoutArena, String) {
 mod tests {
     use super::*;
     use crate::compiler::constructors::{comp, nest, text};
-    use crate::compiler::types::{Break, Id, Pad};
+    use crate::compiler::types::{Break, Pad};
 
     /// Deeper than a native-stack recursion could survive.
     const DEEP: usize = 50_000;

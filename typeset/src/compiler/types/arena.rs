@@ -222,11 +222,12 @@ pub(crate) struct Range<T: ?Sized> {
 }
 
 impl<T: ?Sized> Range<T> {
-    pub(crate) fn new(start: usize, end: usize) -> Self {
-        debug_assert!(start <= end, "range start {start} past end {end}");
+    pub(crate) const fn new(start: usize, end: usize) -> Self {
+        assert!(start <= end, "range start past end");
+        assert!(end <= u32::MAX as usize, "range end exceeds u32");
         Range {
-            start: u32::try_from(start).expect("range start exceeds u32"),
-            end: u32::try_from(end).expect("range end exceeds u32"),
+            start: start as u32,
+            end: end as u32,
             _marker: PhantomData,
         }
     }

@@ -6,10 +6,11 @@
 //!
 //! ## Module Organization
 //!
-//! - `types/` - Type definitions for Layout, intermediate representations, and Doc
-//! - `passes/` - Individual compiler passes
-//! - `render/` - Document rendering system
-//! - `constructors/` - Layout construction functions
+//! - `types/` - The public `Layout` and `Doc`, the arena primitives, and the
+//!   IR vocabulary shared between passes
+//! - `passes/` - One module per pass; each owns the representation it produces
+//! - `render` - Document rendering
+//! - `constructors` - Layout construction functions
 
 pub mod constructors;
 pub mod passes;

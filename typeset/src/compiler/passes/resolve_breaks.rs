@@ -1,4 +1,4 @@
-//! resolve_breaks: LayoutArena → EdslDoc (collapse broken sequences)
+//! resolve_breaks: LayoutArena → LayoutArena (collapse broken sequences)
 //!
 //! Resolves hard line breaks: a composition inside a broken sequence becomes a
 //! `Line`, and a seq wrapper whose subtree already breaks is dropped (its
@@ -7,14 +7,13 @@
 //! The input is a flat postorder arena, so the pass is three plain loops:
 //! 1. mark — forward (bottom-up): does each subtree contain a hard line break?
 //! 2. spread — backward (top-down): is each node inside a broken sequence?
-//! 3. build — forward: emit the Edsl arena, rewriting compositions to lines
+//! 3. build — forward: emit the new arena, rewriting compositions to lines
 //!    and dropping broken seq wrappers as the flags dictate.
 
-use crate::compiler::types::{Arena, EdslDoc, EdslId, EdslNode, IdVec, LayoutArena, LayoutNode};
+use super::flatten::{LayId, LayoutArena, LayoutNode};
+use crate::compiler::types::{Arena, Break, IdVec};
 
-/// The returned [`EdslDoc`] borrows text from `text` (the layout text buffer),
-/// not from `arena`, so the node arena is free to drop the moment this returns.
-pub fn resolve_breaks<'t>(arena: &LayoutArena, text: &'t str) -> EdslDoc<'t> {
+pub fn resolve_breaks(arena: &LayoutArena) -> LayoutArena {
     let n = arena.nodes.len();
 
     // 1. mark: whether each subtree contains a hard line break. Wrappers pass
@@ -51,41 +50,41 @@ pub fn resolve_breaks<'t>(arena: &LayoutArena, text: &'t str) -> EdslDoc<'t> {
         }
     }
 
-    // 3. build: emit the Edsl arena bottom-up.
-    let mut nodes: Arena<EdslNode> = Arena::with_capacity(n);
-    let mut out: IdVec<LayoutNode, EdslId> = IdVec::with_capacity(n);
+    // 3. build: emit the resolved arena bottom-up.
+    let mut nodes: Arena<LayoutNode> = Arena::with_capacity(n);
+    let mut out: IdVec<LayoutNode, LayId> = IdVec::with_capacity(n);
     for (i, node) in arena.nodes.iter() {
         let id = match *node {
-            LayoutNode::Null => nodes.push(EdslNode::Null),
-            LayoutNode::Text(range) => nodes.push(EdslNode::Text(range.slice(text))),
-            LayoutNode::Fix(c) => nodes.push(EdslNode::Fix(out[c])),
-            LayoutNode::Grp(c) => nodes.push(EdslNode::Grp(out[c])),
+            LayoutNode::Null => nodes.push(LayoutNode::Null),
+            LayoutNode::Text(range) => nodes.push(LayoutNode::Text(range)),
+            LayoutNode::Fix(c) => nodes.push(LayoutNode::Fix(out[c])),
+            LayoutNode::Grp(c) => nodes.push(LayoutNode::Grp(out[c])),
             LayoutNode::Seq(c) => {
                 // A sequence that already breaks is dropped: its content is
                 // unconditionally broken (the flag spread takes care of that).
                 if has_line[c] {
                     out[c]
                 } else {
-                    nodes.push(EdslNode::Seq(out[c]))
+                    nodes.push(LayoutNode::Seq(out[c]))
                 }
             }
-            LayoutNode::Nest(c) => nodes.push(EdslNode::Nest(out[c])),
-            LayoutNode::Pack(c) => nodes.push(EdslNode::Pack(out[c])),
-            LayoutNode::Line(l, r) => nodes.push(EdslNode::Line(out[l], out[r])),
+            LayoutNode::Nest(c) => nodes.push(LayoutNode::Nest(out[c])),
+            LayoutNode::Pack(c) => nodes.push(LayoutNode::Pack(out[c])),
+            LayoutNode::Line(l, r) => nodes.push(LayoutNode::Line(out[l], out[r])),
             LayoutNode::Comp(l, r, attr) => {
                 // Inside a broken sequence, a breakable composition becomes a
                 // hard line.
-                if brk[i] && !attr.brk.is_fixed() {
-                    nodes.push(EdslNode::Line(out[l], out[r]))
+                if brk[i] && attr.brk == Break::Breakable {
+                    nodes.push(LayoutNode::Line(out[l], out[r]))
                 } else {
-                    nodes.push(EdslNode::Comp(out[l], out[r], attr))
+                    nodes.push(LayoutNode::Comp(out[l], out[r], attr))
                 }
             }
         };
         out.push(id);
     }
 
-    EdslDoc {
+    LayoutArena {
         nodes,
         root: out[arena.root],
     }
@@ -96,7 +95,7 @@ mod tests {
     use super::*;
     use crate::compiler::constructors::{comp, line, seq, text};
     use crate::compiler::passes::flatten::flatten;
-    use crate::compiler::types::{Break, Pad};
+    use crate::compiler::types::Pad;
 
     #[test]
     fn broken_seq_turns_comps_into_lines() {
@@ -109,22 +108,22 @@ mod tests {
             Break::Breakable,
         ));
         let (arena, text) = flatten(*layout);
-        let edsl = resolve_breaks(&arena, &text);
-        let EdslNode::Line(l, _) = edsl.nodes[edsl.root] else {
+        let out = resolve_breaks(&arena);
+        let LayoutNode::Line(l, _) = out.nodes[out.root] else {
             panic!("expected the comp to become a line");
         };
-        assert!(matches!(edsl.nodes[l], EdslNode::Text("a")));
+        assert!(matches!(out.nodes[l], LayoutNode::Text(r) if r.slice(&text) == "a"));
     }
 
     #[test]
     fn unbroken_seq_keeps_wrapper_and_comps() {
         let layout = seq(comp(text("a"), text("b"), Pad::Padded, Break::Breakable));
-        let (arena, text) = flatten(*layout);
-        let edsl = resolve_breaks(&arena, &text);
-        let EdslNode::Seq(c) = edsl.nodes[edsl.root] else {
+        let (arena, _text) = flatten(*layout);
+        let out = resolve_breaks(&arena);
+        let LayoutNode::Seq(c) = out.nodes[out.root] else {
             panic!("expected the seq wrapper to survive");
         };
-        assert!(matches!(edsl.nodes[c], EdslNode::Comp(..)));
+        assert!(matches!(out.nodes[c], LayoutNode::Comp(..)));
     }
 
     #[test]
@@ -137,12 +136,12 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let (arena, text) = flatten(*layout);
-        let edsl = resolve_breaks(&arena, &text);
+        let (arena, _text) = flatten(*layout);
+        let out = resolve_breaks(&arena);
         // Root is the outer comp turned line; its left is the fixed comp.
-        let EdslNode::Line(l, _) = edsl.nodes[edsl.root] else {
+        let LayoutNode::Line(l, _) = out.nodes[out.root] else {
             panic!("expected the outer comp to become a line");
         };
-        assert!(matches!(edsl.nodes[l], EdslNode::Comp(..)));
+        assert!(matches!(out.nodes[l], LayoutNode::Comp(..)));
     }
 }

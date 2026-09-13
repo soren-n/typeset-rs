@@ -18,7 +18,7 @@
 //! before returning — measurement only ever inserts a mark when the slot is
 //! empty, so clearing exactly those slots restores the caller's marks.
 
-use crate::compiler::types::{Doc, FixId, FixNode, IdVec, ObjId, ObjNode, Range, text_width};
+use crate::compiler::types::{Doc, FixId, FixNode, IdVec, ObjId, ObjNode, Pad, Range, text_width};
 use std::cmp::max;
 
 /// The recorded column of each pack, by pack index; `None` until first seen.
@@ -190,9 +190,9 @@ enum MFrame {
     RestoreHead(bool),
     /// After visiting the left of a `Comp`: pad, drop `head`, visit the right,
     /// then restore `head`.
-    CompMid(ObjId, bool),
+    CompMid(ObjId, Pad),
     /// After visiting the left of a fixed `Comp`: pad, then visit the right.
-    FixCompMid(FixId, bool),
+    FixCompMid(FixId, Pad),
 }
 
 /// Reusable renderer buffers: [`fold`]'s frame stack and inserted-marks undo
@@ -281,14 +281,14 @@ fn fold(
             MFrame::RestoreLvl(lvl) => st = State { lvl, ..st },
             MFrame::RestoreHead(head) => st = State { head, ..st },
             MFrame::CompMid(right, pad) => {
-                st = inc_pos(usize::from(pad), st);
+                st = inc_pos(pad.width(), st);
                 let head = st.head;
                 st = State { head: false, ..st };
                 stack.push(MFrame::RestoreHead(head));
                 stack.push(MFrame::Obj(right));
             }
             MFrame::FixCompMid(right, pad) => {
-                st = inc_pos(usize::from(pad), st);
+                st = inc_pos(pad.width(), st);
                 stack.push(MFrame::Fix(right));
             }
         }
@@ -338,9 +338,9 @@ enum RFrame {
     RestoreBreak(bool),
     /// After rendering the left of a `Comp`: decide the break, then render the
     /// right. `state` at this point is the state produced by the left.
-    CompMid(ObjId, bool),
+    CompMid(ObjId, Pad),
     /// After rendering the left of a fixed `Comp`: pad, then render the right.
-    FixCompMid(FixId, bool),
+    FixCompMid(FixId, Pad),
 }
 
 /// Render one document object into `result`, threading `state` (iterative).
@@ -434,7 +434,7 @@ fn render_obj(
                 let state1 = st;
                 let state3 = State {
                     head: false,
-                    ..inc_pos(usize::from(pad), state1)
+                    ..inc_pos(pad.width(), state1)
                 };
                 if should_break(arena, right, state3) {
                     let state2 = newline(state1);
@@ -443,13 +443,13 @@ fn render_obj(
                     result.push('\n');
                     push_spaces(result, offset);
                 } else {
-                    push_spaces(result, usize::from(pad));
+                    push_spaces(result, pad.width());
                     st = state3;
                 }
                 stack.push(RFrame::Obj(right));
             }
             RFrame::FixCompMid(right, pad) => {
-                let padding = usize::from(pad);
+                let padding = pad.width();
                 push_spaces(result, padding);
                 st = inc_pos(padding, st);
                 stack.push(RFrame::Fix(right));

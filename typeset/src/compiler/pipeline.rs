@@ -6,8 +6,8 @@
 //! | Pass             | Lowers                    | Does |
 //! |------------------|---------------------------|------|
 //! | `flatten`        | `Layout` → `LayoutArena`  | flatten the input `Box` tree into a postorder arena |
-//! | `resolve_breaks` | `LayoutArena` → `EdslDoc` | collapse broken sequences into hard lines |
-//! | `serialize`      | `EdslDoc` → `SerialDoc`   | flatten to leaf entries, computing scope open/close deltas |
+//! | `resolve_breaks` | `LayoutArena` → `LayoutArena` | collapse broken sequences into hard lines |
+//! | `serialize`      | `LayoutArena` → `SerialDoc` | flatten to leaf entries, computing scope open/close deltas |
 //! | `split_lines`    | `SerialDoc` → `FixedDoc`  | split at hard lines, coalesce fixed-composition runs |
 //! | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve, and read back the grp/seq scope graph |
 //! | `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms, strip term wrappers to prop lists |
@@ -65,12 +65,10 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
     let (arena, text) = flatten(*layout);
 
     let serial = {
-        // resolve_breaks reads the node arena but roots the Edsl's text in
-        // `text`, so the node arena is free after this block; serialize builds
-        // its scope accumulators in flat arenas it owns, so its output no
-        // longer references the Edsl arena, which also drops here.
-        let edsl = resolve_breaks(&arena, &text);
-        serialize(&edsl)
+        // serialize builds its scope accumulators in flat arenas it owns and
+        // borrows only `text`, so both node arenas drop here.
+        let resolved = resolve_breaks(&arena);
+        serialize(&resolved, &text)
     };
     // The node arena is dead now; only `text` lives on to feed `rescope`.
     drop(arena);

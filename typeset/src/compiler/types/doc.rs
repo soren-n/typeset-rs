@@ -16,6 +16,7 @@
 //! and `Debug` are all derived.
 
 use super::arena::{Arena, Id, IdVec, Range};
+use super::layout::Pad;
 
 pub(crate) type ObjId = Id<ObjNode>;
 pub(crate) type FixId = Id<FixNode>;
@@ -31,14 +32,14 @@ pub(crate) enum ObjNode {
     Seq(ObjId),
     Nest(ObjId),
     Pack(u32, ObjId),
-    Comp(ObjId, ObjId, bool),
+    Comp(ObjId, ObjId, Pad),
 }
 
 /// A node in the fixed-object arena (the subset of objects that never break).
 #[derive(Clone, Debug)]
 pub(crate) enum FixNode {
     Text(Range<str>),
-    Comp(FixId, FixId, bool),
+    Comp(FixId, FixId, Pad),
 }
 
 /// Width of a literal in columns.
@@ -141,7 +142,7 @@ impl DocBuilder {
             let extent = match node {
                 FixNode::Text(range) => text_width(range.slice(&self.text)),
                 FixNode::Comp(left, right, pad) => fix_extents[*left]
-                    .saturating_add(usize::from(*pad))
+                    .saturating_add(pad.width())
                     .saturating_add(fix_extents[*right]),
             };
             fix_extents.push(extent);
@@ -174,7 +175,7 @@ impl DocBuilder {
                 }
                 ObjNode::Comp(left, right, pad) => (
                     extents[*left]
-                        .saturating_add(usize::from(*pad))
+                        .saturating_add(pad.width())
                         .saturating_add(extents[*right]),
                     next_comps[*left],
                 ),

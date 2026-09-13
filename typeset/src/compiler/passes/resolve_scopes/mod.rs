@@ -15,7 +15,22 @@ mod graphify;
 mod rebuild;
 mod solve;
 
-use crate::compiler::types::{FixedDoc, RebuildDoc, Scope};
+use super::split_lines::FixedDoc;
+use crate::compiler::types::{Arena, Fix, Id, Obj, Scope, Term};
+
+pub(crate) type RObjId<'a> = Id<Obj<Term<'a>>>;
+pub(crate) type RFixId<'a> = Id<Fix<Term<'a>>>;
+
+/// The document rebuilt as one composition tree per line, over terms that
+/// still carry their nest/pack paths. Both arenas are postorder (children
+/// precede parents), so consumers fold them with a forward loop.
+#[derive(Debug)]
+pub(crate) struct RebuildDoc<'a> {
+    /// One root object per line, in document order.
+    pub(crate) lines: Vec<RObjId<'a>>,
+    pub(crate) objs: Arena<Obj<Term<'a>>>,
+    pub(crate) fixes: Arena<Fix<Term<'a>>>,
+}
 
 pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>, scopes: &[Scope]) -> RebuildDoc<'a> {
     let mut graph = graphify::graphify(doc, scopes);
@@ -26,10 +41,8 @@ pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>, scopes: &[Scope]) -> RebuildDoc<'a
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{
-        Arena, FixRun, FixedComp, FixedItem, FixedLine, PathNode, Prop, Range, RebuildFix,
-        RebuildObj, Term, TermLeaf,
-    };
+    use crate::compiler::passes::split_lines::{FixRun, FixedComp, FixedItem, FixedLine};
+    use crate::compiler::types::{Pad, PathNode, Prop, Range, TermLeaf};
 
     /// Wraps `items` and `item_seps` arenas as a single-line [`FixedDoc`] with
     /// no fix runs — the shape most of these tests build.
@@ -61,7 +74,7 @@ mod tests {
 
     fn sep() -> FixedComp {
         FixedComp {
-            pad: false,
+            pad: Pad::Unpadded,
             opens: Range::EMPTY,
             closes: Range::EMPTY,
         }
@@ -89,7 +102,7 @@ mod tests {
         };
         let mut count = 0usize;
         let mut cur = root;
-        while let RebuildObj::Comp(_left, right, _pad) = out.objs[cur] {
+        while let Obj::Comp(_left, right, _pad) = out.objs[cur] {
             count += 1;
             cur = right;
         }
@@ -116,7 +129,7 @@ mod tests {
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
-        let RebuildObj::Term(t) = out.objs[root] else {
+        let Obj::Term(t) = out.objs[root] else {
             panic!("expected a single term")
         };
         let mut count = 0usize;
@@ -159,12 +172,12 @@ mod tests {
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
-        let RebuildObj::Fix(rfix) = out.objs[root] else {
+        let Obj::Fix(rfix) = out.objs[root] else {
             panic!("expected a fix object")
         };
         let mut count = 0usize;
         let mut cur = rfix;
-        while let RebuildFix::Comp(_left, right, _pad) = out.fixes[cur] {
+        while let Fix::Comp(_left, right, _pad) = out.fixes[cur] {
             count += 1;
             cur = right;
         }

@@ -1,7 +1,7 @@
-//! serialize: EdslDoc → SerialDoc (serialize in order to normalize)
+//! serialize: LayoutArena → SerialDoc (serialize in order to normalize)
 //!
-//! Flattens the Edsl arena into the flat serial entry list with an explicit
-//! left-to-right DFS:
+//! Flattens the (break-resolved) layout arena into the flat serial entry list
+//! with an explicit left-to-right DFS:
 //!
 //! - `i`/`j` (group/seq and pack indices) are counters advanced in DFS
 //!   pre-order.
@@ -19,10 +19,42 @@
 //! entries (in leaf order) into the `SerialEntry` list, computing each
 //! composition's scope open/close deltas in the same sweep.
 
+use super::flatten::{LayId, LayoutArena, LayoutNode};
 use crate::compiler::types::{
-    Arena, Attr, Break, EdslDoc, EdslId, EdslNode, Id, PathId, PathNode, Prop, Scope, ScopeKind,
-    SerialComp, SerialDoc, SerialEntry, Term, TermLeaf, append_range,
+    Arena, Attr, Break, Id, PathId, PathNode, Prop, Range, Scope, ScopeKind, Term, TermLeaf,
+    append_range,
 };
+
+/// A flat list of leaf entries in document order; each entry is a term plus
+/// how it glues to what follows. The entry list is always non-empty and its
+/// final entry is always `Last`. The document owns the path arena the
+/// entries' terms point into and the scope buffer their deltas range into,
+/// and borrows only the layout text buffer.
+#[derive(Debug)]
+pub(crate) struct SerialDoc<'a> {
+    pub(crate) entries: Vec<SerialEntry<'a>>,
+    /// The shared nest/pack path arena every [`Term`]'s `path` points into.
+    pub(crate) paths: Arena<PathNode>,
+    /// The shared scope buffer every delta ranges into.
+    pub(crate) scopes: Vec<Scope>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum SerialEntry<'a> {
+    /// A term followed by a composition — a hard line break
+    /// (`SerialComp::Line`) or a composition separator (`SerialComp::Comp`).
+    Next(Term<'a>, SerialComp),
+    /// The document's final term, with nothing following.
+    Last(Term<'a>),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum SerialComp {
+    Line,
+    /// A composition: its attributes, the scopes opening here, and the scopes
+    /// closing here (ranges into the document's shared scope buffer).
+    Comp(Attr, Range<Scope>, Range<Scope>),
+}
 
 /// A comp accumulator: the innermost enclosing grp/seq wrapper, `None` at the
 /// root.
@@ -60,17 +92,17 @@ struct Entry<'a> {
 
 /// A pending subtree to visit, with its scoped path state. `i`/`j` are global
 /// counters and deliberately not carried here.
-struct Work<'a> {
-    node: EdslId<'a>,
+struct Work {
+    node: LayId,
     terms: Option<PathId>,
     comps: CompId,
     glue: Glue,
     fixed: bool,
 }
 
-/// The output borrows only the layout text (`'a`). Every accumulator is a flat
-/// arena owned by this pass, so nothing else outlives the return.
-pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
+/// The output borrows only `text` (the layout text buffer). Every accumulator
+/// is a flat arena owned by this pass, so nothing else outlives the return.
+pub fn serialize<'a>(doc: &LayoutArena, text: &'a str) -> SerialDoc<'a> {
     let mut i: u32 = 0;
     let mut j: u32 = 0;
     let mut entries: Vec<Entry<'a>> = Vec::new();
@@ -82,7 +114,7 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
     // Right-to-left visitation is achieved by a stack: pushing the right child
     // before the left makes the left pop (and fully process) first, so the
     // counters thread left-to-right.
-    let mut stack: Vec<Work<'a>> = vec![Work {
+    let mut stack: Vec<Work> = vec![Work {
         node: doc.root,
         terms: None,
         comps: None,
@@ -100,9 +132,9 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
         } = work;
         match &doc.nodes[node] {
             // A leaf: emit its term under the accumulated wrapper path.
-            leaf @ (EdslNode::Null | EdslNode::Text(_)) => {
+            leaf @ (LayoutNode::Null | LayoutNode::Text(_)) => {
                 let leaf = match leaf {
-                    EdslNode::Text(data) => TermLeaf::Text(data),
+                    LayoutNode::Text(range) => TermLeaf::Text(range.slice(text)),
                     _ => TermLeaf::Null,
                 };
                 entries.push(Entry {
@@ -110,7 +142,7 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
                     term: Term { path: terms, leaf },
                 });
             }
-            EdslNode::Fix(child) => stack.push(Work {
+            LayoutNode::Fix(child) => stack.push(Work {
                 node: *child,
                 terms,
                 comps,
@@ -119,11 +151,11 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
             }),
             // A grp/seq wrapper: push it onto the comp accumulator (assigning
             // the next scope index in DFS pre-order) and descend.
-            wrapper @ (EdslNode::Grp(child) | EdslNode::Seq(child)) => {
+            wrapper @ (LayoutNode::Grp(child) | LayoutNode::Seq(child)) => {
                 let index = i;
                 i += 1;
                 let kind = match wrapper {
-                    EdslNode::Grp(_) => ScopeKind::Grp,
+                    LayoutNode::Grp(_) => ScopeKind::Grp,
                     _ => ScopeKind::Seq,
                 };
                 let depth = comps.map_or(0, |id| comp_arena[id].depth) + 1;
@@ -142,9 +174,9 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
             }
             // A nest/pack wrapper: push it onto the path arena (pack assigning
             // the next pack index in DFS pre-order) and descend.
-            wrapper @ (EdslNode::Nest(child) | EdslNode::Pack(child)) => {
+            wrapper @ (LayoutNode::Nest(child) | LayoutNode::Pack(child)) => {
                 let prop = match wrapper {
-                    EdslNode::Nest(_) => Prop::Nest,
+                    LayoutNode::Nest(_) => Prop::Nest,
                     _ => {
                         let index = j;
                         j += 1;
@@ -163,7 +195,7 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
                     fixed,
                 });
             }
-            EdslNode::Line(left, right) => {
+            LayoutNode::Line(left, right) => {
                 // Right inherits the outer glue; left's trailing term gets a
                 // hard line. Push right first so left is processed first.
                 stack.push(Work {
@@ -181,7 +213,7 @@ pub fn serialize<'a>(doc: &EdslDoc<'a>) -> SerialDoc<'a> {
                     fixed,
                 });
             }
-            EdslNode::Comp(left, right, attr) => {
+            LayoutNode::Comp(left, right, attr) => {
                 // Inside a fix wrapper every composition is fixed.
                 let attr1 = Attr {
                     pad: attr.pad,
@@ -302,17 +334,18 @@ mod tests {
     /// on a 2 MB stack). Reaching it without aborting proves iteration.
     const DEEP: usize = 50_000;
 
+    /// A one-character text buffer and the range covering it.
+    const TEXT: &str = "x";
+    const X: Range<str> = Range::new(0, 1);
+
     /// Wraps a `Text` leaf in `DEEP` layers of `wrap`.
-    fn deep_unary(
-        text: &'static str,
-        wrap: fn(EdslId<'static>) -> EdslNode<'static>,
-    ) -> EdslDoc<'static> {
-        let mut nodes: Arena<EdslNode> = Arena::new();
-        let mut cur = nodes.push(EdslNode::Text(text));
+    fn deep_unary(wrap: fn(LayId) -> LayoutNode) -> LayoutArena {
+        let mut nodes: Arena<LayoutNode> = Arena::new();
+        let mut cur = nodes.push(LayoutNode::Text(X));
         for _ in 0..DEEP {
             cur = nodes.push(wrap(cur));
         }
-        EdslDoc { nodes, root: cur }
+        LayoutArena { nodes, root: cur }
     }
 
     #[test]
@@ -322,14 +355,14 @@ mod tests {
             brk: Break::Breakable,
         };
         // Right-nested Comp chain of DEEP compositions over DEEP + 1 texts.
-        let mut nodes: Arena<EdslNode> = Arena::new();
-        let mut cur = nodes.push(EdslNode::Text("z"));
+        let mut nodes: Arena<LayoutNode> = Arena::new();
+        let mut cur = nodes.push(LayoutNode::Text(X));
         for _ in 0..DEEP {
-            let left = nodes.push(EdslNode::Text("y"));
-            cur = nodes.push(EdslNode::Comp(left, cur, attr));
+            let left = nodes.push(LayoutNode::Text(X));
+            cur = nodes.push(LayoutNode::Comp(left, cur, attr));
         }
-        let doc = EdslDoc { nodes, root: cur };
-        let serial = serialize(&doc);
+        let doc = LayoutArena { nodes, root: cur };
+        let serial = serialize(&doc, TEXT);
         // DEEP Next entries, then a final Last entry.
         let count = serial
             .entries
@@ -342,8 +375,8 @@ mod tests {
 
     #[test]
     fn serialize_handles_deep_nest_chain() {
-        let doc = deep_unary("x", EdslNode::Nest);
-        let serial = serialize(&doc);
+        let doc = deep_unary(LayoutNode::Nest);
+        let serial = serialize(&doc, TEXT);
         // Single leaf: one Last whose term sits under a Nest^DEEP path.
         let [SerialEntry::Last(term)] = serial.entries[..] else {
             panic!("expected a single Last")
@@ -360,8 +393,8 @@ mod tests {
 
     #[test]
     fn serialize_handles_deep_pack_chain_indices() {
-        let doc = deep_unary("x", EdslNode::Pack);
-        let serial = serialize(&doc);
+        let doc = deep_unary(LayoutNode::Pack);
+        let serial = serialize(&doc, TEXT);
         let [SerialEntry::Last(term)] = serial.entries[..] else {
             panic!("expected a single Last")
         };
@@ -388,9 +421,9 @@ mod tests {
     #[test]
     fn serialize_handles_deep_grp_chain() {
         // Deep grp nesting exercises the i counter and comp-arena/stack depth.
-        let doc = deep_unary("x", EdslNode::Grp);
+        let doc = deep_unary(LayoutNode::Grp);
         // Should not overflow; a single leaf yields a trivial one-Last serial.
-        let serial = serialize(&doc);
+        let serial = serialize(&doc, TEXT);
         assert!(matches!(serial.entries[..], [SerialEntry::Last(_)]));
     }
 }

@@ -6,10 +6,25 @@
 //! so the object and fix walks are plain forward folds: by the time a node is
 //! visited its children's results are already computed.
 
+use super::resolve_scopes::RebuildDoc;
 use crate::compiler::types::{
-    Arena, DFixId, DObjId, DenullDoc, DenullFix, DenullObj, DenullTerm, IdVec, PathNode, Prop,
-    Range, RebuildDoc, RebuildFix, RebuildObj, Term, TermLeaf,
+    Arena, DenullTerm, Fix, Id, IdVec, Obj, Pad, PathNode, Prop, Range, Term, TermLeaf,
 };
+
+pub(crate) type DObjId<'a> = Id<Obj<DenullTerm<'a>>>;
+pub(crate) type DFixId<'a> = Id<Fix<DenullTerm<'a>>>;
+
+/// The document with nulls gone: one optional root per line (`None` for a
+/// line that denulled to nothing) over composition trees whose terms are a
+/// stripped `(props, text)` pair. Both arenas are postorder.
+#[derive(Debug)]
+pub(crate) struct DenullDoc<'a> {
+    pub(crate) lines: Vec<Option<DObjId<'a>>>,
+    pub(crate) objs: Arena<Obj<DenullTerm<'a>>>,
+    pub(crate) fixes: Arena<Fix<DenullTerm<'a>>>,
+    /// The shared prop buffer every [`DenullTerm`]'s `props` range indexes.
+    pub(crate) props: Vec<Prop>,
+}
 
 /// Result of denulling an object: nothing survived (`None`); an object
 /// survived (`Some`); or everything to the left of a composition was dropped,
@@ -18,15 +33,15 @@ use crate::compiler::types::{
 enum Res<Id> {
     None,
     Some(Id),
-    NextNone(bool, Id),
+    NextNone(Pad, Id),
 }
 
 /// Remove null identities.
 pub fn denull<'a>(doc: &RebuildDoc<'a>, paths: &Arena<PathNode>) -> DenullDoc<'a> {
     // Every input node yields at most one output node, so the input sizes are
     // exact capacity bounds.
-    let mut objs: Arena<DenullObj<'a>> = Arena::with_capacity(doc.objs.len());
-    let mut fixes: Arena<DenullFix<'a>> = Arena::with_capacity(doc.fixes.len());
+    let mut objs: Arena<Obj<DenullTerm<'a>>> = Arena::with_capacity(doc.objs.len());
+    let mut fixes: Arena<Fix<DenullTerm<'a>>> = Arena::with_capacity(doc.fixes.len());
     // The shared prop buffer every surviving term's props range indexes, and
     // the memo of already-materialized paths: terms sharing a path (sibling
     // leaves under the same wrappers) share one materialization, so the
@@ -35,44 +50,42 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>, paths: &Arena<PathNode>) -> DenullDoc<'a
     let mut memo: IdVec<PathNode, Option<Range<Prop>>> = IdVec::filled(None, paths.len());
 
     // Fold the fixed-object arena bottom-up (forward, children first).
-    let mut fix_res: IdVec<RebuildFix<'a>, Res<DFixId<'a>>> = IdVec::with_capacity(doc.fixes.len());
+    let mut fix_res: IdVec<Fix<Term<'a>>, Res<DFixId<'a>>> = IdVec::with_capacity(doc.fixes.len());
     for (_, node) in doc.fixes.iter() {
         let res = match *node {
-            RebuildFix::Term(term) => match strip_term(&mut props, &mut memo, paths, term) {
+            Fix::Term(term) => match strip_term(&mut props, &mut memo, paths, term) {
                 None => Res::None,
-                Some(term1) => Res::Some(fixes.push(DenullFix::Term(term1))),
+                Some(term1) => Res::Some(fixes.push(Fix::Term(term1))),
             },
-            RebuildFix::Comp(left, right, l_pad) => comp_res(
+            Fix::Comp(left, right, l_pad) => comp_res(
                 fix_res[left],
                 fix_res[right],
                 l_pad,
-                |left1, right1, pad| fixes.push(DenullFix::Comp(left1, right1, pad)),
+                |left1, right1, pad| fixes.push(Fix::Comp(left1, right1, pad)),
             ),
         };
         fix_res.push(res);
     }
 
     // Fold the object arena bottom-up the same way.
-    let mut obj_res: IdVec<RebuildObj<'a>, Res<DObjId<'a>>> = IdVec::with_capacity(doc.objs.len());
+    let mut obj_res: IdVec<Obj<Term<'a>>, Res<DObjId<'a>>> = IdVec::with_capacity(doc.objs.len());
     for (_, node) in doc.objs.iter() {
         let res = match *node {
-            RebuildObj::Term(term) => match strip_term(&mut props, &mut memo, paths, term) {
+            Obj::Term(term) => match strip_term(&mut props, &mut memo, paths, term) {
                 None => Res::None,
-                Some(term1) => Res::Some(objs.push(DenullObj::Term(term1))),
+                Some(term1) => Res::Some(objs.push(Obj::Term(term1))),
             },
-            RebuildObj::Fix(fix) => match fix_res[fix] {
+            Obj::Fix(fix) => match fix_res[fix] {
                 Res::None => Res::None,
-                Res::Some(fix1) | Res::NextNone(_, fix1) => {
-                    Res::Some(objs.push(DenullObj::Fix(fix1)))
-                }
+                Res::Some(fix1) | Res::NextNone(_, fix1) => Res::Some(objs.push(Obj::Fix(fix1))),
             },
-            RebuildObj::Grp(obj1) => wrap_obj(&mut objs, obj_res[obj1], DenullObj::Grp),
-            RebuildObj::Seq(obj1) => wrap_obj(&mut objs, obj_res[obj1], DenullObj::Seq),
-            RebuildObj::Comp(left, right, l_pad) => comp_res(
+            Obj::Grp(obj1) => wrap_obj(&mut objs, obj_res[obj1], Obj::Grp),
+            Obj::Seq(obj1) => wrap_obj(&mut objs, obj_res[obj1], Obj::Seq),
+            Obj::Comp(left, right, l_pad) => comp_res(
                 obj_res[left],
                 obj_res[right],
                 l_pad,
-                |left1, right1, pad| objs.push(DenullObj::Comp(left1, right1, pad)),
+                |left1, right1, pad| objs.push(Obj::Comp(left1, right1, pad)),
             ),
         };
         obj_res.push(res);
@@ -102,17 +115,17 @@ pub fn denull<'a>(doc: &RebuildDoc<'a>, paths: &Arena<PathNode>) -> DenullDoc<'a
 fn comp_res<Id: Copy>(
     left: Res<Id>,
     right: Res<Id>,
-    l_pad: bool,
-    mut comp: impl FnMut(Id, Id, bool) -> Id,
+    l_pad: Pad,
+    mut comp: impl FnMut(Id, Id, Pad) -> Id,
 ) -> Res<Id> {
     match (left, right) {
         (Res::None, Res::None) => Res::None,
         (Res::None, Res::Some(right1)) => Res::NextNone(l_pad, right1),
-        (Res::None, Res::NextNone(r_pad, right1)) => Res::NextNone(l_pad || r_pad, right1),
+        (Res::None, Res::NextNone(r_pad, right1)) => Res::NextNone(l_pad.merge(r_pad), right1),
         (Res::Some(left1), Res::None) => Res::Some(left1),
         (Res::Some(left1), Res::Some(right1)) => Res::Some(comp(left1, right1, l_pad)),
         (Res::Some(left1), Res::NextNone(r_pad, right1)) => {
-            Res::Some(comp(left1, right1, l_pad || r_pad))
+            Res::Some(comp(left1, right1, l_pad.merge(r_pad)))
         }
         // A composition's left operand never denulls to NextNone.
         (Res::NextNone(..), _) => unreachable!("Invariant"),
@@ -123,9 +136,9 @@ fn comp_res<Id: Copy>(
 /// propagating the "nothing survived" result unchanged. A surviving `NextNone`
 /// collapses to `Some` — the dropped-left pad is discarded at a wrapper.
 fn wrap_obj<'a>(
-    objs: &mut Arena<DenullObj<'a>>,
+    objs: &mut Arena<Obj<DenullTerm<'a>>>,
     val: Res<DObjId<'a>>,
-    ctor: fn(DObjId<'a>) -> DenullObj<'a>,
+    ctor: fn(DObjId<'a>) -> Obj<DenullTerm<'a>>,
 ) -> Res<DObjId<'a>> {
     match val {
         Res::None => Res::None,
@@ -198,11 +211,11 @@ mod tests {
     fn denull_handles_deep_comp_object() {
         // Right-nested Comp chain: Comp(Term, Comp(Term, ... Term)). Each left
         // operand is a surviving Term, so the whole object survives.
-        let mut objs: Arena<RebuildObj> = Arena::new();
-        let mut cur = objs.push(RebuildObj::Term(text_term("z")));
+        let mut objs: Arena<Obj<Term>> = Arena::new();
+        let mut cur = objs.push(Obj::Term(text_term("z")));
         for _ in 0..DEEP {
-            let left = objs.push(RebuildObj::Term(text_term("y")));
-            cur = objs.push(RebuildObj::Comp(left, cur, false));
+            let left = objs.push(Obj::Term(text_term("y")));
+            cur = objs.push(Obj::Comp(left, cur, Pad::Unpadded));
         }
         let doc = RebuildDoc {
             lines: vec![cur],
@@ -216,7 +229,7 @@ mod tests {
         };
         let mut count = 0usize;
         let mut walk = root;
-        while let DenullObj::Comp(_left, right, _pad) = out.objs[walk] {
+        while let Obj::Comp(_left, right, _pad) = out.objs[walk] {
             count += 1;
             walk = right;
         }
@@ -237,8 +250,8 @@ mod tests {
             path,
             leaf: TermLeaf::Text("x"),
         };
-        let mut objs: Arena<RebuildObj> = Arena::new();
-        let root = objs.push(RebuildObj::Term(term));
+        let mut objs: Arena<Obj<Term>> = Arena::new();
+        let root = objs.push(Obj::Term(term));
         let doc = RebuildDoc {
             lines: vec![root],
             objs,
@@ -248,7 +261,7 @@ mod tests {
         let [Some(root)] = out.lines[..] else {
             panic!("expected a single line");
         };
-        let DenullObj::Term(t) = &out.objs[root] else {
+        let Obj::Term(t) = &out.objs[root] else {
             panic!("expected a single term line");
         };
         assert_eq!(t.text, "x");
@@ -261,12 +274,12 @@ mod tests {
     fn denull_drops_null_left_and_merges_pads() {
         // Comp(Text "a", Comp(Null, Text "x", pad=true), pad=false): the null
         // vanishes and its pad merges onto the surviving composition.
-        let mut objs: Arena<RebuildObj> = Arena::new();
-        let n1 = objs.push(RebuildObj::Term(null_term()));
-        let t = objs.push(RebuildObj::Term(text_term("x")));
-        let inner = objs.push(RebuildObj::Comp(n1, t, true));
-        let a = objs.push(RebuildObj::Term(text_term("a")));
-        let root = objs.push(RebuildObj::Comp(a, inner, false));
+        let mut objs: Arena<Obj<Term>> = Arena::new();
+        let n1 = objs.push(Obj::Term(null_term()));
+        let t = objs.push(Obj::Term(text_term("x")));
+        let inner = objs.push(Obj::Comp(n1, t, Pad::Padded));
+        let a = objs.push(Obj::Term(text_term("a")));
+        let root = objs.push(Obj::Comp(a, inner, Pad::Unpadded));
         let doc = RebuildDoc {
             lines: vec![root],
             objs,
@@ -276,18 +289,22 @@ mod tests {
         let [Some(root)] = out.lines[..] else {
             panic!("expected a single line");
         };
-        let DenullObj::Comp(_, _, pad) = out.objs[root] else {
+        let Obj::Comp(_, _, pad) = out.objs[root] else {
             panic!("expected a comp line");
         };
-        assert!(pad, "the dropped left's pad must merge into the comp");
+        assert_eq!(
+            pad,
+            Pad::Padded,
+            "the dropped left's pad must merge into the comp"
+        );
     }
 
     #[test]
     fn denull_handles_long_doc_spine() {
-        let mut objs: Arena<RebuildObj> = Arena::new();
+        let mut objs: Arena<Obj<Term>> = Arena::new();
         let mut lines = Vec::new();
         for _ in 0..DEEP {
-            lines.push(objs.push(RebuildObj::Term(text_term("x"))));
+            lines.push(objs.push(Obj::Term(text_term("x"))));
         }
         let doc = RebuildDoc {
             lines,
@@ -303,10 +320,10 @@ mod tests {
     fn denull_emptied_lines_become_none() {
         // Lines: [Text "a", Null, Null]: the null lines denull to `None` and
         // keep their place, so the document still ends in two empty lines.
-        let mut objs: Arena<RebuildObj> = Arena::new();
-        let a = objs.push(RebuildObj::Term(text_term("a")));
-        let n1 = objs.push(RebuildObj::Term(null_term()));
-        let n2 = objs.push(RebuildObj::Term(null_term()));
+        let mut objs: Arena<Obj<Term>> = Arena::new();
+        let a = objs.push(Obj::Term(text_term("a")));
+        let n1 = objs.push(Obj::Term(null_term()));
+        let n2 = objs.push(Obj::Term(null_term()));
         let doc = RebuildDoc {
             lines: vec![a, n1, n2],
             objs,
@@ -320,12 +337,12 @@ mod tests {
     fn denull_fix_arena_folds_bottom_up() {
         // Fix(Comp(Text "a", Text "", pad=true)): the empty right vanishes and
         // the fix survives as its left.
-        let mut objs: Arena<RebuildObj> = Arena::new();
-        let mut fixes: Arena<RebuildFix> = Arena::new();
-        let fa = fixes.push(RebuildFix::Term(text_term("a")));
-        let fe = fixes.push(RebuildFix::Term(text_term("")));
-        let fc = fixes.push(RebuildFix::Comp(fa, fe, true));
-        let root = objs.push(RebuildObj::Fix(fc));
+        let mut objs: Arena<Obj<Term>> = Arena::new();
+        let mut fixes: Arena<Fix<Term>> = Arena::new();
+        let fa = fixes.push(Fix::Term(text_term("a")));
+        let fe = fixes.push(Fix::Term(text_term("")));
+        let fc = fixes.push(Fix::Comp(fa, fe, Pad::Padded));
+        let root = objs.push(Obj::Fix(fc));
         let doc = RebuildDoc {
             lines: vec![root],
             objs,
@@ -335,10 +352,10 @@ mod tests {
         let [Some(root)] = out.lines[..] else {
             panic!("expected a single line");
         };
-        let DenullObj::Fix(fix1) = out.objs[root] else {
+        let Obj::Fix(fix1) = out.objs[root] else {
             panic!("expected a fix object");
         };
-        let DenullFix::Term(t) = &out.fixes[fix1] else {
+        let Fix::Term(t) = &out.fixes[fix1] else {
             panic!("expected the fix to survive as its left term");
         };
         assert_eq!(t.text, "a");

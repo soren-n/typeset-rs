@@ -6,15 +6,15 @@
 //! borrowed `FixedDoc` line (nodes are index-aligned with the line's items).
 
 use super::graph::{GraphDoc, GraphLine};
-use crate::compiler::types::{
-    Arena, FixRun, FixedItem, RFixId, RObjId, Range, RebuildDoc, RebuildFix, RebuildObj, ScopeKind,
-};
+use super::{RFixId, RObjId, RebuildDoc};
+use crate::compiler::passes::split_lines::{FixRun, FixedItem};
+use crate::compiler::types::{Arena, Fix, Obj, Pad, Range, ScopeKind, Term};
 
 /// Appends arena nodes children-first while rebuilding, so a parent's child
 /// ids always already exist.
 struct Builder<'a> {
-    objs: Arena<RebuildObj<'a>>,
-    fixes: Arena<RebuildFix<'a>>,
+    objs: Arena<Obj<Term<'a>>>,
+    fixes: Arena<Fix<Term<'a>>>,
 }
 
 // Rebuild continuations, flattened into shared buffers so threading them
@@ -34,7 +34,7 @@ struct Builder<'a> {
 enum RStep<'a> {
     Grp,
     Seq,
-    Partial(Range<(RObjId<'a>, bool)>),
+    Partial(Range<(RObjId<'a>, Pad)>),
 }
 
 /// The flat continuation state, reused across lines: cleared per line, so its
@@ -47,7 +47,7 @@ struct ContState<'a> {
     bounds: Vec<usize>,
     /// Partial spines: captured regions below `cur_start` (addressed by
     /// `RStep::Partial` ranges), the live partial from `cur_start` on.
-    partials: Vec<(RObjId<'a>, bool)>,
+    partials: Vec<(RObjId<'a>, Pad)>,
     /// Start of the live partial region in `partials`.
     cur_start: usize,
 }
@@ -66,12 +66,12 @@ impl ContState<'_> {
 // Applies a partial spine to an object (innermost element first).
 fn apply_rpartial<'a>(
     b: &mut Builder<'a>,
-    partial: &[(RObjId<'a>, bool)],
+    partial: &[(RObjId<'a>, Pad)],
     obj: RObjId<'a>,
 ) -> RObjId<'a> {
     let mut result = obj;
     for &(left, pad) in partial.iter().rev() {
-        result = b.objs.push(RebuildObj::Comp(left, result, pad));
+        result = b.objs.push(Obj::Comp(left, result, pad));
     }
     result
 }
@@ -88,8 +88,8 @@ fn apply_steps<'a>(
     let mut result = obj;
     for i in (start..st.steps.len()).rev() {
         result = match st.steps[i] {
-            RStep::Grp => b.objs.push(RebuildObj::Grp(result)),
-            RStep::Seq => b.objs.push(RebuildObj::Seq(result)),
+            RStep::Grp => b.objs.push(Obj::Grp(result)),
+            RStep::Seq => b.objs.push(Obj::Seq(result)),
             RStep::Partial(range) => apply_rpartial(b, range.slice(&st.partials), result),
         };
     }
@@ -143,9 +143,9 @@ fn visit_item<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, item: &FixedItem<'a
     match item {
         FixedItem::Fix(run) => {
             let fix1 = visit_fix(b, g, *run);
-            b.objs.push(RebuildObj::Fix(fix1))
+            b.objs.push(Obj::Fix(fix1))
         }
-        FixedItem::Term(term) => b.objs.push(RebuildObj::Term(*term)),
+        FixedItem::Term(term) => b.objs.push(Obj::Term(*term)),
     }
 }
 
@@ -225,10 +225,10 @@ fn visit_fix<'a>(b: &mut Builder<'a>, g: &GraphDoc<'_, 'a>, run: FixRun<'a>) -> 
     let terms = run.terms.slice(&g.fixed.terms);
     let seps = run.seps.slice(&g.fixed.run_seps);
     let last = *terms.last().expect("a fix run has at least one term");
-    let mut rfix = b.fixes.push(RebuildFix::Term(last));
+    let mut rfix = b.fixes.push(Fix::Term(last));
     for k in (0..seps.len()).rev() {
-        let left = b.fixes.push(RebuildFix::Term(terms[k]));
-        rfix = b.fixes.push(RebuildFix::Comp(left, rfix, seps[k].pad));
+        let left = b.fixes.push(Fix::Term(terms[k]));
+        rfix = b.fixes.push(Fix::Comp(left, rfix, seps[k].pad));
     }
     rfix
 }

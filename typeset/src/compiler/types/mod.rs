@@ -1,10 +1,10 @@
 pub mod arena;
 pub mod doc;
-pub mod intermediate;
+pub mod ir;
 pub mod layout;
 pub mod traversal;
 
 pub(crate) use arena::*;
 pub use doc::*;
-pub(crate) use intermediate::*;
+pub(crate) use ir::*;
 pub use layout::*;

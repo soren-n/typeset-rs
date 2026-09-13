@@ -4,9 +4,56 @@
 //! line, and maximal runs of terms joined by fixed compositions coalesce into
 //! single fix items as each line is built.
 
-use crate::compiler::types::{
-    FixRun, FixedComp, FixedDoc, FixedItem, FixedLine, Range, SerialComp, SerialEntry, Term,
-};
+use super::serialize::{SerialComp, SerialEntry};
+use crate::compiler::types::{Break, Pad, Range, Scope, Term};
+
+/// A composition between two items: its padding and the scopes opening and
+/// closing here (ranges into the serial document's shared scope buffer).
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct FixedComp {
+    pub(crate) pad: Pad,
+    pub(crate) opens: Range<Scope>,
+    pub(crate) closes: Range<Scope>,
+}
+
+/// A maximal run of terms joined by fixed compositions, coalesced into one
+/// unbreakable item. `terms` and `seps` are ranges into [`FixedDoc`]'s shared
+/// `terms` and `run_seps` buffers; `seps[i]` sits between `terms[i]` and
+/// `terms[i + 1]` (so `terms.len() == seps.len() + 1`).
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct FixRun<'a> {
+    pub(crate) terms: Range<Term<'a>>,
+    pub(crate) seps: Range<FixedComp>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum FixedItem<'a> {
+    Term(Term<'a>),
+    Fix(FixRun<'a>),
+}
+
+/// One line: ranges into [`FixedDoc`]'s `items` and `item_seps` buffers.
+/// `item_seps[seps.start + i]` is the non-fixed composition between the line's
+/// item `i` and item `i + 1`.
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct FixedLine<'a> {
+    pub(crate) items: Range<FixedItem<'a>>,
+    pub(crate) seps: Range<FixedComp>,
+}
+
+/// The document split into lines, each line its items with the non-fixed
+/// compositions separating them. `lines` is the top-level index; the four
+/// element buffers are shared across all lines (items and their separators)
+/// and all fix runs (run terms and their separators), so building the
+/// document appends instead of allocating per line or per run.
+#[derive(Debug)]
+pub(crate) struct FixedDoc<'a> {
+    pub(crate) lines: Vec<FixedLine<'a>>,
+    pub(crate) items: Vec<FixedItem<'a>>,
+    pub(crate) item_seps: Vec<FixedComp>,
+    pub(crate) terms: Vec<Term<'a>>,
+    pub(crate) run_seps: Vec<FixedComp>,
+}
 
 /// Accumulates the flattened document. Items, line separators, run terms, and
 /// run separators are appended straight into the shared buffers; the line and
@@ -74,11 +121,11 @@ pub fn split_lines<'a>(entries: &[SerialEntry<'a>]) -> FixedDoc<'a> {
             }
             SerialEntry::Next(term, SerialComp::Comp(attr, opens, closes)) => {
                 let comp = FixedComp {
-                    pad: attr.pad.is_padded(),
+                    pad: attr.pad,
                     opens: *opens,
                     closes: *closes,
                 };
-                if attr.brk.is_fixed() {
+                if attr.brk == Break::Fixed {
                     // A fixed composition: extend (or start) the current run.
                     acc.push_fixed(*term, comp);
                 } else {
@@ -102,7 +149,7 @@ pub fn split_lines<'a>(entries: &[SerialEntry<'a>]) -> FixedDoc<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::types::{Attr, Break, Pad, TermLeaf};
+    use crate::compiler::types::{Attr, TermLeaf};
 
     /// Far past where a native-stack recursion could survive; the pass is a
     /// plain scan, so this guards sizing behavior only.
