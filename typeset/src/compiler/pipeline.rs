@@ -109,13 +109,9 @@ mod tests {
         assert!(!output.is_empty());
     }
 
-    // End-to-end deep-safety.
-    //
-    // The whole pipeline is iterative now — the compiler passes, the heap
-    // conversion, the renderer, and dropping the resulting `Doc` all run with a
-    // constant native stack. These build layouts far past the depth at which the
-    // recursive tail used to abort (~1,000-2,000 on rendering), compile, render,
-    // and let every intermediate drop.
+    // End-to-end deep-safety: every stage runs in constant native stack, so
+    // layouts far deeper than a recursive implementation could survive
+    // compile, render, and drop.
     const DEEP: usize = 50_000;
 
     #[test]

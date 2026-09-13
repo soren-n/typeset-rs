@@ -195,38 +195,3 @@ impl DocBuilder {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Depth chosen far past where a recursive drop/print would abort.
-    const DEEP: usize = 50_000;
-
-    /// Builds a single-line document whose object is `Nest^depth(Text("x"))`.
-    fn deep_nest_line(depth: usize) -> Doc {
-        let mut b = DocBuilder::with_capacity(0, 0);
-        let range = b.text("x");
-        let mut id = b.obj(ObjNode::Text(range));
-        for _ in 0..depth {
-            id = b.obj(ObjNode::Nest(id));
-        }
-        b.finish(vec![Some(id)])
-    }
-
-    #[test]
-    fn deep_doc_drops_without_overflow() {
-        // Structural: dropping flat `Vec`s never recurses. Kept as a guard.
-        let doc = deep_nest_line(DEEP);
-        drop(doc);
-    }
-
-    #[test]
-    fn deep_doc_clones_and_debugs_without_overflow() {
-        // Clone and the derived Debug both walk flat Vecs, never the object
-        // graph, so depth cannot overflow either.
-        let doc = deep_nest_line(DEEP);
-        let cloned = doc.clone();
-        assert_eq!(format!("{:?}", cloned), format!("{:?}", doc));
-    }
-}

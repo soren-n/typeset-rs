@@ -431,7 +431,6 @@ mod tests {
     use crate::compiler::constructors::{comp, fix, grp, line, nest, pack, seq, text};
     use crate::compiler::types::Layout;
 
-    /// Deeper than a native-stack recursion could survive.
     const DEEP: usize = 50_000;
 
     fn run(layout: &Layout) -> FixedDoc<'_> {

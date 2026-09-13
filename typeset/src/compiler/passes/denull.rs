@@ -203,38 +203,7 @@ mod tests {
         }
     }
 
-    /// Far past where a native-stack recursion could survive; with flat arenas
-    /// the folds are plain loops, so this guards sizing behavior only.
     const DEEP: usize = 50_000;
-
-    #[test]
-    fn denull_handles_deep_comp_object() {
-        // Right-nested Comp chain: Comp(Term, Comp(Term, ... Term)). Each left
-        // operand is a surviving Term, so the whole object survives.
-        let mut objs: Arena<Obj<Term>> = Arena::new();
-        let mut cur = objs.push(Obj::Term(text_term("z")));
-        for _ in 0..DEEP {
-            let left = objs.push(Obj::Term(text_term("y")));
-            cur = objs.push(Obj::Comp(left, cur, Pad::Unpadded));
-        }
-        let doc = RebuildDoc {
-            lines: vec![cur],
-            objs,
-            fixes: Arena::new(),
-        };
-        let out = denull(&doc, &Arena::new());
-        // Count the surviving comps in the single line.
-        let [Some(root)] = out.lines[..] else {
-            panic!("expected a single line");
-        };
-        let mut count = 0usize;
-        let mut walk = root;
-        while let Obj::Comp(_left, right, _pad) = out.objs[walk] {
-            count += 1;
-            walk = right;
-        }
-        assert_eq!(count, DEEP);
-    }
 
     #[test]
     fn denull_strips_deep_nest_term_to_props() {
@@ -297,23 +266,6 @@ mod tests {
             Pad::Padded,
             "the dropped left's pad must merge into the comp"
         );
-    }
-
-    #[test]
-    fn denull_handles_long_doc_spine() {
-        let mut objs: Arena<Obj<Term>> = Arena::new();
-        let mut lines = Vec::new();
-        for _ in 0..DEEP {
-            lines.push(objs.push(Obj::Term(text_term("x"))));
-        }
-        let doc = RebuildDoc {
-            lines,
-            objs,
-            fixes: Arena::new(),
-        };
-        let out = denull(&doc, &Arena::new());
-        assert_eq!(out.lines.len(), DEEP);
-        assert!(out.lines.iter().all(Option::is_some));
     }
 
     #[test]

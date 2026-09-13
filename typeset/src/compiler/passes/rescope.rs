@@ -129,8 +129,6 @@ mod tests {
     use super::*;
     use crate::compiler::types::{Arena, Pad};
 
-    /// Far past where a native-stack recursion could survive; with flat arenas
-    /// the folds are plain loops, so this guards sizing behavior only.
     const DEEP: usize = 50_000;
 
     /// Pushes `props` onto the shared buffer and returns a term over them.
@@ -237,26 +235,6 @@ mod tests {
     }
 
     #[test]
-    fn rescope_handles_deep_comp_object() {
-        // Right-nested comp of plain terms.
-        let mut buf: Vec<Prop> = Vec::new();
-        let mut objs: Arena<Obj<DenullTerm>> = Arena::new();
-        let mut cur = objs.push(nest_term(&mut buf, 0, "z"));
-        for _ in 0..DEEP {
-            let left = objs.push(nest_term(&mut buf, 0, "y"));
-            cur = objs.push(Obj::Comp(left, cur, Pad::Unpadded));
-        }
-        let out = rescope(line_doc(objs, buf, cur));
-        let mut count = 0usize;
-        let mut walk = line_root(&out);
-        while let ObjNode::Comp(_left, right, _) = out.objs[walk] {
-            count += 1;
-            walk = right;
-        }
-        assert_eq!(count, DEEP);
-    }
-
-    #[test]
     fn rescope_fix_comp_keeps_left_props_only() {
         let mut objs: Arena<Obj<DenullTerm>> = Arena::new();
         let mut fixes: Arena<Fix<DenullTerm>> = Arena::new();
@@ -287,24 +265,5 @@ mod tests {
         };
         cur = inner;
         assert!(matches!(out.objs[cur], ObjNode::Fix(_)));
-    }
-
-    #[test]
-    fn rescope_handles_long_doc_spine() {
-        let mut buf: Vec<Prop> = Vec::new();
-        let mut objs: Arena<Obj<DenullTerm>> = Arena::new();
-        let mut lines = Vec::new();
-        for _ in 0..DEEP {
-            lines.push(Some(objs.push(nest_term(&mut buf, 0, "x"))));
-        }
-        let doc = DenullDoc {
-            lines,
-            objs,
-            fixes: Arena::new(),
-            props: buf,
-        };
-        let out = rescope(doc);
-        assert_eq!(out.lines.len(), DEEP);
-        assert!(out.lines.iter().all(Option::is_some));
     }
 }

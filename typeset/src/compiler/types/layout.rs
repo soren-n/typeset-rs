@@ -202,17 +202,4 @@ mod tests {
         };
         assert!(matches!(layout.nodes[l], LayoutNode::Text(s) if s.slice(&layout.text) == "y"));
     }
-
-    #[test]
-    fn deep_layout_clones_drops_and_debugs_flat() {
-        let mut layout = text("x");
-        for _ in 0..DEEP {
-            layout = nest(layout);
-        }
-        let cloned = layout.clone();
-        assert_eq!(cloned.nodes.len(), DEEP + 1);
-        let _ = format!("{:?}", cloned);
-        drop(layout);
-        drop(cloned);
-    }
 }

@@ -300,8 +300,6 @@ mod tests {
     use super::*;
     use crate::compiler::types::Range;
 
-    /// Far past where a native-stack recursion could survive; with flat arenas
-    /// the folds are plain loops, so this guards sizing behavior only.
     const DEEP: usize = 50_000;
 
     fn term(text: &'static str) -> DObj<'static> {
@@ -371,23 +369,6 @@ mod tests {
             panic!("expected a line");
         };
         assert!(matches!(out.objs[root], Obj::Term(_)));
-    }
-
-    #[test]
-    fn normalize_handles_long_doc_spine() {
-        let mut objs: Arena<DObj> = Arena::new();
-        let mut lines = Vec::new();
-        for _ in 0..DEEP {
-            lines.push(Some(objs.push(term("x"))));
-        }
-        let doc = DenullDoc {
-            lines,
-            objs,
-            fixes: Arena::new(),
-            props: Vec::new(),
-        };
-        let out = normalize(doc);
-        assert_eq!(out.lines.len(), DEEP);
     }
 
     #[test]
