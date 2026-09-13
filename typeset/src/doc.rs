@@ -48,8 +48,8 @@ pub(crate) fn text_width(data: &str) -> usize {
     data.chars().count()
 }
 
-/// A compiled layout: the output of [`compile`](crate::compile) and the input
-/// to [`render`](crate::render()). Callers never construct or inspect a
+/// A compiled layout: the output of [`Layout::compile`](crate::Layout::compile) and the input
+/// to [`Doc::render`]. Callers never construct or inspect a
 /// `Doc`. `Clone`, `Drop`, and `Debug` are derived and structurally deep-safe
 /// (they touch only flat `Vec`s), so no amount of document nesting can
 /// overflow the stack.

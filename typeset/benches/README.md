@@ -1,37 +1,21 @@
 # Typeset Benchmarks
 
-Two criterion suites live here. The full benchmarking and profiling guide,
+One criterion suite lives here. The full benchmarking and profiling guide,
 including the audit history and what the numbers mean, is in
 [docs/context/PERFORMANCE.md](../../docs/context/PERFORMANCE.md).
 
-## Suites
+## The suite
 
-### `layout_performance` — small-input latency
-
-Groups: `construction`, `compilation`, `rendering`, `end_to_end`,
-`reuse_efficiency`, `combinators`.
-
-- `construction` / `compilation` / `rendering`: each phase on simple, nested,
-  wide, and JSON-like layouts.
-- `end_to_end`: construction through `render`, including `format_layout()`.
-- `reuse_efficiency`: compile once and render at several widths versus
-  recompiling each time.
-- `combinators`: per-constructor cost (`text`, `comp`, `line`, `nest`, `pack`,
-  `fix`, `grp`, `seq`).
-
-### `scaling` — asymptotics
-
-Groups: `compile_scaling`, `render_scaling`. Inputs are large enough to expose
-growth (word chains to 64k, JSON-like trees to 32k leaves, nest-depth and
-width sweeps). This is the suite to run before and after any pipeline or
+`scaling` has two groups, `compile_scaling` and `render_scaling`, at inputs
+large enough to expose growth (word chains to 64k, JSON-like trees to 32k
+leaves, nest-depth and width sweeps). Run it before and after any pipeline or
 renderer change.
 
 ## Running
 
 ```bash
-cargo bench -p typeset                              # both suites
-cargo bench -p typeset --bench scaling              # asymptotics only
-cargo bench -p typeset --bench layout_performance -- rendering   # one group
+cargo bench -p typeset --bench scaling
+cargo bench -p typeset --bench scaling -- render    # one group
 
 # Compare a change against a saved baseline
 cargo bench -p typeset --bench scaling -- --save-baseline before

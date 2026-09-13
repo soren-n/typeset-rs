@@ -1,190 +1,82 @@
-use std::collections::HashMap;
+//! A JSON pretty printer.
+//!
+//! A container that fits stays on one line; one that does not puts its
+//! delimiters and every entry on lines of their own: `seq` makes the
+//! delimiters and entries of a broken container break together, `grp` lets
+//! each nested container decide for itself, and `nest` indents the entries.
+//! A key is fixed to its value, so `"key": {` never splits.
+
 use typeset::*;
 
-/// Example: JSON pretty printer using typeset layout combinators
-/// Demonstrates how to build a practical formatter for a real data structure
-
-#[derive(Debug, Clone)]
-enum JsonValue {
+enum Json {
     Null,
     Bool(bool),
     Number(f64),
     String(String),
-    Array(Vec<JsonValue>),
-    Object(HashMap<String, JsonValue>),
+    Array(Vec<Json>),
+    Object(Vec<(String, Json)>),
 }
 
-/// Pretty print a JSON value using typeset combinators
-fn format_json(value: &JsonValue) -> Layout {
+fn layout(value: &Json) -> Layout {
     match value {
-        JsonValue::Null => text("null"),
-        JsonValue::Bool(b) => text(b.to_string()),
-        JsonValue::Number(n) => text(n.to_string()),
-        JsonValue::String(s) => text(format!("\"{}\"", s)),
-
-        JsonValue::Array(arr) => {
-            if arr.is_empty() {
-                text("[]")
-            } else {
-                let opening = text("[");
-                let closing = text("]");
-
-                // Create comma-separated items
-                let items = arr.iter().enumerate().fold(null(), |acc, (i, item)| {
-                    let formatted_item = format_json(item);
-                    if i == 0 {
-                        formatted_item
-                    } else {
-                        comp(
-                            acc,
-                            comp(text(","), formatted_item, Pad::Padded, Break::Breakable),
-                            Pad::Unpadded,
-                            Break::Breakable,
-                        )
-                    }
-                });
-
-                // Group the content - will break all commas if doesn't fit on one line
-                let content = grp(seq(items));
-                let indented_content = nest(content);
-
-                comp(
-                    opening,
-                    comp(indented_content, closing, Pad::Unpadded, Break::Breakable),
-                    Pad::Unpadded,
-                    Break::Breakable,
+        Json::Null => text("null"),
+        Json::Bool(b) => text(b.to_string()),
+        Json::Number(n) => text(n.to_string()),
+        Json::String(s) => text(format!("{s:?}")),
+        Json::Array(items) if items.is_empty() => text("[]"),
+        Json::Array(items) => container("[", "]", items.iter().map(layout)),
+        Json::Object(entries) if entries.is_empty() => text("{}"),
+        Json::Object(entries) => container(
+            "{",
+            "}",
+            entries.iter().map(|(key, value)| {
+                fix_pad(
+                    fix_unpad(text(format!("{key:?}")), text(":")),
+                    layout(value),
                 )
-            }
-        }
-
-        JsonValue::Object(obj) => {
-            if obj.is_empty() {
-                text("{}")
-            } else {
-                let opening = text("{");
-                let closing = text("}");
-
-                // Create comma-separated key-value pairs
-                let pairs: Vec<_> = obj.iter().collect();
-                let items = pairs
-                    .iter()
-                    .enumerate()
-                    .fold(null(), |acc, (i, (key, value))| {
-                        let key_layout = text(format!("\"{}\"", key));
-                        let colon = text(": ");
-                        let value_layout = format_json(value);
-
-                        let pair = comp(
-                            key_layout,
-                            comp(colon, value_layout, Pad::Unpadded, Break::Breakable),
-                            Pad::Unpadded,
-                            Break::Breakable,
-                        );
-
-                        if i == 0 {
-                            pair
-                        } else {
-                            comp(
-                                acc,
-                                comp(text(","), pair, Pad::Padded, Break::Breakable),
-                                Pad::Unpadded,
-                                Break::Breakable,
-                            )
-                        }
-                    });
-
-                // Group and sequence for proper breaking
-                let content = grp(seq(items));
-                let indented_content = nest(content);
-
-                comp(
-                    opening,
-                    comp(indented_content, closing, Pad::Unpadded, Break::Breakable),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                )
-            }
-        }
+            }),
+        ),
     }
 }
 
+/// `open`, the comma-separated entries, `close`, all inside one sequence so
+/// that a broken container opens and closes on lines of its own.
+fn container(open: &str, close: &str, entries: impl IntoIterator<Item = Layout>) -> Layout {
+    let entries = nest(join_with_commas(entries));
+    grp(seq(unpad(unpad(text(open), entries), text(close))))
+}
+
 fn main() {
-    println!("=== JSON Pretty Printer Example ===\n");
-
-    // Simple values
-    let simple_json = JsonValue::Object({
-        let mut map = HashMap::new();
-        map.insert(
-            "name".to_string(),
-            JsonValue::String("John Doe".to_string()),
-        );
-        map.insert("age".to_string(), JsonValue::Number(30.0));
-        map.insert("active".to_string(), JsonValue::Bool(true));
-        map.insert("balance".to_string(), JsonValue::Null);
-        map
-    });
-
-    println!("Simple object (wide):");
-    let layout = format_json(&simple_json);
-    let doc = compile(layout);
-    println!("{}", render(&doc, 2, 80));
-
-    println!("\nSimple object (narrow):");
-    println!("{}", render(&doc, 2, 20));
-
-    // Complex nested structure
-    let complex_json = JsonValue::Object({
-        let mut map = HashMap::new();
-        map.insert(
-            "users".to_string(),
-            JsonValue::Array(vec![
-                JsonValue::Object({
-                    let mut user1 = HashMap::new();
-                    user1.insert("id".to_string(), JsonValue::Number(1.0));
-                    user1.insert("name".to_string(), JsonValue::String("Alice".to_string()));
-                    user1.insert(
-                        "roles".to_string(),
-                        JsonValue::Array(vec![
-                            JsonValue::String("admin".to_string()),
-                            JsonValue::String("user".to_string()),
-                        ]),
-                    );
-                    user1
-                }),
-                JsonValue::Object({
-                    let mut user2 = HashMap::new();
-                    user2.insert("id".to_string(), JsonValue::Number(2.0));
-                    user2.insert("name".to_string(), JsonValue::String("Bob".to_string()));
-                    user2.insert(
-                        "roles".to_string(),
-                        JsonValue::Array(vec![JsonValue::String("user".to_string())]),
-                    );
-                    user2
-                }),
+    let user = |id: f64, name: &str, roles: &[&str]| {
+        Json::Object(vec![
+            ("id".into(), Json::Number(id)),
+            ("name".into(), Json::String(name.into())),
+            (
+                "roles".into(),
+                Json::Array(roles.iter().map(|r| Json::String(r.to_string())).collect()),
+            ),
+        ])
+    };
+    let document = Json::Object(vec![
+        (
+            "users".into(),
+            Json::Array(vec![
+                user(1.0, "Alice", &["admin", "user"]),
+                user(2.0, "Bob", &["user"]),
             ]),
-        );
-        map.insert(
-            "metadata".to_string(),
-            JsonValue::Object({
-                let mut meta = HashMap::new();
-                meta.insert("version".to_string(), JsonValue::String("1.0".to_string()));
-                meta.insert("timestamp".to_string(), JsonValue::Number(1234567890.0));
-                meta
-            }),
-        );
-        map
-    });
+        ),
+        (
+            "metadata".into(),
+            Json::Object(vec![
+                ("version".into(), Json::String("1.0".into())),
+                ("active".into(), Json::Bool(true)),
+                ("parent".into(), Json::Null),
+            ]),
+        ),
+    ]);
 
-    println!("\n=== Complex nested structure ===");
-
-    println!("\nWide format (120 chars):");
-    let complex_layout = format_json(&complex_json);
-    let complex_doc = compile(complex_layout);
-    println!("{}", render(&complex_doc, 2, 120));
-
-    println!("\nNarrow format (40 chars):");
-    println!("{}", render(&complex_doc, 2, 40));
-
-    println!("\nVery narrow format (20 chars):");
-    println!("{}", render(&complex_doc, 2, 20));
+    let doc = layout(&document).compile();
+    for width in [120, 60, 30] {
+        println!("--- width {width}\n{}", doc.render(2, width));
+    }
 }

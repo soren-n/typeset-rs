@@ -96,7 +96,7 @@ fn json(d: usize, fan: usize) -> Layout {
                 ),
             });
         }
-        let body = body.unwrap_or_else(null);
+        let body = body.expect("fan > 0");
         grp(comp(
             comp(text("{"), seq(nest(body)), Pad::Unpadded, Break::Breakable),
             text("}"),
@@ -169,12 +169,12 @@ fn main() {
         match args.phase.as_str() {
             "compile" => loop {
                 let layout = build(&args);
-                std::hint::black_box(compile(layout));
+                std::hint::black_box(layout.compile());
             },
             _ => {
-                let doc = compile(layout);
+                let doc = layout.compile();
                 loop {
-                    std::hint::black_box(render(&doc, 2, args.width));
+                    std::hint::black_box(doc.render(2, args.width));
                 }
             }
         }
@@ -189,7 +189,7 @@ fn main() {
         for _ in 0..args.iters {
             let input = layout.clone();
             let t = Instant::now();
-            let d = compile(input);
+            let d = input.compile();
             best = best.min(t.elapsed().as_nanos());
             doc = Some(d);
         }
@@ -199,11 +199,11 @@ fn main() {
     let mut render_ns = 0u128;
     let mut out_len = 0usize;
     if args.phase == "render" || args.phase == "all" {
-        let doc = doc.unwrap_or_else(|| compile(layout));
+        let doc = doc.unwrap_or_else(|| layout.compile());
         let mut best = u128::MAX;
         for _ in 0..args.iters {
             let t = Instant::now();
-            let out = render(&doc, 2, args.width);
+            let out = doc.render(2, args.width);
             best = best.min(t.elapsed().as_nanos());
             out_len = out.len();
             std::hint::black_box(out);

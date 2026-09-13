@@ -68,7 +68,7 @@ fn grp_inside_seq_keeps_its_own_fit_scope() {
 fn seq_cascades_once_one_composition_breaks() {
     let items = join_with_spaces([text("seq1"), text("seq2"), text("seq3"), text("seq4")]);
     let layout = pad(text("Before"), seq(items));
-    assert_eq!(fmt(layout, 2, 15), "Before seq1\n \nseq2\n \nseq3\n \nseq4");
+    assert_eq!(fmt(layout, 2, 15), "Before seq1\nseq2\nseq3\nseq4");
 }
 
 #[test]
@@ -104,8 +104,27 @@ fn pack_aligns_continuation_lines_to_its_first_column() {
     );
     assert_eq!(
         fmt(config, 2, 25),
-        "Config: key1 value1, key2\n        value2, \n        longer_key value3"
+        "Config: key1 value1, key2\n        value2,\n        longer_key value3"
     );
+}
+
+#[test]
+fn comma_lists_align_under_the_first_argument() {
+    let call = |a: &str, b: &str| {
+        let args = pack(seq(join_with_commas([text(a), text(b)])));
+        unpad(text("f("), unpad(args, text(")")))
+    };
+    assert_eq!(fmt(call("a", "b"), 2, 80), "f(a, b)");
+    assert_eq!(fmt(call("aaa", "bbb"), 2, 6), "f(aaa,\n  bbb)");
+}
+
+#[test]
+fn a_fixed_run_takes_the_wrappers_of_its_first_literal() {
+    // `(` fixed before the packed arguments joins the first argument into
+    // its run, and the run keeps `(`'s (absent) wrappers: no alignment.
+    let args = pack(seq(join_with_commas([text("aaa"), text("bbb")])));
+    let call = fix_unpad(text("f("), fix_unpad(args, text(")")));
+    assert_eq!(fmt(call, 2, 6), "f(aaa,\nbbb)");
 }
 
 #[test]
@@ -140,11 +159,12 @@ fn null_and_empty_text_vanish() {
     assert_eq!(fmt(null(), 2, 80), "");
     assert_eq!(fmt(text(""), 2, 80), "");
     assert_eq!(fmt(pad(text("Before"), null()), 2, 80), "Before");
+    assert_eq!(fmt(pad(nest(null()), text("a")), 2, 3), "a");
 }
 
 #[test]
 fn empty_lines_are_kept() {
-    let layout = unpad(text("Section 1"), unpad(blank_line(), text("Section 2")));
+    let layout = line(text("Section 1"), line(null(), text("Section 2")));
     assert_eq!(fmt(layout, 2, 80), "Section 1\n\nSection 2");
     assert_eq!(fmt(line(text("a"), null()), 2, 80), "a\n");
     assert_eq!(fmt(line(null(), text("a")), 2, 80), "\na");
@@ -159,10 +179,14 @@ fn one_document_renders_at_several_widths() {
 }
 
 #[test]
-fn format_layout_is_compile_then_render() {
-    let layout = pad(text("Hello"), text("world"));
-    assert_eq!(
-        format_layout(layout.clone(), 2, 80),
-        layout.compile().render(2, 80)
-    );
+fn width_is_measured_in_characters_not_bytes() {
+    // 30 characters, 90 UTF-8 bytes: with " x" the line is 32 columns and
+    // fits in 40; measured as bytes it would be 92 and break.
+    let cjk = "日本語".repeat(10);
+    assert_eq!((cjk.chars().count(), cjk.len()), (30, 90));
+    let fits = grp(pad(text(cjk.clone()), text("x")));
+    assert!(!fmt(fits, 2, 40).contains('\n'));
+    // Over-wide multi-byte content still breaks.
+    let wide = grp(pad(text(cjk), text("語".repeat(60))));
+    assert!(fmt(wide, 2, 40).contains('\n'));
 }

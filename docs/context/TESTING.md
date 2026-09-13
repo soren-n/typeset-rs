@@ -128,9 +128,7 @@ mod tests {
 
     #[test]
     fn test_layout_behavior() {
-        let layout = text("hello");
-        let compiled = compile(layout);
-        assert_eq!(render(&compiled, 2, 80), "hello");
+        assert_eq!(text("hello").compile().render(2, 80), "hello");
     }
 }
 ```

@@ -10,6 +10,16 @@ by the previous automated release tooling.
 
 ### Breaking
 
+* **One way to compile and render: `Layout::compile` and `Doc::render`.**
+  The free functions `compile`, `render` and `format_layout` are gone.
+* **The joins compose correctly.** `join_with_spaces` folds with `pad`
+  (previously it inserted `" "` literals, so a broken sequence rendered
+  whitespace-only lines) and `join_with_commas` fixes each comma to the item
+  before it (previously a line could start with a comma). `join_with`,
+  `space`, `comma`, `semicolon`, `newline`, `blank_line`, `parens`,
+  `brackets` and `braces` are gone: each was one composition, and the
+  delimiter helpers encoded a style choice that is wrong as often as right.
+  A blank line is `line(a, line(null(), b))`.
 * **`Layout` is an opaque arena and nothing in the API is boxed.** Every
   constructor takes and returns `Layout` by value, `compile(Layout) -> Doc`,
   and `render(&Doc, tab, width)`. `Layout`'s variants and the composition
@@ -428,6 +438,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+* **One way to compile and render: `Layout::compile` and `Doc::render`.**
+  The free functions `compile`, `render` and `format_layout` are gone.
+* **The joins compose correctly.** `join_with_spaces` folds with `pad`
+  (previously it inserted `" "` literals, so a broken sequence rendered
+  whitespace-only lines) and `join_with_commas` fixes each comma to the item
+  before it (previously a line could start with a comma). `join_with`,
+  `space`, `comma`, `semicolon`, `newline`, `blank_line`, `parens`,
+  `brackets` and `braces` are gone: each was one composition, and the
+  delimiter helpers encoded a style choice that is wrong as often as right.
+  A blank line is `line(a, line(null(), b))`.
 * **`Layout` is an opaque arena and nothing in the API is boxed.** Every
   constructor takes and returns `Layout` by value, `compile(Layout) -> Doc`,
   and `render(&Doc, tab, width)`. `Layout`'s variants and the composition

@@ -14,8 +14,6 @@ resource-usage audit found. Numbers below are from an Apple Silicon Mac
   change; use criterion baselines to diff:
   `cargo bench -p typeset --bench scaling -- --save-baseline before` then
   `-- --baseline before` after the change.
-- `cargo bench -p typeset --bench layout_performance` — small-input latency and
-  per-combinator costs.
 
 ### Profiling probe
 

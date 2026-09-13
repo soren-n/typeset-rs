@@ -1,89 +1,49 @@
-//! # Typeset: A DSL for Pretty Printing
+//! # Typeset: a DSL for pretty printing
 //!
-//! Typeset is a powerful embedded domain-specific language (DSL) for defining source code pretty printers.
-//! It provides a clean, compositional approach to formatting structured data with automatic line breaking,
-//! indentation, and layout optimization.
-//!
-//! ## Quick Start
-//!
-//! ```rust
-//! use typeset::{compile, render, text, comp, nest, grp, Pad, Break};
-//!
-//! // Create a simple layout
-//! let layout = comp(
-//!     text("function"),
-//!     nest(comp(
-//!         text("name()"),
-//!         text("{ body }"),
-//!         Pad::Padded, Break::Breakable
-//!     )),
-//!     Pad::Padded, Break::Breakable
-//! );
-//!
-//! // Compile and render
-//! let doc = compile(layout);
-//! let output = render(&doc, 2, 40);
-//! println!("{}", output);
-//! ```
-//!
-//! ## Core Concepts
-//!
-//! ### Layout Constructors
-//!
-//! Typeset provides several fundamental constructors for building layouts:
-//!
-//! - **[`text()`]** - Text literals that form the visible content
-//! - **[`comp()`]** - Compositions that can break into multiple lines
-//! - **[`line()`]** - Forced line breaks
-//! - **[`nest()`]** - Indentation for nested content
-//! - **[`pack()`]** - Alignment to first element position
-//! - **[`grp()`]** - Groups that break together
-//! - **[`seq()`]** - Sequences where if one breaks, all break
-//! - **[`fix()`]** - Fixed content that never breaks
-//!
-//! ### Compile, then render
-//!
-//! [`compile()`] lowers a [`Layout`] into a [`Doc`]; [`render()`] (or
-//! [`Doc::render`]) lays a document out at a tab width and a target line
-//! width. Rendering only borrows the document, so one compiled document can
-//! be rendered at several widths. Both steps are infallible and run in
-//! constant native stack: a layout of any depth compiles and renders, with
-//! depth costing heap rather than stack. Break decisions are O(1), so render
-//! cost does not grow with the target width.
-//!
-//! ## Examples
-//!
-//! ### Basic Usage
+//! A layout is a tree of text literals joined by compositions that may or
+//! may not break across lines, under wrappers that decide how a group of
+//! compositions breaks and how continuation lines indent. Compiling a
+//! layout resolves those decisions into a [`Doc`]; rendering a `Doc` lays
+//! it out greedily at a tab width and a target line width, fitting as much
+//! on each line as the wrappers allow.
 //!
 //! ```rust
 //! use typeset::*;
 //!
-//! let layout = join_with_spaces(vec![
-//!     text("Hello"),
-//!     text("world!"),
-//! ]);
-//!
-//! let result = format_layout(layout, 2, 80);
-//! assert_eq!(result, "Hello world!");
+//! let args = pack(seq(join_with_commas([text("x"), text("y"), text("z")])));
+//! let call = unpad(text("f("), unpad(args, text(")")));
+//! let doc = call.compile();
+//! assert_eq!(doc.render(2, 80), "f(x, y, z)");
+//! assert_eq!(doc.render(2, 6), "f(x,\n  y,\n  z)");
 //! ```
 //!
-//! ### Complex Formatting
+//! ## The layout language
 //!
-//! ```rust
-//! use typeset::*;
+//! - [`text`] is a literal; [`null`] the empty layout, which vanishes.
+//! - [`comp`] joins two layouts. Its [`Pad`] axis puts a space between them
+//!   on a shared line; its [`Break`] axis says whether the composition may
+//!   break, moving the right operand to the next line when the line is
+//!   full. [`pad`], [`unpad`], [`fix_pad`] and [`fix_unpad`] name the four
+//!   combinations. A fixed composition binds the literals on either side of
+//!   it, which is how punctuation attaches to an item:
+//!   `fix_unpad(item, text(","))`.
+//! - [`line()`] always breaks.
+//! - [`fix`] never breaks inside. [`grp`] breaks its compositions
+//!   all-or-nothing. [`seq`] breaks every later composition once one
+//!   breaks. [`nest`] indents continuation lines by one tab; [`pack`]
+//!   aligns them to the column its content started at.
+//! - [`join_with_spaces`], [`join_with_commas`] and [`join_with_lines`]
+//!   fold a collection with the corresponding composition.
 //!
-//! let json_object = braces(
-//!     join_with_commas(vec![
-//!         comp(text("\"name\""), text("\"John\""), Pad::Padded, Break::Breakable),
-//!         comp(text("\"age\""), text("30"), Pad::Padded, Break::Breakable),
-//!     ])
-//! );
+//! ## Compile, then render
 //!
-//! let result = format_layout(json_object, 2, 40);
-//! // Output will adapt to width constraints automatically
-//! ```
+//! [`Layout::compile`] is infallible and runs in constant native stack: a
+//! layout of any depth compiles, with depth costing heap. [`Doc::render`]
+//! only borrows the document, so one compiled document renders at several
+//! widths. Break decisions are O(1), so rendering does not slow down with
+//! the target width.
 //!
-//! ### The DSL
+//! ## The DSL
 //!
 //! The `typeset-parser` crate's `layout!` macro accepts a compact DSL at
 //! compile time; [`dsl::parse`] accepts the same language at run time:
@@ -94,9 +54,7 @@
 //! # Ok::<(), typeset::dsl::ParseError>(())
 //! ```
 //!
-//! ## Rust Version Compatibility
-//!
-//! This crate builds on stable Rust (MSRV: 1.96.0).
+//! This crate has no dependencies and builds on stable Rust (MSRV 1.96.0).
 
 // Keep the doc-comment cross-references honest: a stale intra-doc link is a
 // hard error under `cargo doc`, so broken references cannot silently rot.
@@ -112,15 +70,12 @@ mod render;
 mod resolve_scopes;
 mod serialize;
 
+pub use self::constructors::{
+    comp, fix, fix_pad, fix_unpad, grp, join_with_commas, join_with_lines, join_with_spaces, line,
+    nest, null, pack, pad, seq, text, unpad,
+};
 pub use self::doc::Doc;
 pub use self::layout::{Break, Layout, Pad};
-pub use self::render::render;
-
-pub use self::constructors::{
-    blank_line, braces, brackets, comma, comp, fix, fix_pad, fix_unpad, format_layout, grp,
-    join_with, join_with_commas, join_with_lines, join_with_spaces, line, nest, newline, null,
-    pack, pad, parens, semicolon, seq, space, text, unpad,
-};
 
 // The pipeline, pass by pass. Every module below owns the representation it
 // produces; this table is the one place the order is stated.
@@ -141,34 +96,26 @@ pub use self::constructors::{
 // as soon as it is serialized. The output [`Doc`] is a flat arena whose
 // `Clone`/`Drop`/`Debug` are derived and non-recursive by construction.
 
-/// Compiles a layout into an optimized document.
-///
-/// Infallible: the pipeline is iterative, so no layout is too deep to compile
-/// and there is no depth cap. Layout depth shows up as O(depth) heap, freed once
-/// compilation returns.
-///
-/// # Examples
-///
-/// ```rust
-/// use typeset::{compile, render, text};
-///
-/// let doc = compile(text("Hello, world!"));
-/// assert_eq!(render(&doc, 2, 80), "Hello, world!");
-/// ```
-pub fn compile(layout: Layout) -> Doc {
-    // The layout's text buffer is borrowed all the way down the pipeline; its
-    // node arena is dead once serialized.
-    let Layout { nodes, text } = layout;
-    let fixed = serialize::serialize(&nodes, &text);
-    drop(nodes);
-    let rebuilt = resolve_scopes::resolve_scopes(&fixed);
-    lower::lower(&rebuilt, &fixed)
-}
-
 impl Layout {
-    /// Compiles this layout into a [`Doc`]; see [`compile`].
+    /// Compiles this layout into a [`Doc`].
+    ///
+    /// Infallible: the pipeline is iterative, so no layout is too deep to
+    /// compile and there is no depth cap. Layout depth shows up as O(depth)
+    /// heap, freed once compilation returns.
+    ///
+    /// ```rust
+    /// use typeset::text;
+    ///
+    /// assert_eq!(text("Hello, world!").compile().render(2, 80), "Hello, world!");
+    /// ```
     pub fn compile(self) -> Doc {
-        compile(self)
+        // The layout's text buffer is borrowed all the way down the pipeline;
+        // its node arena is dead once serialized.
+        let Layout { nodes, text } = self;
+        let fixed = serialize::serialize(&nodes, &text);
+        drop(nodes);
+        let rebuilt = resolve_scopes::resolve_scopes(&fixed);
+        lower::lower(&rebuilt, &fixed)
     }
 }
 
@@ -187,8 +134,8 @@ mod tests {
         for _ in 0..DEEP {
             layout = nest(layout);
         }
-        let doc = compile(layout);
-        let output = render(&doc, 2, 80);
+        let doc = layout.compile();
+        let output = doc.render(2, 80);
         // Pure nesting introduces no line breaks; only leading indentation.
         assert!(!output.contains('\n'));
         assert!(output.ends_with('x'));
@@ -202,8 +149,8 @@ mod tests {
         for _ in 0..DEEP {
             layout = comp(layout, text("b"), Pad::Padded, Break::Breakable);
         }
-        let doc = compile(layout);
-        let output = render(&doc, 2, 1);
+        let doc = layout.compile();
+        let output = doc.render(2, 1);
         assert!(output.contains('\n'));
         assert!(output.ends_with('b'));
     }
@@ -216,8 +163,8 @@ mod tests {
         for _ in 0..DEEP {
             layout = nest(grp(seq(layout)));
         }
-        let doc = compile(layout);
-        assert_eq!(render(&doc, 1, 80).trim_start(), "x");
+        let doc = layout.compile();
+        assert_eq!(doc.render(1, 80).trim_start(), "x");
     }
 
     #[test]
@@ -226,17 +173,17 @@ mod tests {
         for _ in 0..DEEP {
             layout = comp(text("y"), layout, Pad::Unpadded, Break::Fixed);
         }
-        let doc = compile(layout);
-        assert_eq!(render(&doc, 2, 1).len(), DEEP + 1);
+        let doc = layout.compile();
+        assert_eq!(doc.render(2, 1).len(), DEEP + 1);
     }
 
     #[test]
     fn render_is_reusable() {
         let layout = comp(text("hello"), text("world"), Pad::Padded, Break::Breakable);
-        let doc = compile(layout);
+        let doc = layout.compile();
         // Borrowing renders the same document repeatedly without moving it.
-        let a = render(&doc, 2, 5);
-        let b = render(&doc, 2, 80);
+        let a = doc.render(2, 5);
+        let b = doc.render(2, 80);
         assert_eq!(b, "hello world");
         assert!(a.contains('\n'));
     }

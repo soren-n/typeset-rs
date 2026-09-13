@@ -280,10 +280,9 @@ Infix fixed compositions are useful when you need to fix a literal to the beginn
 ## Compiling the layout
 Your custom layout function (pretty printer) will build a layout, which you then need to compile and render:
 ```Rust
-let document = compile(layout);
-let result = render(&document, 2, 80);
+let document = layout.compile();
+let result = document.render(2, 80);
 println!("{result}");
-// or: layout.compile().render(2, 80)
 ```
 I.e. the layout should be given to the compiler, which gives you back a document ready for rendering, which you in turn give to the renderer along with arguments for indentation width and layout buffer width; in the above case indentation width is 2 and the layout buffer width is 80.
 

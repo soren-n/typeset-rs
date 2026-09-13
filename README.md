@@ -16,29 +16,21 @@ cargo add typeset typeset-parser
 ## Quick Start
 
 ```rust
-use typeset::{compile, render, text, comp, nest, grp, Pad, Break};
+use typeset::*;
 
-// Create a simple layout (text accepts &str or String)
-let layout = comp(
-    text("function"),
-    nest(comp(
-        text("name()"),
-        text("{ body }"),
-        Pad::Padded, Break::Breakable
-    )),
-    Pad::Padded, Break::Breakable
-);
+// A call whose arguments align under the first one once they break.
+let args = pack(seq(join_with_commas([text("x"), text("y"), text("z")])));
+let call = unpad(text("f("), unpad(args, text(")")));
 
-// Compile and render with indent width 2, buffer width 40
-let doc = compile(layout);
-let output = render(&doc, 2, 40);
-println!("{}", output);
+// Compile once, render at any tab width and target line width.
+let doc = call.compile();
+assert_eq!(doc.render(2, 80), "f(x, y, z)");
+assert_eq!(doc.render(2, 6), "f(x,\n  y,\n  z)");
 ```
 
 The `typeset-parser` crate provides a procedural macro for more succinct layout definitions:
 
 ```rust
-use typeset::{compile, render};
 use typeset_parser::layout;
 
 let my_layout = layout! {
@@ -46,9 +38,7 @@ let my_layout = layout! {
     pack (seq ("baz" + fragment)) @@
     fix (a + b)
 };
-
-let doc = compile(my_layout);
-let result = render(&doc, 2, 80);
+let result = my_layout.compile().render(2, 80);
 ```
 
 ## Crates
@@ -63,8 +53,8 @@ let result = render(&doc, 2, 80);
 See the [examples](typeset/examples/) directory:
 
 ```bash
-cargo run --example basic -p typeset
 cargo run --example json_formatter -p typeset
+cargo run --example lisp_formatter -p typeset
 cargo run --example code_formatter -p typeset
 cargo run --example full -p typeset-parser
 ```

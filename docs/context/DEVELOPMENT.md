@@ -52,7 +52,6 @@ cargo test --all --all-features
 cd tests && ./run.sh
 
 # Benchmarks (small-input latency + asymptotic scaling suites)
-cargo bench -p typeset --bench layout_performance
 cargo bench -p typeset --bench scaling
 ```
 
@@ -70,12 +69,9 @@ cargo run --example <name> -p typeset          # Layout examples
 
 ### Available Examples
 `typeset`:
-- `basic.rs`: Simple layout construction
-- `dsl_syntax.rs`: DSL syntax demonstration
 - `json_formatter.rs`: JSON pretty printer
 - `lisp_formatter.rs`: Lisp-style formatter
 - `code_formatter.rs`: Source code formatting
-- `convenience_api.rs`: High-level API usage
 - `perf_probe.rs`, `alloc_probe.rs`: profiling probes (see PERFORMANCE.md)
 
 `typeset-parser`:

@@ -21,9 +21,5 @@ typeset-parser.workspace = true
 criterion.workspace = true
 
 [[bench]]
-name = "layout_performance"
-harness = false
-
-[[bench]]
 name = "scaling"
 harness = false

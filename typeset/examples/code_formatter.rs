@@ -1,398 +1,97 @@
+//! A source formatter for a small imperative language: blocks with braces on
+//! their own lines, call arguments that align under the first argument, and
+//! binary operators that break as a unit.
+
 use typeset::*;
 
-/// Example: Source code formatter for a simple imperative language
-/// Demonstrates practical use case with complex layout decisions
-
-#[derive(Debug, Clone)]
-enum Statement {
-    Assignment {
-        var: String,
-        expr: Expression,
-    },
-    If {
-        condition: Expression,
-        then_block: Vec<Statement>,
-        else_block: Option<Vec<Statement>>,
-    },
-    While {
-        condition: Expression,
-        body: Vec<Statement>,
-    },
-    FunctionCall {
-        name: String,
-        args: Vec<Expression>,
-    },
-    #[allow(dead_code)]
-    Return(Option<Expression>),
+enum Expr {
+    Var(&'static str),
+    Num(i64),
+    Str(&'static str),
+    Bin(Box<Expr>, &'static str, Box<Expr>),
+    Call(&'static str, Vec<Expr>),
 }
 
-#[derive(Debug, Clone)]
-enum Expression {
-    Variable(String),
-    Number(i64),
-    String(String),
-    BinaryOp {
-        left: Box<Expression>,
-        op: String,
-        right: Box<Expression>,
-    },
-    FunctionCall {
-        name: String,
-        args: Vec<Expression>,
-    },
+enum Stmt {
+    Assign(&'static str, Expr),
+    Call(&'static str, Vec<Expr>),
+    If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
+    While(Expr, Vec<Stmt>),
 }
 
-/// Format an expression with proper precedence and grouping
-fn format_expression(expr: &Expression) -> Layout {
-    match expr {
-        Expression::Variable(name) => text(name.clone()),
-        Expression::Number(n) => text(n.to_string()),
-        Expression::String(s) => text(format!("\"{}\"", s)),
-
-        Expression::BinaryOp { left, op, right } => {
-            let left_layout = format_expression(left);
-            let op_layout = text(format!(" {} ", op));
-            let right_layout = format_expression(right);
-
-            // Group the binary operation so it breaks as a unit
-            grp(comp(
-                left_layout,
-                comp(op_layout, right_layout, Pad::Unpadded, Break::Breakable),
-                Pad::Unpadded,
-                Break::Breakable,
-            ))
-        }
-
-        Expression::FunctionCall { name, args } => {
-            let name_layout = text(name.clone());
-            let open_paren = text("(");
-            let close_paren = text(")");
-
-            if args.is_empty() {
-                comp(
-                    name_layout,
-                    comp(open_paren, close_paren, Pad::Unpadded, Break::Breakable),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                )
-            } else {
-                let args_layout = format_argument_list(args);
-                comp(
-                    name_layout,
-                    comp(
-                        open_paren,
-                        comp(args_layout, close_paren, Pad::Unpadded, Break::Breakable),
-                        Pad::Unpadded,
-                        Break::Breakable,
-                    ),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                )
-            }
-        }
+fn expr(e: &Expr) -> Layout {
+    match e {
+        Expr::Var(v) => text(*v),
+        Expr::Num(n) => text(n.to_string()),
+        Expr::Str(s) => text(format!("{s:?}")),
+        // The operator stays with its left operand; the group breaks the
+        // operation as a unit.
+        Expr::Bin(l, op, r) => grp(pad(fix_pad(expr(l), text(*op)), expr(r))),
+        Expr::Call(name, args) => call(name, args),
     }
 }
 
-/// Format function arguments with intelligent breaking
-fn format_argument_list(args: &[Expression]) -> Layout {
-    if args.is_empty() {
-        return null();
-    }
-
-    let formatted_args = args.iter().enumerate().fold(null(), |acc, (i, arg)| {
-        let formatted_arg = format_expression(arg);
-        if i == 0 {
-            formatted_arg
-        } else {
-            comp(
-                acc,
-                comp(text(","), formatted_arg, Pad::Padded, Break::Breakable),
-                Pad::Unpadded,
-                Break::Breakable,
-            )
-        }
-    });
-
-    // Pack arguments for nice alignment
-    pack(seq(formatted_args))
+/// `name(args)`: the arguments align under the first once they break, and
+/// each call fits on its own. The opening parenthesis composes breakably so
+/// the first argument keeps its `pack`; the closing one is fixed to the last.
+fn call(name: &str, args: &[Expr]) -> Layout {
+    let args = pack(seq(join_with_commas(args.iter().map(expr))));
+    grp(unpad(text(format!("{name}(")), fix_unpad(args, text(")"))))
 }
 
-/// Format a statement with proper indentation and layout
-fn format_statement(stmt: &Statement) -> Layout {
-    match stmt {
-        Statement::Assignment { var, expr } => {
-            let var_layout = text(var.clone());
-            let assign_op = text(" = ");
-            let expr_layout = format_expression(expr);
-            let semicolon = text(";");
-
-            comp(
-                var_layout,
-                comp(
-                    assign_op,
-                    comp(expr_layout, semicolon, Pad::Unpadded, Break::Breakable),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                ),
-                Pad::Unpadded,
-                Break::Breakable,
-            )
-        }
-
-        Statement::FunctionCall { name, args } => {
-            let call_expr = Expression::FunctionCall {
-                name: name.clone(),
-                args: args.clone(),
-            };
-            comp(
-                format_expression(&call_expr),
-                text(";"),
-                Pad::Unpadded,
-                Break::Breakable,
-            )
-        }
-
-        Statement::Return(maybe_expr) => {
-            let return_kw = text("return");
-            match maybe_expr {
-                None => comp(return_kw, text(";"), Pad::Unpadded, Break::Breakable),
-                Some(expr) => {
-                    let expr_layout = format_expression(expr);
-                    comp(
-                        return_kw,
-                        comp(expr_layout, text(";"), Pad::Padded, Break::Breakable),
-                        Pad::Unpadded,
-                        Break::Breakable,
-                    )
-                }
-            }
-        }
-
-        Statement::If {
-            condition,
-            then_block,
-            else_block,
-        } => {
-            let if_kw = text("if");
-            let open_paren = text(" (");
-            let close_paren = text(") ");
-            let condition_layout = format_expression(condition);
-
-            let condition_part = comp(
-                if_kw,
-                comp(
-                    open_paren,
-                    comp(
-                        condition_layout,
-                        close_paren,
-                        Pad::Unpadded,
-                        Break::Breakable,
-                    ),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                ),
-                Pad::Unpadded,
-                Break::Breakable,
-            );
-
-            let then_part = format_block(then_block);
-
-            match else_block {
-                None => comp(condition_part, then_part, Pad::Unpadded, Break::Breakable),
-                Some(else_stmts) => {
-                    let else_kw = text(" else ");
-                    let else_part = format_block(else_stmts);
-                    comp(
-                        condition_part,
-                        comp(
-                            then_part,
-                            comp(else_kw, else_part, Pad::Unpadded, Break::Breakable),
-                            Pad::Unpadded,
-                            Break::Breakable,
-                        ),
-                        Pad::Unpadded,
-                        Break::Breakable,
-                    )
-                }
-            }
-        }
-
-        Statement::While { condition, body } => {
-            let while_kw = text("while");
-            let open_paren = text(" (");
-            let close_paren = text(") ");
-            let condition_layout = format_expression(condition);
-
-            let condition_part = comp(
-                while_kw,
-                comp(
-                    open_paren,
-                    comp(
-                        condition_layout,
-                        close_paren,
-                        Pad::Unpadded,
-                        Break::Breakable,
-                    ),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                ),
-                Pad::Unpadded,
-                Break::Breakable,
-            );
-
-            let body_part = format_block(body);
-            comp(condition_part, body_part, Pad::Unpadded, Break::Breakable)
-        }
-    }
+/// `(cond)`, the parentheses fixed to the condition.
+fn parens(cond: &Expr) -> Layout {
+    fix_unpad(text("("), fix_unpad(expr(cond), text(")")))
 }
 
-/// Format a block of statements with proper braces and indentation
-fn format_block(statements: &[Statement]) -> Layout {
-    let open_brace = text("{");
-    let close_brace = text("}");
+/// `{`, the statements one per line and indented, `}` on a line of its own.
+fn block(stmts: &[Stmt]) -> Layout {
+    if stmts.is_empty() {
+        return text("{}");
+    }
+    let body = nest(join_with_lines(stmts.iter().map(stmt)));
+    line(line(text("{"), body), text("}"))
+}
 
-    if statements.is_empty() {
-        comp(open_brace, close_brace, Pad::Unpadded, Break::Breakable)
-    } else {
-        let indented_stmts = nest(join_with_lines(statements.iter().map(format_statement)));
-
-        comp(
-            open_brace,
-            comp(
-                line(null(), indented_stmts),
-                line(null(), close_brace),
-                Pad::Unpadded,
-                Break::Breakable,
-            ),
-            Pad::Unpadded,
-            Break::Breakable,
-        )
+fn stmt(s: &Stmt) -> Layout {
+    match s {
+        Stmt::Assign(v, e) => fix_unpad(pad(fix_pad(text(*v), text("=")), expr(e)), text(";")),
+        Stmt::Call(name, args) => fix_unpad(call(name, args), text(";")),
+        Stmt::If(cond, then, otherwise) => {
+            let head = pad(fix_pad(text("if"), parens(cond)), block(then));
+            match otherwise {
+                None => head,
+                Some(stmts) => pad(pad(head, text("else")), block(stmts)),
+            }
+        }
+        Stmt::While(cond, body) => pad(fix_pad(text("while"), parens(cond)), block(body)),
     }
 }
 
 fn main() {
-    println!("=== Source Code Formatter Example ===\n");
-
-    // Simple assignment
-    let assignment = Statement::Assignment {
-        var: "x".to_string(),
-        expr: Expression::BinaryOp {
-            left: Box::new(Expression::Number(10)),
-            op: "+".to_string(),
-            right: Box::new(Expression::Variable("y".to_string())),
-        },
-    };
-
-    println!("Simple assignment:");
-    println!("{}", render(&compile(format_statement(&assignment)), 2, 40));
-
-    // Function call with multiple arguments
-    let func_call = Statement::FunctionCall {
-        name: "printf".to_string(),
-        args: vec![
-            Expression::String("Hello, %s! You are %d years old.".to_string()),
-            Expression::Variable("name".to_string()),
-            Expression::Variable("age".to_string()),
-        ],
-    };
-
-    println!("\nFunction call (wide):");
-    println!("{}", render(&compile(format_statement(&func_call)), 2, 80));
-
-    println!("\nFunction call (narrow):");
-    println!("{}", render(&compile(format_statement(&func_call)), 2, 30));
-
-    // Complex if statement
-    let if_stmt = Statement::If {
-        condition: Expression::BinaryOp {
-            left: Box::new(Expression::Variable("x".to_string())),
-            op: ">".to_string(),
-            right: Box::new(Expression::Number(0)),
-        },
-        then_block: vec![
-            Statement::Assignment {
-                var: "result".to_string(),
-                expr: Expression::FunctionCall {
-                    name: "calculate".to_string(),
-                    args: vec![
-                        Expression::Variable("x".to_string()),
-                        Expression::Number(42),
+    use Expr::{Bin, Call, Num, Str, Var};
+    let bin = |l, op, r| Bin(Box::new(l), op, Box::new(r));
+    let program = Stmt::While(
+        bin(Var("i"), "<", Var("max_iterations")),
+        vec![
+            Stmt::If(
+                bin(Call("is_prime", vec![Var("i")]), "==", Num(1)),
+                vec![Stmt::Call("add_to_list", vec![Var("primes"), Var("i")])],
+                Some(vec![Stmt::Call(
+                    "log",
+                    vec![
+                        Str("not prime: %d, checked %d so far"),
+                        Var("i"),
+                        Var("checked"),
                     ],
-                },
-            },
-            Statement::FunctionCall {
-                name: "print".to_string(),
-                args: vec![Expression::Variable("result".to_string())],
-            },
+                )]),
+            ),
+            Stmt::Assign("i", bin(Var("i"), "+", Num(1))),
         ],
-        else_block: Some(vec![Statement::FunctionCall {
-            name: "print".to_string(),
-            args: vec![Expression::String("x is not positive".to_string())],
-        }]),
-    };
-
-    println!("\n=== Complex If Statement ===");
-
-    println!("\nWide format (80 chars):");
-    println!("{}", render(&compile(format_statement(&if_stmt)), 2, 80));
-
-    println!("\nNarrow format (40 chars):");
-    println!("{}", render(&compile(format_statement(&if_stmt)), 2, 40));
-
-    // Nested control flow
-    let nested_stmt = Statement::While {
-        condition: Expression::BinaryOp {
-            left: Box::new(Expression::Variable("i".to_string())),
-            op: "<".to_string(),
-            right: Box::new(Expression::Variable("max_iterations".to_string())),
-        },
-        body: vec![
-            Statement::If {
-                condition: Expression::BinaryOp {
-                    left: Box::new(Expression::FunctionCall {
-                        name: "is_prime".to_string(),
-                        args: vec![Expression::Variable("i".to_string())],
-                    }),
-                    op: "==".to_string(),
-                    right: Box::new(Expression::Number(1)),
-                },
-                then_block: vec![Statement::FunctionCall {
-                    name: "add_to_list".to_string(),
-                    args: vec![
-                        Expression::Variable("primes".to_string()),
-                        Expression::Variable("i".to_string()),
-                    ],
-                }],
-                else_block: None,
-            },
-            Statement::Assignment {
-                var: "i".to_string(),
-                expr: Expression::BinaryOp {
-                    left: Box::new(Expression::Variable("i".to_string())),
-                    op: "+".to_string(),
-                    right: Box::new(Expression::Number(1)),
-                },
-            },
-        ],
-    };
-
-    println!("\n=== Nested Control Flow ===");
-
-    println!("\nWide format (100 chars):");
-    println!(
-        "{}",
-        render(&compile(format_statement(&nested_stmt)), 2, 100)
     );
 
-    println!("\nMedium format (60 chars):");
-    println!(
-        "{}",
-        render(&compile(format_statement(&nested_stmt)), 2, 60)
-    );
-
-    println!("\nNarrow format (30 chars):");
-    println!(
-        "{}",
-        render(&compile(format_statement(&nested_stmt)), 2, 30)
-    );
+    let doc = stmt(&program).compile();
+    for width in [100, 50, 24] {
+        println!("--- width {width}\n{}", doc.render(4, width));
+    }
 }

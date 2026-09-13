@@ -298,36 +298,27 @@ impl<'a> Renderer<'a> {
     }
 }
 
-/// Renders a compiled document to a formatted string.
-///
-/// Rendering only reads the document, so the same [`Doc`] can be rendered
-/// repeatedly (e.g. at several widths) without cloning or recompiling it.
-///
-/// `tab` is the number of spaces per indentation level. `width` is the target
-/// line width, counted in `char`s (not display columns — East Asian wide
-/// characters and emoji count as one, so text using them renders wider than the
-/// requested width). Use a very large width (e.g. 10000) to disable wrapping.
-///
-/// # Examples
-///
-/// ```rust
-/// use typeset::{compile, render, text, comp, Pad, Break};
-///
-/// let doc = compile(comp(
-///     text("hello"),
-///     text("world"),
-///     Pad::Padded, Break::Breakable,
-/// ));
-/// // Render at several widths without moving the document.
-/// assert!(render(&doc, 2, 5).contains('\n'));
-/// assert_eq!(render(&doc, 2, 80), "hello world");
-/// ```
-pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
-    doc.render(tab, width)
-}
-
 impl Doc {
-    /// Renders this document; see [`render`].
+    /// Renders this document to a formatted string.
+    ///
+    /// Rendering only reads the document, so the same [`Doc`] can be rendered
+    /// repeatedly (e.g. at several widths) without cloning or recompiling it.
+    ///
+    /// `tab` is the number of spaces per indentation level. `width` is the
+    /// target line width, counted in `char`s (not display columns — East
+    /// Asian wide characters and emoji count as one, so text using them
+    /// renders wider than the requested width). It is a target, not a limit:
+    /// a run wider than it still renders on one line. Use a very large width
+    /// to disable wrapping.
+    ///
+    /// ```rust
+    /// use typeset::*;
+    ///
+    /// let doc = pad(text("hello"), text("world")).compile();
+    /// // Render at several widths without moving the document.
+    /// assert_eq!(doc.render(2, 5), "hello\nworld");
+    /// assert_eq!(doc.render(2, 80), "hello world");
+    /// ```
     pub fn render(&self, tab: usize, width: usize) -> String {
         Renderer::new(self, Config { width, tab }).render()
     }

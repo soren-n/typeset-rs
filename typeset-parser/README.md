@@ -10,15 +10,15 @@ typeset-parser = "5"
 ```
 
 ```rust
-use typeset::{compile, render, text};
+use typeset::text;
 use typeset_parser::layout;
 
 let name = text("Alice");
-let doc = compile(layout! {
+let layout = layout! {
     "Hello" + name @
     nest ("Indented" + "content")
-});
-println!("{}", render(&doc, 2, 40));
+};
+println!("{}", layout.compile().render(2, 40));
 ```
 
 The same language is available at run time as `typeset::dsl::parse`, minus

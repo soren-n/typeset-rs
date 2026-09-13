@@ -166,12 +166,12 @@ fn main() {
 
     let before = snap();
     let t = Instant::now();
-    let doc = compile(layout);
+    let doc = layout.compile();
     report("compile", before, t.elapsed().as_nanos(), nodes);
 
     let before = snap();
     let t = Instant::now();
-    let out = render(&doc, 2, width);
+    let out = doc.render(2, width);
     report("render", before, t.elapsed().as_nanos(), nodes);
     std::hint::black_box(out);
 }

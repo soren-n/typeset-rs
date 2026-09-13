@@ -84,7 +84,7 @@ impl LayoutNode {
     }
 }
 
-/// A layout: the input to [`compile`](crate::compile). Built with the
+/// A layout: the input to [`Layout::compile`]. Built with the
 /// constructor functions ([`text`](crate::text), [`comp`](crate::comp),
 /// [`nest`](crate::nest), ...); never inspected directly.
 ///

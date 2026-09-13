@@ -1,208 +1,62 @@
+//! An S-expression pretty printer in the classic Lisp style: the arguments of
+//! a call align under its first argument, so a broken call reads
+//!
+//! ```text
+//! (defun factorial (n)
+//!        (if (<= n 1) 1 (* n (factorial (- n 1)))))
+//! ```
+//!
+//! `pack` records the column of the first argument and indents the rest to
+//! it; `seq` puts every argument on its own line once one breaks; `grp`
+//! lets each nested call fit on its own.
+
 use typeset::*;
 
-/// Example: Lisp S-expression pretty printer
-/// Demonstrates advanced layout techniques like pack() for aligned indentation
-
-#[derive(Debug, Clone)]
 enum SExpr {
-    Atom(String),
+    Atom(&'static str),
     List(Vec<SExpr>),
 }
 
-/// Format an S-expression with proper Lisp-style indentation
-/// Uses pack() to align subsequent arguments to the first argument position
-fn format_sexpr(expr: &SExpr) -> Layout {
+fn layout(expr: &SExpr) -> Layout {
     match expr {
-        SExpr::Atom(s) => text(s.clone()),
-        SExpr::List(exprs) => {
-            if exprs.is_empty() {
-                text("()")
-            } else {
-                let open_paren = text("(");
-                let close_paren = text(")");
-
-                // Format all expressions
-                let first = format_sexpr(&exprs[0]);
-
-                if exprs.len() == 1 {
-                    // Single item: (item)
-                    comp(
-                        open_paren,
-                        comp(first, close_paren, Pad::Unpadded, Break::Breakable),
-                        Pad::Unpadded,
-                        Break::Breakable,
-                    )
-                } else {
-                    // Multiple items: use pack for alignment
-                    let rest = join_with_spaces(exprs[1..].iter().map(format_sexpr));
-
-                    // Pack aligns subsequent lines to the first argument
-                    let args = pack(comp(first, rest, Pad::Padded, Break::Breakable));
-
-                    comp(
-                        open_paren,
-                        comp(args, close_paren, Pad::Unpadded, Break::Breakable),
-                        Pad::Unpadded,
-                        Break::Breakable,
-                    )
-                }
+        SExpr::Atom(s) => text(*s),
+        SExpr::List(items) => match items.as_slice() {
+            [] => text("()"),
+            [head] => fix_unpad(text("("), fix_unpad(layout(head), text(")"))),
+            [head, args @ ..] => {
+                let args = pack(seq(join_with_spaces(args.iter().map(layout))));
+                grp(pad(
+                    fix_unpad(text("("), layout(head)),
+                    fix_unpad(args, text(")")),
+                ))
             }
-        }
-    }
-}
-
-/// Alternative formatter using sequence semantics for different style
-fn format_sexpr_sequence(expr: &SExpr) -> Layout {
-    match expr {
-        SExpr::Atom(s) => text(s.clone()),
-        SExpr::List(exprs) => {
-            if exprs.is_empty() {
-                text("()")
-            } else {
-                let open_paren = text("(");
-                let close_paren = text(")");
-
-                // Build sequence of all items
-                let mut items = null();
-                for (i, expr) in exprs.iter().enumerate() {
-                    let formatted = format_sexpr_sequence(expr);
-                    items = if i == 0 {
-                        formatted
-                    } else {
-                        comp(items, formatted, Pad::Padded, Break::Breakable)
-                    };
-                }
-
-                // Use sequence so all items break together
-                let content = seq(items);
-                let indented = nest(content);
-
-                comp(
-                    open_paren,
-                    comp(indented, close_paren, Pad::Unpadded, Break::Breakable),
-                    Pad::Unpadded,
-                    Break::Breakable,
-                )
-            }
-        }
+        },
     }
 }
 
 fn main() {
-    println!("=== Lisp S-Expression Pretty Printer ===\n");
-
-    // Simple expressions
-    let atom = SExpr::Atom("hello".to_string());
-    let simple_list = SExpr::List(vec![
-        SExpr::Atom("+".to_string()),
-        SExpr::Atom("1".to_string()),
-        SExpr::Atom("2".to_string()),
-        SExpr::Atom("3".to_string()),
-    ]);
-
-    println!("Atom: {}", render(&compile(format_sexpr(&atom)), 2, 40));
-    println!(
-        "Simple list (wide): {}",
-        render(&compile(format_sexpr(&simple_list)), 2, 40)
-    );
-    println!(
-        "Simple list (narrow): {}",
-        render(&compile(format_sexpr(&simple_list)), 2, 10)
-    );
-
-    // Nested expressions
-    let nested = SExpr::List(vec![
-        SExpr::Atom("defun".to_string()),
-        SExpr::Atom("factorial".to_string()),
-        SExpr::List(vec![SExpr::Atom("n".to_string())]),
-        SExpr::List(vec![
-            SExpr::Atom("if".to_string()),
-            SExpr::List(vec![
-                SExpr::Atom("<=".to_string()),
-                SExpr::Atom("n".to_string()),
-                SExpr::Atom("1".to_string()),
-            ]),
-            SExpr::Atom("1".to_string()),
-            SExpr::List(vec![
-                SExpr::Atom("*".to_string()),
-                SExpr::Atom("n".to_string()),
-                SExpr::List(vec![
-                    SExpr::Atom("factorial".to_string()),
-                    SExpr::List(vec![
-                        SExpr::Atom("-".to_string()),
-                        SExpr::Atom("n".to_string()),
-                        SExpr::Atom("1".to_string()),
-                    ]),
+    use SExpr::{Atom, List};
+    let factorial = List(vec![
+        Atom("defun"),
+        Atom("factorial"),
+        List(vec![Atom("n")]),
+        List(vec![
+            Atom("if"),
+            List(vec![Atom("<="), Atom("n"), Atom("1")]),
+            Atom("1"),
+            List(vec![
+                Atom("*"),
+                Atom("n"),
+                List(vec![
+                    Atom("factorial"),
+                    List(vec![Atom("-"), Atom("n"), Atom("1")]),
                 ]),
             ]),
         ]),
     ]);
 
-    println!("\n=== Nested Function Definition ===");
-
-    println!("\nPack-aligned style (wide):");
-    println!("{}", render(&compile(format_sexpr(&nested)), 2, 80));
-
-    println!("\nPack-aligned style (medium):");
-    println!("{}", render(&compile(format_sexpr(&nested)), 2, 40));
-
-    println!("\nPack-aligned style (narrow):");
-    println!("{}", render(&compile(format_sexpr(&nested)), 2, 20));
-
-    println!("\n=== Sequence-aligned style (alternative) ===");
-
-    println!("\nSequence style (wide):");
-    println!(
-        "{}",
-        render(&compile(format_sexpr_sequence(&nested)), 2, 80)
-    );
-
-    println!("\nSequence style (narrow):");
-    println!(
-        "{}",
-        render(&compile(format_sexpr_sequence(&nested)), 2, 30)
-    );
-
-    // Complex data structure
-    let complex = SExpr::List(vec![
-        SExpr::Atom("let".to_string()),
-        SExpr::List(vec![
-            SExpr::List(vec![
-                SExpr::Atom("x".to_string()),
-                SExpr::List(vec![
-                    SExpr::Atom("+".to_string()),
-                    SExpr::Atom("a".to_string()),
-                    SExpr::Atom("very-long-variable-name".to_string()),
-                ]),
-            ]),
-            SExpr::List(vec![
-                SExpr::Atom("y".to_string()),
-                SExpr::List(vec![
-                    SExpr::Atom("*".to_string()),
-                    SExpr::Atom("b".to_string()),
-                    SExpr::Atom("another-long-name".to_string()),
-                ]),
-            ]),
-        ]),
-        SExpr::List(vec![
-            SExpr::Atom("format".to_string()),
-            SExpr::Atom("t".to_string()),
-            SExpr::Atom("\"Result: ~A~%\"".to_string()),
-            SExpr::List(vec![
-                SExpr::Atom("+".to_string()),
-                SExpr::Atom("x".to_string()),
-                SExpr::Atom("y".to_string()),
-            ]),
-        ]),
-    ]);
-
-    println!("\n=== Complex Let Expression ===");
-    println!("\nComplex (pack style, 50 chars):");
-    println!("{}", render(&compile(format_sexpr(&complex)), 2, 50));
-
-    println!("\nComplex (sequence style, 50 chars):");
-    println!(
-        "{}",
-        render(&compile(format_sexpr_sequence(&complex)), 2, 50)
-    );
+    let doc = layout(&factorial).compile();
+    for width in [80, 40, 20] {
+        println!("--- width {width}\n{}", doc.render(2, width));
+    }
 }
