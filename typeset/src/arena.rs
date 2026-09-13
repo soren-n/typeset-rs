@@ -105,14 +105,6 @@ impl<T> Arena<T> {
             .map(|(i, item)| (Id::from_index(i), item))
     }
 
-    /// Every id in order. The iterator does not borrow the arena, so the
-    /// arena may be mutated while iterating.
-    pub(crate) fn ids(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = Id<T>> + ExactSizeIterator + use<T> {
-        (0..self.items.len()).map(Id::from_index)
-    }
-
     /// Appends every element of `other`, passed through `map` (which
     /// typically shifts the element's ids by this arena's former length).
     pub(crate) fn append(&mut self, other: Arena<T>, map: impl FnMut(T) -> T) {
@@ -183,6 +175,13 @@ impl<K, V> IdVec<K, V> {
     /// Appends the value for the next id in order.
     pub(crate) fn push(&mut self, value: V) {
         self.items.push(value);
+    }
+
+    /// Every id in order. The iterator does not borrow the table.
+    pub(crate) fn ids(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = Id<K>> + ExactSizeIterator + use<K, V> {
+        (0..self.items.len()).map(Id::from_index)
     }
 }
 

@@ -14,14 +14,13 @@
 //!   path arena, so a term is just (path id, text) and sibling leaves share
 //!   their path spine.
 //! - Each `grp`/`seq` descended through pushes one node onto a parent-linked
-//!   scope-chain arena (assigning the scope's index in DFS pre-order). A
-//!   composition records how the chain changed since the previous composition
-//!   on its line — the scopes that *open* and *close* at it — by diffing the
-//!   two chains along their shared spine, which is O(delta), so deeply nested
-//!   scopes stay linear.
+//!   scope-chain arena. A composition records how the chain changed since the
+//!   previous composition on its line — the scopes that *open* and how many
+//!   *close* at it — by diffing the two chains along their shared spine,
+//!   which is O(delta), so deeply nested scopes stay linear.
 //!
-//! Scope and pack indices are DFS pre-order counters; `resolve_scopes` keys
-//! the scope graph by scope index.
+//! Pack indices are DFS pre-order counters, dense so the renderer keys its
+//! marks by plain index.
 
 use crate::arena::{Arena, Id, IdVec, Range, append_range};
 use crate::layout::{Attr, Break, LayId, LayoutNode, Pad};
@@ -54,35 +53,29 @@ pub(crate) struct Term<'a> {
     pub(crate) text: &'a str,
 }
 
-/// A grp or seq scope, identified by the index `serialize` assigns it in
-/// document pre-order. Each composition point records which scopes *open* and
-/// which *close* at it, relative to the previous composition on the same line;
-/// `resolve_scopes` replays those deltas to rebuild the scope graph.
-///
-/// Carrying open/close deltas (total size O(number of scopes)) rather than each
-/// composition's full enclosing scope stack (O(depth) per composition) is what
-/// keeps the grp/seq passes linear on deeply nested scopes.
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct Scope {
-    pub(crate) kind: ScopeKind,
-    pub(crate) index: u32,
-}
-
-/// Which of the two breaking disciplines a scope imposes: `Grp` breaks its
-/// compositions all-or-nothing, `Seq` cascades a break forward.
+/// Which of the two breaking disciplines a grp/seq scope imposes: `Grp`
+/// breaks its compositions all-or-nothing, `Seq` cascades a break forward.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum ScopeKind {
     Grp,
     Seq,
 }
 
-/// A composition between two terms: its padding and the scopes opening and
-/// closing here (ranges into the document's shared scope buffer).
+/// A composition between two terms: its padding and how the enclosing grp/seq
+/// scopes changed since the previous composition on the line. Scopes nest, so
+/// the open scopes at any point form a stack: `closes` scopes pop off it and
+/// `opens` (outermost first, a range into the document's shared scope buffer)
+/// push onto it. `resolve_scopes` replays these deltas to build the scope
+/// graph.
+///
+/// Carrying deltas (total size O(number of scopes)) rather than each
+/// composition's full enclosing scope stack (O(depth) per composition) is what
+/// keeps the grp/seq passes linear on deeply nested scopes.
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct FixedComp {
     pub(crate) pad: Pad,
-    pub(crate) opens: Range<Scope>,
-    pub(crate) closes: Range<Scope>,
+    pub(crate) opens: Range<ScopeKind>,
+    pub(crate) closes: u32,
 }
 
 /// One item of a line: a maximal run of terms joined by fixed compositions,
@@ -119,8 +112,8 @@ pub(crate) struct FixedDoc<'a> {
     pub(crate) run_seps: Vec<FixedComp>,
     /// The shared nest/pack path arena every [`Term`]'s `path` points into.
     pub(crate) paths: Arena<PathNode>,
-    /// The shared scope buffer every delta ranges into.
-    pub(crate) scopes: Vec<Scope>,
+    /// The shared scope buffer every composition's `opens` ranges into.
+    pub(crate) scopes: Vec<ScopeKind>,
 }
 
 /// A scope-chain accumulator: the innermost enclosing grp/seq wrapper, `None`
@@ -134,7 +127,7 @@ type ChainId = Option<Id<ChainNode>>;
 /// the shared id.
 #[derive(Copy, Clone)]
 struct ChainNode {
-    scope: Scope,
+    kind: ScopeKind,
     parent: ChainId,
     depth: u32,
 }
@@ -227,15 +220,32 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
         has_line.push(flag);
     }
 
-    let mut scope_count: u32 = 0;
     let mut pack_count: u32 = 0;
-    let mut paths: Arena<PathNode> = Arena::new();
     let mut chains: Arena<ChainNode> = Arena::new();
-    // Each leaf, in document order, with its glue.
-    let mut leaves: Vec<(Glue, Term<'a>)> = Vec::new();
+    let mut acc = LineAccum {
+        doc: FixedDoc {
+            lines: Vec::new(),
+            items: Vec::new(),
+            item_seps: Vec::new(),
+            terms: Vec::new(),
+            run_seps: Vec::new(),
+            paths: Arena::new(),
+            scopes: Vec::new(),
+        },
+        line_items_start: 0,
+        line_seps_start: 0,
+        run_terms_start: 0,
+        run_seps_start: 0,
+    };
+    // Scratch for one composition's opens, reused across compositions.
+    let mut opens: Vec<ScopeKind> = Vec::new();
+    // The chain of the previous composition *on the same line*: grp/seq
+    // scopes never cross a hard line, so it resets at every line.
+    let mut prev: ChainId = None;
 
     // Pushing the right child before the left makes the left pop (and fully
-    // process) first, so the counters advance in left-to-right pre-order.
+    // process) first, so leaves are emitted in document order and the pack
+    // counter advances in left-to-right pre-order.
     let mut stack: Vec<Work> = vec![Work {
         node: Id::from_index(nodes.len() - 1),
         path: None,
@@ -255,8 +265,35 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
         } = work;
         match &nodes[node] {
             LayoutNode::Text(range) => {
-                let text = range.slice(text);
-                leaves.push((glue, Term { path, text }));
+                let term = Term {
+                    path,
+                    text: range.slice(text),
+                };
+                match glue {
+                    Glue::Line => {
+                        prev = None;
+                        acc.flush_line(term);
+                    }
+                    Glue::Comp { chain, attr } => {
+                        opens.clear();
+                        let closes = diff_chains(&chains, prev, chain, &mut opens);
+                        prev = chain;
+                        // The diff walks the chain innermost-first; the delta
+                        // lists opens outermost-first, in stack order.
+                        opens.reverse();
+                        let comp = FixedComp {
+                            pad: attr.pad,
+                            opens: append_range(&mut acc.doc.scopes, &opens),
+                            closes,
+                        };
+                        if attr.brk == Break::Fixed {
+                            acc.push_fixed(term, comp);
+                        } else {
+                            acc.push_item(term);
+                            acc.doc.item_seps.push(comp);
+                        }
+                    }
+                }
             }
             LayoutNode::Fix(child) => stack.push(Work {
                 node: *child,
@@ -280,14 +317,9 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
                     LayoutNode::Grp(_) => ScopeKind::Grp,
                     _ => ScopeKind::Seq,
                 };
-                let scope = Scope {
-                    kind,
-                    index: scope_count,
-                };
-                scope_count += 1;
                 let depth = chain.map_or(0, |id| chains[id].depth) + 1;
                 let id = chains.push(ChainNode {
-                    scope,
+                    kind,
                     parent: chain,
                     depth,
                 });
@@ -309,7 +341,7 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
                         Prop::Pack(index)
                     }
                 };
-                let id = paths.push(PathNode { prop, parent: path });
+                let id = acc.doc.paths.push(PathNode { prop, parent: path });
                 stack.push(Work {
                     node: *child,
                     path: Some(id),
@@ -371,94 +403,46 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
         }
     }
 
-    // Lay the leaves out as lines, resolving each composition's scope deltas
-    // against the previous composition's chain *on the same line*: grp/seq
-    // scopes never cross a hard line, so the chain resets at every line.
-    let mut acc = LineAccum {
-        doc: FixedDoc {
-            lines: Vec::new(),
-            items: Vec::new(),
-            item_seps: Vec::new(),
-            terms: Vec::new(),
-            run_seps: Vec::new(),
-            paths,
-            scopes: Vec::new(),
-        },
-        line_items_start: 0,
-        line_seps_start: 0,
-        run_terms_start: 0,
-        run_seps_start: 0,
-    };
-    // Scratch for one composition's deltas, reused across compositions.
-    let mut opens: Vec<Scope> = Vec::new();
-    let mut closes: Vec<Scope> = Vec::new();
-    let mut prev: ChainId = None;
-    for &(glue, term) in &leaves {
-        match glue {
-            Glue::Line => {
-                prev = None;
-                acc.flush_line(term);
-            }
-            Glue::Comp { chain, attr } => {
-                opens.clear();
-                closes.clear();
-                diff_chains(&chains, prev, chain, &mut opens, &mut closes);
-                prev = chain;
-                let comp = FixedComp {
-                    pad: attr.pad,
-                    opens: append_range(&mut acc.doc.scopes, &opens),
-                    closes: append_range(&mut acc.doc.scopes, &closes),
-                };
-                if attr.brk == Break::Fixed {
-                    acc.push_fixed(term, comp);
-                } else {
-                    acc.push_item(term);
-                    acc.doc.item_seps.push(comp);
-                }
-            }
-        }
-    }
     acc.doc
 }
 
-/// Diffs two scope chains (innermost-first, sharing an outer spine by id)
-/// into the scopes that *open* (in `cur`, not `prev`) and *close* (in `prev`,
-/// not `cur`), appended to the caller's scratch. Order within each delta is
-/// irrelevant: `resolve_scopes` keys scopes by index.
+/// Diffs two scope chains (innermost-first, sharing an outer spine by id):
+/// the scopes that *open* (in `cur`, not `prev`) are appended innermost-first
+/// to the caller's scratch, and the number that *close* (in `prev`, not
+/// `cur`) is returned.
 fn diff_chains(
     chains: &Arena<ChainNode>,
     prev: ChainId,
     cur: ChainId,
-    opens: &mut Vec<Scope>,
-    closes: &mut Vec<Scope>,
-) {
+    opens: &mut Vec<ScopeKind>,
+) -> u32 {
     let depth = |id: ChainId| id.map_or(0, |id| chains[id].depth);
     let mut a = prev; // contributes closes
     let mut b = cur; // contributes opens
     let (mut da, mut db) = (depth(a), depth(b));
+    let mut closes = 0;
     // Drop the deeper chain's excess head down to the shallower chain's depth.
     while da > db {
-        let node = chains[a.expect("deeper chain is non-empty")];
-        closes.push(node.scope);
-        a = node.parent;
+        closes += 1;
+        a = chains[a.expect("deeper chain is non-empty")].parent;
         da -= 1;
     }
     while db > da {
         let node = chains[b.expect("deeper chain is non-empty")];
-        opens.push(node.scope);
+        opens.push(node.kind);
         b = node.parent;
         db -= 1;
     }
     // Equal depth: step in lockstep until the shared spine — the first id both
     // chains agree on (or both `None`) — everything above it differs.
     while a != b {
-        let na = chains[a.expect("chains of equal depth")];
         let nb = chains[b.expect("chains of equal depth")];
-        closes.push(na.scope);
-        opens.push(nb.scope);
-        a = na.parent;
+        closes += 1;
+        opens.push(nb.kind);
+        a = chains[a.expect("chains of equal depth")].parent;
         b = nb.parent;
     }
+    closes
 }
 
 #[cfg(test)]
@@ -515,6 +499,7 @@ mod tests {
         let doc = run(&layout);
         assert_eq!(doc.lines.len(), 3);
         assert!(doc.scopes.is_empty());
+        assert!(doc.item_seps.is_empty());
     }
 
     #[test]
@@ -559,15 +544,8 @@ mod tests {
         let [sep] = seps else {
             panic!("expected one separator")
         };
-        let opens = sep.opens.slice(&doc.scopes);
-        assert!(matches!(
-            opens,
-            [Scope {
-                kind: ScopeKind::Seq,
-                index: 0
-            }]
-        ));
-        assert!(sep.closes.slice(&doc.scopes).is_empty());
+        assert_eq!(sep.opens.slice(&doc.scopes), [ScopeKind::Seq]);
+        assert_eq!(sep.closes, 0);
     }
 
     #[test]
@@ -584,8 +562,25 @@ mod tests {
         assert_eq!(texts(&doc, items), ["a", "b", "c"]);
         assert_eq!(seps.len(), 2);
         assert_eq!(seps[0].opens.len(), 1);
-        assert_eq!(seps[1].closes.len(), 1);
+        assert_eq!(seps[1].closes, 1);
         assert_eq!(seps[1].opens.len(), 0);
+    }
+
+    #[test]
+    fn opens_are_listed_outermost_first() {
+        // grp(seq(a + b)): both open at comp(a, b), the grp outside the seq.
+        let layout = grp(seq(comp(
+            text("a"),
+            text("b"),
+            Pad::Padded,
+            Break::Breakable,
+        )));
+        let doc = run(&layout);
+        let (_, seps) = one_line(&doc);
+        assert_eq!(
+            seps[0].opens.slice(&doc.scopes),
+            [ScopeKind::Grp, ScopeKind::Seq]
+        );
     }
 
     #[test]
