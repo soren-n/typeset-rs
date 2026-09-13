@@ -5,7 +5,7 @@ Thank you for your interest in contributing! This guide will help you understand
 ## Development Setup
 
 1. **Prerequisites**
-   - Rust (stable toolchain, MSRV 1.89.0)
+   - Rust (stable toolchain, MSRV 1.96.0)
    - OCaml and opam (for tests)
    - Git
 

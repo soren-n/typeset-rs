@@ -27,6 +27,7 @@ by the previous automated release tooling.
 
 ### Changed
 
+* MSRV raised from 1.89.0 to 1.96.0.
 * `Layout` clones and drops in constant allocations regardless of size
   (previously one allocation per node), and compiles ~30% faster on tree
   shaped documents because there is no input tree to dismantle.

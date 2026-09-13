@@ -96,7 +96,7 @@
 //!
 //! ## Rust Version Compatibility
 //!
-//! This crate builds on stable Rust (MSRV: 1.89.0).
+//! This crate builds on stable Rust (MSRV: 1.96.0).
 
 // Keep the doc-comment cross-references honest: a stale intra-doc link is a
 // hard error under `cargo doc`, so broken references cannot silently rot.

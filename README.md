@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/typeset)](https://crates.io/crates/typeset)
 [![docs.rs](https://img.shields.io/docsrs/typeset)](https://docs.rs/typeset)
 [![CI](https://github.com/soren-n/typeset-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/soren-n/typeset-rs/actions/workflows/ci.yml)
-[![MSRV](https://img.shields.io/badge/MSRV-1.89.0-blue)](https://github.com/soren-n/typeset-rs)
+[![MSRV](https://img.shields.io/badge/MSRV-1.96.0-blue)](https://github.com/soren-n/typeset-rs)
 
 An embedded DSL for defining source code pretty printers. The layout language is designed to fit naturally over a structurally recursive pass of some inductive data-structure. A layout is a tree of text literals composed with padded/unpadded compositions or line-breaks; the solver greedily fits as many literals per line as possible while respecting grouping, sequencing, and indentation properties.
 

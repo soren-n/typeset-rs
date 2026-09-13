@@ -20,7 +20,7 @@ jobs:
           - rust: stable
             check_fmt: true
             check_clippy: true
-          - rust: "1.89.0"
+          - rust: "1.96.0"
             check_fmt: false
             check_clippy: false
     steps:

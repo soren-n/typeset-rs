@@ -154,7 +154,7 @@ The OCaml tests validate properties like:
 Tests run automatically on:
 - Every commit (via git hooks, once installed with `./scripts/install-hooks.sh`)
 - Pull requests and pushes to `main` (via GitHub Actions)
-- Multiple Rust versions (stable, MSRV 1.89.0)
+- Multiple Rust versions (stable, MSRV 1.96.0)
 - License and advisory policy (`cargo deny`)
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) runs two jobs that gate

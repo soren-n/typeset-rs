@@ -24,7 +24,7 @@ The project uses GitHub Actions workflows for continuous integration, releases, 
   guard against silent renderer divergence, which uniform QCheck rarely catches.
 
 **Matrix Testing**:
-- Rust stable (all gates) and MSRV 1.89.0 (`cargo check` + `cargo test` only;
+- Rust stable (all gates) and MSRV 1.96.0 (`cargo check` + `cargo test` only;
   fmt/clippy/doc run on stable alone so new lints never break the MSRV job)
 - Linux only
 
