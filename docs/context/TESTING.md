@@ -31,14 +31,14 @@ custom data structures were removed along with those structures.)
 
 - `rendering.rs`: exact-output tests. Every expected string was produced by
   the OCaml oracle for the same layout, tab and width; add new cases the same
-  way (`tests/_build/oracle '<dsl>' <tab> <width>`), never by pasting what the
+  way (`oracle/_build/oracle '<dsl>' <tab> <width>`), never by pasting what the
   Rust implementation printed
 - `scaling.rs`: the one wall-clock assertion, an order-of-magnitude guard
   that nested scopes compile in linear time
 - `unicode_width_tests.rs`: widths are counted in characters
 
 ### 3. OCaml Property-Based Tests
-**Location**: `tests/tester/`
+**Location**: `oracle/tester/`
 
 **Purpose**:
 - Cross-language validation against reference OCaml typeset implementation
@@ -54,10 +54,10 @@ for that.
 
 ### 4. Differential Tools
 
-**Location**: `tests/compare.sh`, `tests/fuzz.py`, `tests/tester/bin/oracle.ml`
+**Location**: `oracle/compare.sh`, `tests/fuzz.py`, `oracle/tester/bin/oracle.ml`
 
 `oracle.ml` parses the same DSL grammar as `typeset::dsl` and renders it
-through the OCaml reference; `tests/differential` is the Rust driver, so a
+through the OCaml reference; `oracle/driver` is the Rust driver, so a
 single expression can be compared directly instead of waiting for the generator
 to stumble onto it. Both wrappers expect to run from `tests/` after `./build.sh`.
 
@@ -79,8 +79,8 @@ rather than padding the input with long strings.
 
 ### Complete Test Suite
 ```bash
-cd tests && ./build.sh        # Build both Rust and OCaml test infrastructure  
-cd tests && ./run.sh          # Run all tests
+cd oracle && ./build.sh        # Build both Rust and OCaml test infrastructure  
+cd oracle && ./run.sh          # Run all tests
 ```
 
 ### Rust Tests Only
@@ -90,7 +90,7 @@ cargo test --all --all-features
 
 ### OCaml Tests Only
 ```bash
-cd tests/tester && dune exec ./bin/main.exe
+cd oracle/tester && dune exec ./bin/main.exe
 ```
 
 ### Performance Tests
@@ -103,8 +103,8 @@ See [PERFORMANCE.md](PERFORMANCE.md) for the benchmarking/profiling guide.
 ## Test Infrastructure
 
 ### Build System
-- `tests/build.sh`: Compiles both Rust unit tests and OCaml tester
-- Output executables placed in `tests/_build/` (`tester`, `oracle`, `unit`)
+- `oracle/build.sh`: Compiles both Rust unit tests and OCaml tester
+- Output executables placed in `oracle/_build/` (`tester`, `oracle`, `unit`)
 - Does a clean rebuild each time (`dune clean` + `cargo clean`)
 
 ### OCaml Setup Requirements
@@ -116,7 +116,7 @@ See [PERFORMANCE.md](PERFORMANCE.md) for the benchmarking/profiling guide.
   - `qcheck`: Property-based testing framework
   - `typeset`: Reference implementation for comparison
 
-Without these, `tests/build.sh` fails with `Library "qcheck" not found`.
+Without these, `oracle/build.sh` fails with `Library "qcheck" not found`.
 
 ## Test Development Guidelines
 

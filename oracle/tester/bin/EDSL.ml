@@ -20,13 +20,17 @@ let rec _gen_eDSL n =
     ]
   in
   if n <= 0 then _gen_eDSL_term else
+  (* Biased toward grp/seq: stacked scopes are where the breaking decisions
+     of the two implementations can diverge, and a uniform pick almost never
+     produces them (the historical grp(seq(x)) ordering bug survived fifteen
+     clean runs of a uniform generator). *)
   let _gen_eDSL_unary =
-    oneof
-    [ (fun st -> map _fix (_gen_eDSL (n / 2)) st)
-    ; (fun st -> map _seq (_gen_eDSL (n / 2)) st)
-    ; (fun st -> map _grp (_gen_eDSL (n / 2)) st)
-    ; (fun st -> map _nest (_gen_eDSL (n / 2)) st)
-    ; (fun st -> map _pack (_gen_eDSL (n / 2)) st)
+    oneof_weighted
+    [ 7, (fun st -> map _grp (_gen_eDSL (n / 2)) st)
+    ; 7, (fun st -> map _seq (_gen_eDSL (n / 2)) st)
+    ; 2, (fun st -> map _fix (_gen_eDSL (n / 2)) st)
+    ; 2, (fun st -> map _nest (_gen_eDSL (n / 2)) st)
+    ; 2, (fun st -> map _pack (_gen_eDSL (n / 2)) st)
     ]
   in
   let _gen_eDSL_line st =
@@ -53,8 +57,8 @@ let rec _gen_eDSL n =
     ]
   in
   oneof_weighted
-  [ 1, _gen_eDSL_unary
-  ; 2, _gen_eDSL_binary
+  [ 2, _gen_eDSL_unary
+  ; 3, _gen_eDSL_binary
   ]
 
 let gen_eDSL =
@@ -101,49 +105,3 @@ let shrink_eDSL eDSL =
     return { pad = not attr.pad; fix = not attr.fix }
   in
   _shrink eDSL
-
-let print_eDSL eDSL =
-  let open Printf in
-  let _pass msg = msg in
-  let _wrap = sprintf "(%s)" in
-  let rec _print eDSL wrap return =
-    match eDSL with
-    | UNull -> return "null"
-    | UText data -> return (sprintf "~$\"%s\"" data)
-    | UFix eDSL1 ->
-      _print eDSL1 _wrap @@ fun layout2 ->
-      return (wrap (sprintf "fix %s" layout2))
-    | UGrp eDSL1 ->
-      _print eDSL1 _wrap @@ fun layout2 ->
-      return (wrap (sprintf "grp %s" layout2))
-    | USeq eDSL1 ->
-      _print eDSL1 _wrap @@ fun layout2 ->
-      return (wrap (sprintf "seq %s" layout2))
-    | UNest eDSL1 ->
-      _print eDSL1 _wrap @@ fun layout2 ->
-      return (wrap (sprintf "nest %s" layout2))
-    | UPack eDSL1 ->
-      _print eDSL1 _wrap @@ fun layout2 ->
-      return (wrap (sprintf "pack %s" layout2))
-    | ULine (left, right) ->
-      _print left _wrap @@ fun left1 ->
-      _print right _pass @@ fun right1 ->
-      return (wrap (sprintf "%s </>\n%s" left1 right1))
-    | UComp (left, right, attr) ->
-      _print left _wrap @@ fun left1 ->
-      _print right _pass @@ fun right1 ->
-      let _opr =
-        match attr.fix, attr.pad with
-        | true, true -> "<!+>"
-        | true, false -> "<!&>"
-        | false, true -> "<+>"
-        | false, false -> "<&>"
-      in
-      return (wrap (sprintf "%s %s %s" left1 _opr right1))
-  in
-  _print eDSL _pass (fun x -> x)
-
-let arbitrary_eDSL =
-  QCheck.make gen_eDSL
-    ~print: print_eDSL
-    ~shrink: shrink_eDSL

@@ -101,7 +101,7 @@ cargo clippy --all-targets --all-features
 cargo test --all --all-features
 
 # Differential harness against the OCaml reference
-cd tests && ./build.sh && ./run.sh && python3 fuzz.py 3000 1
+cd oracle && ./build.sh && ./_build/tester
 
 # Quick formatting fix
 ./scripts/fix-code-quality.sh
@@ -109,7 +109,7 @@ cd tests && ./build.sh && ./run.sh && python3 fuzz.py 3000 1
 
 ### Test Structure
 - **Rust tests**: Unit tests and doc tests in `cargo test`
-- **OCaml tests**: Property-based tests in `tests/tester/`
+- **OCaml tests**: Property-based tests in `oracle/tester/`
 - **Integration**: Both test suites verify the same functionality
 
 ## Security

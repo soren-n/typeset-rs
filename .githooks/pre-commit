@@ -2,8 +2,9 @@
 # Pre-commit quality gate. See docs/context/GIT_HOOKS.md
 #
 # Mirrors the checks in .github/workflows/ci.yml so failures surface locally
-# rather than in CI. Set SKIP_OCAML=1 to skip the (slow) differential harness
-# (OCaml QCheck suite and fuzzer).
+# rather than in CI. The oracle harness (the OCaml QCheck identity suite) is
+# part of the gate; SKIP_OCAML=1 skips it explicitly, nothing skips it
+# silently.
 
 set -euo pipefail
 
@@ -32,36 +33,17 @@ echo "pre-commit: running Rust tests..."
 cargo test --all --all-features || fail "Rust tests failed"
 
 if [ "${SKIP_OCAML:-0}" = "1" ]; then
-    echo "pre-commit: skipping OCaml suite (SKIP_OCAML=1)"
-    echo "pre-commit: all checks passed."
-    exit 0
-fi
-
-# The OCaml suite needs opam, dune, and the qcheck + typeset packages. Treat a
-# missing toolchain as a warning (not everyone has OCaml set up), but a genuine
-# test failure as blocking.
-if ! command -v dune >/dev/null 2>&1; then
-    echo "pre-commit: WARNING - dune not found, skipping OCaml property tests." >&2
-    echo "pre-commit:   install with: opam install qcheck typeset" >&2
+    echo "pre-commit: skipping the oracle harness (SKIP_OCAML=1)"
     echo "pre-commit: all other checks passed."
     exit 0
 fi
 
-echo "pre-commit: building OCaml tester..."
-if ! (cd tests/tester && dune build 2>&1); then
-    echo "pre-commit: WARNING - OCaml tester failed to build, skipping property tests." >&2
-    echo "pre-commit:   missing deps? run: opam install qcheck typeset" >&2
-    echo "pre-commit: all other checks passed."
-    exit 0
-fi
+command -v dune >/dev/null 2>&1 || fail "dune not found; the oracle harness needs opam with dune, qcheck and typeset (or set SKIP_OCAML=1)"
 
-echo "pre-commit: building differential harness..."
-(cd tests && ./build.sh >/dev/null 2>&1) || fail "test harness build failed"
+echo "pre-commit: building the oracle harness..."
+(cd oracle && ./build.sh >/dev/null 2>&1) || fail "oracle harness failed to build (opam install dune qcheck typeset?)"
 
-echo "pre-commit: running differential fuzzer..."
-(cd tests && python3 fuzz.py 1000 1) || fail "differential fuzzer found a mismatch"
-
-echo "pre-commit: running OCaml property tests..."
-(cd tests && ./run.sh) || fail "OCaml property tests failed"
+echo "pre-commit: running the oracle identity suite..."
+(cd oracle && ./_build/tester) || fail "the Rust renderer diverged from the OCaml reference"
 
 echo "pre-commit: all checks passed."

@@ -6,7 +6,7 @@ A Rust workspace of three crates:
 - **typeset**: the layout language, compiler, renderer, and a runtime DSL
   parser (`typeset::dsl`)
 - **typeset-parser**: the `layout!` procedural macro (compile-time DSL)
-- **tests/differential** (`typeset-differential`, unpublished): the driver
+- **oracle/driver** (`typeset-differential`, unpublished): the driver
   the OCaml differential harness renders through
 
 ## typeset crate (`typeset/src/`)

@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Rust workspace for typeset pretty printing library:
 - **typeset**: the layout language, compiler, renderer, and `typeset::dsl` (runtime DSL parser)
 - **typeset-parser**: the `layout!` procedural macro (compile-time DSL)
-- **tests/differential**: unpublished driver the OCaml differential harness renders through
+- **oracle/driver**: unpublished driver the OCaml oracle harness renders through
 
 The compiler is a port of an OCaml reference implementation; every change must
-render byte-identically to it (the pre-commit hook and CI run the QCheck suite
-and the differential fuzzer).
+render byte-identically to it (the pre-commit hook and CI run the QCheck
+identity suite in `oracle/`).
 
 ## Quick Reference
 
@@ -20,8 +20,9 @@ and the differential fuzzer).
 # Rust tests
 cargo test --all
 
-# Differential harness against the OCaml reference (needs opam: qcheck, typeset)
-cd tests && ./build.sh && ./run.sh && python3 fuzz.py 3000 1
+# Oracle harness against the OCaml reference (needs opam: dune, qcheck, typeset)
+cd oracle && ./build.sh && ./_build/tester
+./compare.sh '"a" + grp ("b" + "c")' 2 3    # one expression, both implementations
 
 # Fix code quality issues
 ./scripts/fix-code-quality.sh
@@ -31,7 +32,7 @@ cargo run --example <name> -p typeset
 ```
 
 ### Pre-commit Requirements
-All commits must pass: formatting, linting, type checking, doc build, Rust tests, the differential fuzzer, and the OCaml QCheck suite. A git hook enforces these — run `./scripts/install-hooks.sh` once per clone to enable it.
+All commits must pass: formatting, linting, type checking, doc build, Rust tests, and the OCaml QCheck identity suite. A git hook enforces these — run `./scripts/install-hooks.sh` once per clone to enable it.
 
 ## Detailed Context
 

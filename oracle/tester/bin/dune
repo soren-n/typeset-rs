@@ -1,5 +1,4 @@
 (executable
- (public_name ref_impl)
  (name main)
  (modules main EDSL Word)
  (libraries typeset qcheck))

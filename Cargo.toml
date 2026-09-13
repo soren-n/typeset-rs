@@ -3,7 +3,7 @@ resolver = "2"
 members = [
   "typeset",
   "typeset-parser",
-  "tests/differential"
+  "oracle/driver"
 ]
 
 [workspace.package]

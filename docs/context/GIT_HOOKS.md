@@ -35,7 +35,7 @@ The hook is not active in a fresh clone — run `./scripts/install-hooks.sh` onc
    - **Requirement**: All tests must pass (blocking)
    - **Coverage**: Unit tests, integration tests, doc tests
 
-6. **Differential harness** (`tests/build.sh`, then `fuzz.py 1000 1` and
+6. **Differential harness** (`oracle/build.sh`, then `fuzz.py 1000 1` and
    `run.sh`)
    - **Requirement**: the Rust renderer must match the OCaml reference byte
      for byte on 1000 fuzzed layouts and the QCheck suite (blocking)

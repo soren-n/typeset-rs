@@ -78,7 +78,7 @@ let arbitrary_case =
   QCheck.make gen_case ~print ~shrink
 
 let rust_ocaml_identity =
-  QCheck.Test.make ~count: 2048
+  QCheck.Test.make ~count: 3000
     ~name: "rust_ocaml_identity"
     arbitrary_case
     (fun (layout, tab, width) ->

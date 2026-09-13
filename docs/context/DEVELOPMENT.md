@@ -7,7 +7,7 @@
 cargo build                    # Build all workspace members
 cargo build -p typeset        # Build specific crate
 cargo build -p typeset-parser
-cargo build -p typeset-differential   # the differential driver (tests/differential)
+cargo build -p typeset-differential   # the differential driver (oracle/driver)
 ```
 
 ### Release Builds
@@ -21,7 +21,7 @@ cargo build --release -p typeset
 ### Quick Test Setup
 ```bash
 cargo test --all                 # Rust unit, integration and doc tests
-cd tests && ./build.sh           # OCaml tester + oracle, Rust differential driver
+cd oracle && ./build.sh           # OCaml tester + oracle, Rust differential driver
 ./run.sh                         # QCheck property suite against the reference
 python3 fuzz.py 3000 1           # grp/seq-biased differential fuzzer (rounds, seed)
 ./compare.sh '"a" + grp ("b" + "c")' 2 3   # one expression, both implementations
@@ -34,14 +34,14 @@ python3 fuzz.py 3000 1           # grp/seq-biased differential fuzzer (rounds, s
 - `typeset/tests/rendering.rs`: exact-output tests whose expected strings
   came from the OCaml oracle; `scaling.rs`: the linear-time guard;
   `unicode_width_tests.rs`
-- Differential driver: `tests/differential/` (workspace bin, not published)
+- Differential driver: `oracle/driver/` (workspace bin, not published)
 - Benchmarks: `typeset/benches/`
 
 **OCaml Property-Based Tests**:
-- Located in: `tests/tester/`
+- Located in: `oracle/tester/`
 - Requires: opam, dune, qcheck, typeset OCaml package
 - Validates layout behavior against reference OCaml implementation
-- Build script: compiles both systems, places executables in `tests/_build/`
+- Build script: compiles both systems, places executables in `oracle/_build/`
 
 ### Individual Test Commands
 ```bash
@@ -49,7 +49,7 @@ python3 fuzz.py 3000 1           # grp/seq-biased differential fuzzer (rounds, s
 cargo test --all --all-features
 
 # OCaml oracle only (after ./build.sh; run.sh and fuzz.py run from tests/)
-cd tests && ./run.sh
+cd oracle && ./run.sh
 
 # Benchmarks (small-input latency + asymptotic scaling suites)
 cargo bench -p typeset --bench scaling
@@ -118,4 +118,4 @@ cargo check --all-targets --all-features  # Type checking
 - A pass owns the type it produces; only genuinely shared vocabulary goes in
   `types/ir.rs`
 - Every change is held to byte-identical output against the OCaml oracle
-  (`cd tests && ./build.sh && python3 fuzz.py 3000 1`)
+  (`cd oracle && ./build.sh && python3 fuzz.py 3000 1`)

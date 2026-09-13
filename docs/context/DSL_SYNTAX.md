@@ -7,7 +7,7 @@ parses a compact layout DSL at compile time and expands it into calls to the
 `typeset` constructor functions, so the two are always semantically equivalent —
 the macro is pure sugar. `typeset::dsl::parse` accepts the same language (minus
 identifier variables) from a string at run time; the differential harness and
-`tests/compare.sh` use it.
+`oracle/compare.sh` use it.
 
 ```rust
 use typeset_parser::layout;

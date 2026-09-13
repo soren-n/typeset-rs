@@ -86,24 +86,17 @@ jobs:
     - name: Install OCaml dependencies
       run: opam install --yes typeset qcheck dune
 
-    # Builds the OCaml reference oracle/tester and the Rust `unit` binary the
-    # differential checks compare. `opam exec` puts dune on PATH; cargo comes
-    # from the Rust toolchain step.
-    - name: Build differential harness
-      run: cd tests && opam exec -- ./build.sh
+    # Builds the OCaml reference tester and oracle and the Rust driver they
+    # compare against. `opam exec` puts dune on PATH; cargo comes from the
+    # Rust toolchain step.
+    - name: Build oracle harness
+      run: cd oracle && opam exec -- ./build.sh
 
-    # The renderer is the part most prone to silent divergence, so the primary
-    # correctness gate is the differential fuzzer, biased toward the grp/seq
-    # nestings the uniform QCheck generator rarely produces.
-    - name: Differential fuzzer (grp/seq-biased)
+    # The renderer is the part most prone to silent divergence, so the
+    # primary correctness gate is byte-identity with the reference on
+    # generated layouts, biased toward the grp/seq nestings where breaking
+    # decisions differ. Three runs, three random seeds.
+    - name: Oracle identity suite
       run: |
-        cd tests
-        for seed in 1 2 3; do
-          echo "--- seed $seed ---"
-          python3 fuzz.py 3000 "$seed"
-        done
-
-    - name: QCheck oracle
-      run: |
-        cd tests
-        for i in 1 2 3; do opam exec -- ./run.sh; done
+        cd oracle
+        for i in 1 2 3; do opam exec -- ./_build/tester; done

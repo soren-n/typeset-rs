@@ -1,5 +1,5 @@
 //! Renders a layout given in the DSL, for comparison against the OCaml
-//! reference implementation (see `tests/fuzz.py` and `tests/tester`).
+//! reference implementation (see `oracle/tester`).
 //!
 //! Usage: `typeset-differential '<layout dsl>' [tab] [width]`
 
