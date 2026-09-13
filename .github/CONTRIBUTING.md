@@ -74,7 +74,6 @@ feat!: change API for layout composition
 - Differential job: builds the OCaml oracle and runs the QCheck property
   suite plus the grp/seq-biased differential fuzzer
 - License and advisory policy (`cargo deny`)
-- Release build verification
 
 ### 2. Release Workflow (`.github/workflows/release.yml`)
 **Triggers:** Pushing a `v*` tag
@@ -89,8 +88,8 @@ Version bumping and `CHANGELOG.md` are manual (see [Release Process](#release-pr
 - **Dependabot** (`.github/dependabot.yml`): weekly grouped PRs for GitHub
   Actions and both Cargo manifests; `dependabot-auto-merge.yml` merges them
   once CI passes.
-- **Dependencies workflow** (`.github/workflows/dependencies.yml`): weekly
-  `cargo audit` (fails on vulnerabilities) plus a `cargo upgrade` PR.
+- **Security Audit workflow** (`.github/workflows/dependencies.yml`): weekly
+  `cargo audit`, failing on any vulnerability.
 
 ## Testing
 

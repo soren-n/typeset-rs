@@ -31,9 +31,8 @@ The project uses GitHub Actions workflows for continuous integration, releases, 
 **Security & Compliance**:
 - `cargo-deny` (`deny` job, config in `deny.toml`): advisories, license
   allow-list, duplicate-version and source checks
-- `build` job: release build with uploaded artifacts (7-day retention)
 
-`cargo-audit` runs in the Dependencies workflow, not here.
+`cargo-audit` runs in the weekly Security Audit workflow, not here.
 
 ### 2. Release Pipeline (`.github/workflows/release.yml`)
 **Triggers**: Pushing a `v*` tag (e.g. `v3.3.0`)
@@ -59,15 +58,11 @@ the `CI` workflow has passed on it (the repo has no branch protection, so the
 gate lives in the workflow via `workflow_run`). This is the primary dependency
 update path.
 
-### 4. Dependencies Workflow (`.github/workflows/dependencies.yml`)
+### 4. Security Audit (`.github/workflows/dependencies.yml`)
 **Triggers**: Weekly schedule + manual dispatch
 
-Two jobs:
-- `update-rust`: `cargo update` + `cargo upgrade --incompatible` (cargo-edit),
-  runs the tests, and opens a PR. Largely redundant with Dependabot; note that
-  PRs opened with the default `GITHUB_TOKEN` do not trigger the CI workflow.
-- `security-audit`: `cargo audit`, uploads the JSON report and fails on any
-  vulnerability.
+Runs `cargo audit` against the RustSec advisory database and fails on any
+vulnerability.
 
 ## Releasing
 
