@@ -24,7 +24,7 @@ jobs:
     - name: Update dependencies
       run: |
         cargo update
-        cargo upgrade --workspace --allow-prerelease
+        cargo upgrade --incompatible
 
     - name: Run tests
       run: |
