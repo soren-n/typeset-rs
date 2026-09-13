@@ -187,7 +187,13 @@ impl<'a> Renderer<'a> {
     /// and the caller only compares the result against the width, so the fold
     /// stops as soon as the position passes it.
     fn fold(&mut self, obj: ObjId, mut cur: Cursor) -> usize {
-        let doc = self.doc;
+        let Doc {
+            objs,
+            fixes,
+            text,
+            extents,
+            ..
+        } = self.doc;
         let mut stack = std::mem::take(&mut self.fold_stack);
         stack.clear();
         self.inserted.clear();
@@ -197,8 +203,8 @@ impl<'a> Renderer<'a> {
                 break;
             }
             match frame {
-                MFrame::Obj(o) => match &doc.objs[o] {
-                    ObjNode::Text(_) => cur.advance(doc.extents[o]),
+                MFrame::Obj(o) => match &objs[o] {
+                    ObjNode::Text(_) => cur.advance(extents[o]),
                     ObjNode::Fix(fix) => stack.push(MFrame::Fix(*fix)),
                     ObjNode::Grp(child) | ObjNode::Seq(child) => stack.push(MFrame::Obj(*child)),
                     ObjNode::Nest(child) => {
@@ -221,8 +227,8 @@ impl<'a> Renderer<'a> {
                         stack.push(MFrame::Obj(*left));
                     }
                 },
-                MFrame::Fix(f) => match &doc.fixes[f] {
-                    FixNode::Text(range) => cur.advance(text_width(range.slice(&doc.text))),
+                MFrame::Fix(f) => match &fixes[f] {
+                    FixNode::Text(range) => cur.advance(text_width(range.slice(text))),
                     FixNode::Comp(left, right, pad) => {
                         stack.push(MFrame::FixCompMid(*right, *pad));
                         stack.push(MFrame::Fix(*left));
@@ -270,16 +276,22 @@ impl<'a> Renderer<'a> {
     /// Renders one document object, threading the cursor. Marks inserted
     /// here are kept: they accumulate forward across the whole document.
     fn render_obj(&mut self, obj: ObjId, cur: &mut Cursor) {
-        let doc = self.doc;
+        let Doc {
+            objs,
+            fixes,
+            text,
+            extents,
+            ..
+        } = self.doc;
         let mut stack = std::mem::take(&mut self.frames);
         stack.clear();
         stack.push(RFrame::Obj(obj));
         while let Some(frame) = stack.pop() {
             match frame {
-                RFrame::Obj(o) => match &doc.objs[o] {
+                RFrame::Obj(o) => match &objs[o] {
                     ObjNode::Text(range) => {
-                        cur.advance(doc.extents[o]);
-                        self.out.push_str(range.slice(&doc.text));
+                        cur.advance(extents[o]);
+                        self.out.push_str(range.slice(text));
                     }
                     ObjNode::Fix(fix) => stack.push(RFrame::Fix(*fix)),
                     ObjNode::Grp(child) => {
@@ -315,9 +327,9 @@ impl<'a> Renderer<'a> {
                         stack.push(RFrame::Obj(*left));
                     }
                 },
-                RFrame::Fix(f) => match &doc.fixes[f] {
+                RFrame::Fix(f) => match &fixes[f] {
                     FixNode::Text(range) => {
-                        let data = range.slice(&doc.text);
+                        let data = range.slice(text);
                         cur.advance(text_width(data));
                         self.out.push_str(data);
                     }
