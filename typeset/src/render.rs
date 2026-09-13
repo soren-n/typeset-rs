@@ -1,16 +1,17 @@
 //! Document rendering: [`Doc`] → `String`.
 //!
-//! Every traversal here is iterative. A [`Doc`] is a flat arena, so the
-//! renderer walks it by arena id, keeping its descent state in heap-allocated
-//! frame stacks instead of on the native stack, so arbitrarily deep documents
-//! render with a constant native stack.
+//! A [`Doc`] is a flat arena, so the renderer walks it by arena id, keeping
+//! its descent state in a heap-allocated frame stack instead of on the native
+//! stack: arbitrarily deep documents render with a constant native stack.
 //!
-//! Two traversals share the machinery: `render_obj` produces output and
-//! commits pack marks; `fold` only measures, and undoes any marks it recorded
-//! before returning so the caller's marks are untouched.
+//! Break decisions are arithmetic on the document's precomputed extent
+//! tables. Mid-line, neither `Nest` nor `Pack` advances the position, so an
+//! object's width is state-independent. At the head of a line the
+//! indentation offsets depend on the live level and pack marks, but offsets
+//! are only ever emitted before the first text on the line, so the head-of-
+//! line measure walks the object's left spine and adds the flat extent.
 
 use crate::doc::{Doc, ObjId, ObjNode};
-
 use crate::layout::Pad;
 use std::cmp::max;
 
@@ -51,9 +52,7 @@ impl Cursor {
 
     /// Raises the indentation level to the next multiple of `tab`.
     fn indent(&mut self, tab: usize) {
-        if tab != 0 {
-            self.lvl += tab - (self.lvl % tab);
-        }
+        self.lvl = indent(self.lvl, tab);
     }
 
     /// Starts a new line within the same document object.
@@ -85,19 +84,14 @@ impl Cursor {
     }
 }
 
-/// Frame for the measuring traversal ([`Renderer::fold`]): the remaining work
-/// and any cursor field to restore once a child subtree has been folded.
-enum MFrame {
-    Obj(ObjId),
-    RestoreLvl(usize),
-    RestoreHead(bool),
-    /// After the left of a `Comp`: pad, drop `head`, visit the right, then
-    /// restore `head`.
-    CompMid(ObjId, Pad),
+/// The next multiple of `tab` above `lvl` (`lvl` itself when `tab` is 0, so
+/// a zero tab disables indentation).
+fn indent(lvl: usize, tab: usize) -> usize {
+    if tab == 0 { lvl } else { lvl + tab - lvl % tab }
 }
 
 /// Frame for the output traversal ([`Renderer::render_obj`]).
-enum RFrame {
+enum Frame {
     Obj(ObjId),
     RestoreLvl(usize),
     RestoreBreak(bool),
@@ -105,25 +99,13 @@ enum RFrame {
     CompMid(ObjId, Pad),
 }
 
-/// Outcome of resolving a `Pack` mark.
-struct PackStep {
-    /// Columns the pack advanced by (spaces to emit when producing output);
-    /// `0` the first time a mark is seen.
-    offset: usize,
-    /// Whether this call recorded a new mark (measuring must undo it).
-    fresh: bool,
-}
-
 struct Renderer<'a> {
     cfg: Config,
     doc: &'a Doc,
     /// The recorded column of each pack, by pack index; `None` until seen.
     marks: Vec<Option<usize>>,
-    /// Frame stack and inserted-mark undo list for `fold`, and the frame
-    /// stack for `render_obj`; owned here so every call reuses them.
-    fold_stack: Vec<MFrame>,
-    inserted: Vec<usize>,
-    frames: Vec<RFrame>,
+    /// Frame stack for `render_obj`; owned here so every line reuses it.
+    frames: Vec<Frame>,
     out: String,
 }
 
@@ -133,8 +115,6 @@ impl<'a> Renderer<'a> {
             cfg,
             doc,
             marks: vec![None; doc.packs],
-            fold_stack: Vec::new(),
-            inserted: Vec::new(),
             frames: Vec::new(),
             // The output is at least the document's text; reserving it (plus a
             // newline per line) leaves only indentation to grow into.
@@ -146,102 +126,70 @@ impl<'a> Renderer<'a> {
         self.out.extend(std::iter::repeat_n(' ', n));
     }
 
-    /// Resolves a `Pack` mark. The first time `index` is seen the current
-    /// column is recorded and the level is lifted to it (no advance). On any
-    /// later sighting the level is lifted to the recorded column and the
-    /// cursor advances by the resulting offset.
-    fn resolve_pack(&mut self, index: usize, cur: &mut Cursor) -> PackStep {
+    /// Resolves a `Pack` mark while rendering, returning the columns the
+    /// cursor advanced by. The first time `index` is seen the current column
+    /// is recorded and the level is lifted to it (no advance). On any later
+    /// sighting the level is lifted to the recorded column and the cursor
+    /// advances by the resulting offset.
+    fn resolve_pack(&mut self, index: usize, cur: &mut Cursor) -> usize {
         match self.marks[index] {
             None => {
                 self.marks[index] = Some(cur.pos);
                 cur.lvl = max(cur.lvl, cur.pos);
-                PackStep {
-                    offset: 0,
-                    fresh: true,
-                }
+                0
             }
             Some(mark) => {
                 cur.lvl = max(cur.lvl, mark);
                 let offset = cur.offset();
                 cur.advance(offset);
-                PackStep {
-                    offset,
-                    fresh: false,
-                }
+                offset
             }
         }
     }
 
-    /// Folds `obj` into its ending position without emitting output: where
-    /// `obj` finishes if laid out from `cur`. Marks inserted while folding are
-    /// undone before returning.
+    /// Where `obj` ends if laid out from `cur` at the head of a line.
     ///
-    /// This is the head-of-line slow path of [`will_fit`](Self::will_fit): at
-    /// the head of a line `Nest`/`Pack` offsets depend on the live indentation
-    /// level and pack marks, so the extent must be folded from the actual
-    /// cursor. Width-bounded: the position only ever advances while measuring
-    /// and the caller only compares the result against the width, so the fold
-    /// stops as soon as the position passes it.
-    fn fold(&mut self, obj: ObjId, mut cur: Cursor) -> usize {
+    /// Only the wrappers on `obj`'s left spine — before its first text — can
+    /// emit an indentation offset; everything after is mid-line, where the
+    /// precomputed extent is exact. Each offset brings the position up to
+    /// the level, so the spine walk tracks the level alone. A pack seen for
+    /// the first time would only lift the level to the position, which is
+    /// no change at the head of a line, and a measure never records marks.
+    fn head_end(&self, obj: ObjId, cur: Cursor) -> usize {
         let Doc { objs, extents, .. } = self.doc;
-        let mut stack = std::mem::take(&mut self.fold_stack);
-        stack.clear();
-        self.inserted.clear();
-        stack.push(MFrame::Obj(obj));
-        while let Some(frame) = stack.pop() {
-            if cur.pos > self.cfg.width {
-                break;
-            }
-            match frame {
-                MFrame::Obj(o) => match &objs[o] {
-                    ObjNode::Run(_) => cur.advance(extents[o]),
-                    ObjNode::Grp(child) | ObjNode::Seq(child) => stack.push(MFrame::Obj(*child)),
-                    ObjNode::Nest(child) => {
-                        stack.push(MFrame::RestoreLvl(cur.lvl));
-                        cur.indent(self.cfg.tab);
-                        let offset = cur.offset();
-                        cur.advance(offset);
-                        stack.push(MFrame::Obj(*child));
-                    }
-                    ObjNode::Pack(index, child) => {
-                        stack.push(MFrame::RestoreLvl(cur.lvl));
-                        let index = *index as usize;
-                        if self.resolve_pack(index, &mut cur).fresh {
-                            self.inserted.push(index);
-                        }
-                        stack.push(MFrame::Obj(*child));
-                    }
-                    ObjNode::Comp(left, right, pad) => {
-                        stack.push(MFrame::CompMid(*right, *pad));
-                        stack.push(MFrame::Obj(*left));
-                    }
-                },
-                MFrame::RestoreLvl(lvl) => cur.lvl = lvl,
-                MFrame::RestoreHead(head) => cur.head = head,
-                MFrame::CompMid(right, pad) => {
-                    cur.advance(pad.width());
-                    stack.push(MFrame::RestoreHead(cur.head));
-                    cur.head = false;
-                    stack.push(MFrame::Obj(right));
+        let mut lvl = cur.lvl;
+        let mut pos = cur.pos;
+        let mut o = obj;
+        loop {
+            o = match &objs[o] {
+                ObjNode::Run(_) => break,
+                ObjNode::Grp(child) | ObjNode::Seq(child) => *child,
+                ObjNode::Comp(left, ..) => *left,
+                ObjNode::Nest(child) => {
+                    lvl = indent(lvl, self.cfg.tab);
+                    pos = lvl;
+                    *child
                 }
-            }
+                ObjNode::Pack(index, child) => {
+                    if let Some(mark) = self.marks[*index as usize] {
+                        lvl = max(lvl, mark);
+                        pos = lvl;
+                    }
+                    *child
+                }
+            };
         }
-        for index in self.inserted.drain(..) {
-            self.marks[index] = None;
-        }
-        self.fold_stack = stack;
-        cur.pos
+        pos.saturating_add(extents[obj])
     }
 
-    /// Whether `obj` fits within the width if laid out from `cur`. Mid-line
-    /// this is arithmetic on the precomputed extent (neither `Nest` nor `Pack`
-    /// advances the position when `head` is false); only at the head of a
-    /// line does it fold.
-    fn will_fit(&mut self, obj: ObjId, cur: Cursor) -> bool {
-        if !cur.head {
-            return cur.pos.saturating_add(self.doc.extents[obj]) <= self.cfg.width;
-        }
-        self.fold(obj, cur) <= self.cfg.width
+    /// Whether `obj` fits within the width if laid out from `cur`.
+    fn will_fit(&self, obj: ObjId, cur: Cursor) -> bool {
+        let end = if cur.head {
+            self.head_end(obj, cur)
+        } else {
+            cur.pos.saturating_add(self.doc.extents[obj])
+        };
+        end <= self.cfg.width
     }
 
     /// Whether the next composition boundary reachable from `obj` passes the
@@ -251,7 +199,7 @@ impl<'a> Renderer<'a> {
         cur.broken || self.cfg.width < cur.pos.saturating_add(self.doc.next_comps[obj])
     }
 
-    /// Renders one document object, threading the cursor. Marks inserted
+    /// Renders one document object, threading the cursor. Marks recorded
     /// here are kept: they accumulate forward across the whole document.
     fn render_obj(&mut self, obj: ObjId, cur: &mut Cursor) {
         let Doc {
@@ -263,10 +211,10 @@ impl<'a> Renderer<'a> {
         } = self.doc;
         let mut stack = std::mem::take(&mut self.frames);
         stack.clear();
-        stack.push(RFrame::Obj(obj));
+        stack.push(Frame::Obj(obj));
         while let Some(frame) = stack.pop() {
             match frame {
-                RFrame::Obj(o) => match &objs[o] {
+                Frame::Obj(o) => match &objs[o] {
                     ObjNode::Run(range) => {
                         for run in range.slice(runs) {
                             self.push_spaces(run.pad.width());
@@ -275,41 +223,41 @@ impl<'a> Renderer<'a> {
                         cur.advance(extents[o]);
                     }
                     ObjNode::Grp(child) => {
-                        stack.push(RFrame::RestoreBreak(cur.broken));
+                        stack.push(Frame::RestoreBreak(cur.broken));
                         cur.broken = false;
-                        stack.push(RFrame::Obj(*child));
+                        stack.push(Frame::Obj(*child));
                     }
                     ObjNode::Seq(child) => {
                         // A sequence that doesn't fit renders broken; either
                         // way the child renders next.
                         if !self.will_fit(*child, *cur) {
-                            stack.push(RFrame::RestoreBreak(cur.broken));
+                            stack.push(Frame::RestoreBreak(cur.broken));
                             cur.broken = true;
                         }
-                        stack.push(RFrame::Obj(*child));
+                        stack.push(Frame::Obj(*child));
                     }
                     ObjNode::Nest(child) => {
-                        stack.push(RFrame::RestoreLvl(cur.lvl));
+                        stack.push(Frame::RestoreLvl(cur.lvl));
                         cur.indent(self.cfg.tab);
                         let offset = cur.offset();
                         cur.advance(offset);
                         self.push_spaces(offset);
-                        stack.push(RFrame::Obj(*child));
+                        stack.push(Frame::Obj(*child));
                     }
                     ObjNode::Pack(index, child) => {
-                        stack.push(RFrame::RestoreLvl(cur.lvl));
-                        let step = self.resolve_pack(*index as usize, cur);
-                        self.push_spaces(step.offset);
-                        stack.push(RFrame::Obj(*child));
+                        stack.push(Frame::RestoreLvl(cur.lvl));
+                        let offset = self.resolve_pack(*index as usize, cur);
+                        self.push_spaces(offset);
+                        stack.push(Frame::Obj(*child));
                     }
                     ObjNode::Comp(left, right, pad) => {
-                        stack.push(RFrame::CompMid(*right, *pad));
-                        stack.push(RFrame::Obj(*left));
+                        stack.push(Frame::CompMid(*right, *pad));
+                        stack.push(Frame::Obj(*left));
                     }
                 },
-                RFrame::RestoreLvl(lvl) => cur.lvl = lvl,
-                RFrame::RestoreBreak(broken) => cur.broken = broken,
-                RFrame::CompMid(right, pad) => {
+                Frame::RestoreLvl(lvl) => cur.lvl = lvl,
+                Frame::RestoreBreak(broken) => cur.broken = broken,
+                Frame::CompMid(right, pad) => {
                     // `cur` is the cursor left by the left operand. Decide from
                     // where the right operand would start if the line went on.
                     let mut joined = *cur;
@@ -325,16 +273,16 @@ impl<'a> Renderer<'a> {
                         self.push_spaces(pad.width());
                         *cur = joined;
                     }
-                    stack.push(RFrame::Obj(right));
+                    stack.push(Frame::Obj(right));
                 }
             }
         }
         self.frames = stack;
     }
 
-    /// Renders every line, joined by newlines. Pack marks and the indentation
-    /// level carry across lines; the head flag, position and broken state
-    /// reset per line.
+    /// Renders every line, joined by newlines. Pack marks carry across
+    /// lines; the head flag, position and broken state reset per line, and
+    /// the indentation level is back to zero once a line's wrappers unwind.
     fn render(mut self) -> String {
         let mut cur = Cursor::START;
         for (i, line) in self.doc.lines.iter().enumerate() {
