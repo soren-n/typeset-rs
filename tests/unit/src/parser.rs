@@ -47,7 +47,7 @@ enum Syntax {
 
 #[doc(hidden)]
 #[allow(clippy::vec_box)]
-pub fn parse(input: &str, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String> {
+pub fn parse(input: &str, args: &Vec<Layout>) -> Result<Layout, String> {
     fn parse_syntax(tokens: Pairs<Rule>) -> Result<Box<Syntax>, String> {
         PRATT_PARSER
             .map_primary(|primary| match primary.as_rule() {
@@ -119,7 +119,7 @@ pub fn parse(input: &str, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String
             .parse(tokens)
     }
     #[allow(clippy::vec_box)]
-    fn interp_syntax(syntax: Syntax, args: &Vec<Box<Layout>>) -> Result<Box<Layout>, String> {
+    fn interp_syntax(syntax: Syntax, args: &Vec<Layout>) -> Result<Layout, String> {
         match syntax {
             Syntax::Null => Ok(null()),
             Syntax::Index(index) => {

@@ -41,43 +41,15 @@
 //! - **[`seq()`]** - Sequences where if one breaks, all break
 //! - **[`fix()`]** - Fixed content that never breaks
 //!
-//! ### Compilation Pipeline
+//! ### Compile, then render
 //!
-//! [`compile()`] lowers a layout through a multi-pass compiler whose
-//! intermediate representations are flat postorder arenas; the pass-by-pass
-//! description lives in the (internal) `compiler::pipeline` module docs.
-//!
-//! ## Architecture Overview
-//!
-//! The typeset library is organized into several key modules:
-//!
-//! - **Constructors** - Functions for building layout trees ([`text()`], [`comp()`], [`nest()`], etc.)
-//! - **Compiler** - Multi-pass compilation pipeline that optimizes layouts
-//! - **Types** - Core data structures for layouts and intermediate representations  
-//! - **Render** - Final rendering engine that produces formatted strings.
-//!   [`render()`] borrows the [`Doc`], so the same document renders repeatedly
-//!   (e.g. at several widths) without cloning or recompiling
-//!
-//! ## Compilation
-//!
-//! [`compile()`] is infallible: the pipeline is iterative, so no layout is too
-//! deep to compile and there is no depth cap. Layout depth shows up as O(depth)
-//! heap, freed once compilation returns.
-//!
-//! ## Performance
-//!
-//! Typeset is designed for high performance:
-//!
-//! - Flat, loop-based compilation: every intermediate representation is a
-//!   flat arena folded with plain loops, and text is concatenated into one
-//!   buffer up front, then borrowed (never re-copied) through every pass until
-//!   it is materialized into the [`Doc`]'s shared text buffer at the end
-//! - Constant-time line-breaking decisions: compilation precomputes each
-//!   node's flat extent, so rendering decides breaks by arithmetic instead of
-//!   re-measuring subtrees — render cost does not grow with the target width
-//! - Constant native stack throughout: the passes and renderer never recurse,
-//!   and the output [`Doc`] is a flat `Vec`-backed arena, so cloning or
-//!   freeing it is non-recursive too — deep layouts never overflow the stack
+//! [`compile()`] lowers a [`Layout`] into a [`Doc`]; [`render()`] (or
+//! [`Doc::render`]) lays a document out at a tab width and a target line
+//! width. Rendering only borrows the document, so one compiled document can
+//! be rendered at several widths. Both steps are infallible and run in
+//! constant native stack: a layout of any depth compiles and renders, with
+//! depth costing heap rather than stack. Break decisions are O(1), so render
+//! cost does not grow with the target width.
 //!
 //! ## Examples
 //!
@@ -188,5 +160,3 @@ pub use self::compiler::constructors::{
     text,
     unpad,
 };
-
-// Tests are now in the dedicated tests/ directory

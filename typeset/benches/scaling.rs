@@ -8,7 +8,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use typeset::*;
 
 /// Right-leaning breakable comp chain of `n` words.
-fn wide(n: usize) -> Box<Layout> {
+fn wide(n: usize) -> Layout {
     let mut layout = text("w0");
     for i in 1..n {
         layout = comp(layout, text(format!("w{i}")), Pad::Padded, Break::Breakable);
@@ -18,7 +18,7 @@ fn wide(n: usize) -> Box<Layout> {
 
 /// nest^d over a breakable chain of `m` words: stresses distributing nest
 /// wrappers over every leaf (compile cost is O(m * d)).
-fn nestwide(d: usize, m: usize) -> Box<Layout> {
+fn nestwide(d: usize, m: usize) -> Layout {
     let mut layout = wide(m);
     for _ in 0..d {
         layout = nest(layout);
@@ -27,7 +27,7 @@ fn nestwide(d: usize, m: usize) -> Box<Layout> {
 }
 
 /// `n` pack-aligned groups: stresses the renderer's pack marks map.
-fn packs(n: usize) -> Box<Layout> {
+fn packs(n: usize) -> Layout {
     let group = |i: usize| {
         pack(comp(
             text(format!("k{i}")),
@@ -45,11 +45,11 @@ fn packs(n: usize) -> Box<Layout> {
 
 /// Balanced JSON-ish tree: objects of `fan` entries, `d` levels deep, with the
 /// grp/seq/nest structure a real formatter emits. Leaf count is `fan^d`.
-fn json(d: usize, fan: usize) -> Box<Layout> {
+fn json(d: usize, fan: usize) -> Layout {
     if d == 0 {
         return text("\"value\"");
     }
-    let mut body: Option<Box<Layout>> = None;
+    let mut body: Option<Layout> = None;
     for k in 0..fan {
         let entry = comp(
             text(format!("\"key_{k}\":")),

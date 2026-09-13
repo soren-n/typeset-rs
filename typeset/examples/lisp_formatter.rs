@@ -11,7 +11,7 @@ enum SExpr {
 
 /// Format an S-expression with proper Lisp-style indentation
 /// Uses pack() to align subsequent arguments to the first argument position
-fn format_sexpr(expr: &SExpr) -> Box<Layout> {
+fn format_sexpr(expr: &SExpr) -> Layout {
     match expr {
         SExpr::Atom(s) => text(s.clone()),
         SExpr::List(exprs) => {
@@ -34,14 +34,7 @@ fn format_sexpr(expr: &SExpr) -> Box<Layout> {
                     )
                 } else {
                     // Multiple items: use pack for alignment
-                    let mut rest = null();
-                    for expr in &exprs[1..] {
-                        let formatted = format_sexpr(expr);
-                        rest = match rest.as_ref() {
-                            Layout::Null => formatted,
-                            _ => comp(rest, formatted, Pad::Padded, Break::Breakable),
-                        };
-                    }
+                    let rest = join_with_spaces(exprs[1..].iter().map(format_sexpr));
 
                     // Pack aligns subsequent lines to the first argument
                     let args = pack(comp(first, rest, Pad::Padded, Break::Breakable));
@@ -59,7 +52,7 @@ fn format_sexpr(expr: &SExpr) -> Box<Layout> {
 }
 
 /// Alternative formatter using sequence semantics for different style
-fn format_sexpr_sequence(expr: &SExpr) -> Box<Layout> {
+fn format_sexpr_sequence(expr: &SExpr) -> Layout {
     match expr {
         SExpr::Atom(s) => text(s.clone()),
         SExpr::List(exprs) => {

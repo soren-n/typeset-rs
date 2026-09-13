@@ -11,7 +11,7 @@
 use std::time::Instant;
 use typeset::*;
 
-fn chain(n: usize, brk: Break) -> Box<Layout> {
+fn chain(n: usize, brk: Break) -> Layout {
     let mut layout = text("w0");
     for i in 1..n {
         layout = comp(layout, text(format!("w{i}")), Pad::Padded, brk);
@@ -20,17 +20,17 @@ fn chain(n: usize, brk: Break) -> Box<Layout> {
 }
 
 /// Right-leaning breakable comp chain of `n` words.
-fn wide(n: usize) -> Box<Layout> {
+fn wide(n: usize) -> Layout {
     chain(n, Break::Breakable)
 }
 
 /// One fix run of `n` words.
-fn fixed(n: usize) -> Box<Layout> {
+fn fixed(n: usize) -> Layout {
     fix(chain(n, Break::Fixed))
 }
 
 /// `n` hard lines (document spine).
-fn lines(n: usize) -> Box<Layout> {
+fn lines(n: usize) -> Layout {
     let mut layout = text("l0");
     for i in 1..n {
         layout = line(layout, text(format!("l{i}")));
@@ -40,7 +40,7 @@ fn lines(n: usize) -> Box<Layout> {
 
 /// nest^d over a breakable chain of `m` words: stresses distributing the
 /// nest wrappers over every leaf and re-factoring them back out.
-fn nestwide(d: usize, m: usize) -> Box<Layout> {
+fn nestwide(d: usize, m: usize) -> Layout {
     let mut layout = chain(m, Break::Breakable);
     for _ in 0..d {
         layout = nest(layout);
@@ -49,7 +49,7 @@ fn nestwide(d: usize, m: usize) -> Box<Layout> {
 }
 
 /// grp(nest(...))^d around a small chain: deep scope nesting.
-fn deepgrp(d: usize) -> Box<Layout> {
+fn deepgrp(d: usize) -> Layout {
     let mut layout = chain(4, Break::Breakable);
     for _ in 0..d {
         layout = grp(nest(layout));
@@ -58,7 +58,7 @@ fn deepgrp(d: usize) -> Box<Layout> {
 }
 
 /// `n` pack-aligned groups of short chains: stresses the renderer's marks map.
-fn packs(n: usize) -> Box<Layout> {
+fn packs(n: usize) -> Layout {
     let mut layout = pack(chain(4, Break::Breakable));
     for _ in 1..n {
         layout = comp(
@@ -73,12 +73,12 @@ fn packs(n: usize) -> Box<Layout> {
 
 /// Balanced JSON-ish tree: objects of `fan` entries, `d` levels deep, with
 /// grp/seq/nest structure like a real formatter would emit.
-fn json(d: usize, fan: usize) -> Box<Layout> {
-    fn value(d: usize, fan: usize, i: usize) -> Box<Layout> {
+fn json(d: usize, fan: usize) -> Layout {
+    fn value(d: usize, fan: usize, i: usize) -> Layout {
         if d == 0 {
             return text(format!("\"value_{i}\""));
         }
-        let mut body: Option<Box<Layout>> = None;
+        let mut body: Option<Layout> = None;
         for k in 0..fan {
             let entry = comp(
                 text(format!("\"key_{k}\":")),
@@ -144,7 +144,7 @@ fn parse_args() -> Args {
     args
 }
 
-fn build(args: &Args) -> Box<Layout> {
+fn build(args: &Args) -> Layout {
     match args.workload.as_str() {
         "wide" => wide(args.n),
         "fixed" => fixed(args.n),

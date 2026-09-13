@@ -43,7 +43,7 @@ enum Expression {
 }
 
 /// Format an expression with proper precedence and grouping
-fn format_expression(expr: &Expression) -> Box<Layout> {
+fn format_expression(expr: &Expression) -> Layout {
     match expr {
         Expression::Variable(name) => text(name.clone()),
         Expression::Number(n) => text(n.to_string()),
@@ -94,7 +94,7 @@ fn format_expression(expr: &Expression) -> Box<Layout> {
 }
 
 /// Format function arguments with intelligent breaking
-fn format_argument_list(args: &[Expression]) -> Box<Layout> {
+fn format_argument_list(args: &[Expression]) -> Layout {
     if args.is_empty() {
         return null();
     }
@@ -118,7 +118,7 @@ fn format_argument_list(args: &[Expression]) -> Box<Layout> {
 }
 
 /// Format a statement with proper indentation and layout
-fn format_statement(stmt: &Statement) -> Box<Layout> {
+fn format_statement(stmt: &Statement) -> Layout {
     match stmt {
         Statement::Assignment { var, expr } => {
             let var_layout = text(var.clone());
@@ -247,23 +247,14 @@ fn format_statement(stmt: &Statement) -> Box<Layout> {
 }
 
 /// Format a block of statements with proper braces and indentation
-fn format_block(statements: &[Statement]) -> Box<Layout> {
+fn format_block(statements: &[Statement]) -> Layout {
     let open_brace = text("{");
     let close_brace = text("}");
 
     if statements.is_empty() {
         comp(open_brace, close_brace, Pad::Unpadded, Break::Breakable)
     } else {
-        let mut formatted_stmts = null();
-        for stmt in statements {
-            let formatted_stmt = format_statement(stmt);
-            formatted_stmts = match formatted_stmts.as_ref() {
-                Layout::Null => formatted_stmt,
-                _ => line(formatted_stmts, formatted_stmt),
-            };
-        }
-
-        let indented_stmts = nest(formatted_stmts);
+        let indented_stmts = nest(join_with_lines(statements.iter().map(format_statement)));
 
         comp(
             open_brace,

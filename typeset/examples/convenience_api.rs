@@ -114,7 +114,7 @@ fn main() {
                 }
             }))
             .chain(vec![null()]) // Empty last line
-            .collect(),
+            .collect::<Vec<_>>(),
     )));
 
     println!(
@@ -124,14 +124,5 @@ fn main() {
     println!(
         "\nJSON object (narrow):\n{}",
         format_layout(json_object, 2, 20)
-    );
-
-    // Demonstrate Default trait
-    println!("\n=== Default Trait ===");
-
-    let default_layout: Layout = Default::default();
-    println!(
-        "Default layout: {}",
-        format_layout(Box::new(default_layout), 2, 40)
     );
 }

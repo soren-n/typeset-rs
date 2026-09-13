@@ -484,29 +484,37 @@ fn render_obj(
 /// assert_eq!(render(&doc, 2, 80), "hello world");
 /// ```
 pub fn render(doc: &Doc, tab: usize, width: usize) -> String {
-    let arena = Arena {
-        objs: doc.objs.as_slice(),
-        fixes: doc.fixes.as_slice(),
-        text: &doc.text,
-        extents: &doc.extents,
-        next_comps: &doc.next_comps,
-    };
-    let mut st = make_state(width, tab);
-    let mut marks: Vec<Option<usize>> = vec![None; doc.packs];
-    let mut scratch = Scratch::default();
-    // The output is at least the document's text; reserving it (plus a
-    // newline per line) leaves only indentation to grow into.
-    let mut result = String::with_capacity(doc.text.len() + doc.lines.len());
-    // Lines are joined by newlines. `marks` and `lvl` survive `reset`, so they
-    // carry across lines.
-    for (i, line) in doc.lines.iter().enumerate() {
-        if i > 0 {
-            result.push('\n');
+    doc.render(tab, width)
+}
+
+impl Doc {
+    /// Renders this document; see [`render`].
+    pub fn render(&self, tab: usize, width: usize) -> String {
+        let doc = self;
+        let arena = Arena {
+            objs: doc.objs.as_slice(),
+            fixes: doc.fixes.as_slice(),
+            text: &doc.text,
+            extents: &doc.extents,
+            next_comps: &doc.next_comps,
+        };
+        let mut st = make_state(width, tab);
+        let mut marks: Vec<Option<usize>> = vec![None; doc.packs];
+        let mut scratch = Scratch::default();
+        // The output is at least the document's text; reserving it (plus a
+        // newline per line) leaves only indentation to grow into.
+        let mut result = String::with_capacity(doc.text.len() + doc.lines.len());
+        // Lines are joined by newlines. `marks` and `lvl` survive `reset`, so they
+        // carry across lines.
+        for (i, line) in doc.lines.iter().enumerate() {
+            if i > 0 {
+                result.push('\n');
+            }
+            st = reset(st);
+            if let Some(obj) = line {
+                render_obj(arena, *obj, &mut st, &mut marks, &mut scratch, &mut result);
+            }
         }
-        st = reset(st);
-        if let Some(obj) = line {
-            render_obj(arena, *obj, &mut st, &mut marks, &mut scratch, &mut result);
-        }
+        result
     }
-    result
 }

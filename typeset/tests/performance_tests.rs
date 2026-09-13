@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use typeset::{Break, Pad, comp, compile, grp, nest, render, seq, text};
 
 /// Helper function to create a layout with specified depth
-fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
+fn create_deep_layout(depth: usize) -> typeset::Layout {
     let mut layout = text("base");
 
     for i in 0..depth {
@@ -23,7 +23,7 @@ fn create_deep_layout(depth: usize) -> Box<typeset::Layout> {
 }
 
 /// Helper function to create a layout with specified width
-fn create_wide_layout(width: usize) -> Box<typeset::Layout> {
+fn create_wide_layout(width: usize) -> typeset::Layout {
     let mut layout = text("first");
 
     for i in 1..width {
@@ -154,7 +154,7 @@ fn test_memory_efficiency() {
 /// flaky (linear compiles this in a few milliseconds).
 #[test]
 fn test_nested_scope_compilation_is_linear() {
-    fn nested_seq(n: usize) -> Box<typeset::Layout> {
+    fn nested_seq(n: usize) -> typeset::Layout {
         let mut layout = text("a");
         for _ in 0..n {
             layout = seq(comp(text("a"), layout, Pad::Padded, Break::Breakable));

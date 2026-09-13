@@ -45,7 +45,7 @@ layout! { "Hello, World!" }
 ```
 
 ### Variables
-You can reference Rust variables containing `Box<Layout>` values:
+You can reference Rust variables containing `Layout` values:
 ```rust
 let name = text("Alice");
 let greeting = layout! { "Hello" + name };

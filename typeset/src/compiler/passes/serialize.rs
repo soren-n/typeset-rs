@@ -1,4 +1,4 @@
-//! serialize: LayoutArena → SerialDoc (serialize in order to normalize)
+//! serialize: resolved layout arena → SerialDoc (serialize in order to normalize)
 //!
 //! Flattens the (break-resolved) layout arena into the flat serial entry list
 //! with an explicit left-to-right DFS:
@@ -19,10 +19,9 @@
 //! entries (in leaf order) into the `SerialEntry` list, computing each
 //! composition's scope open/close deltas in the same sweep.
 
-use super::flatten::{LayId, LayoutArena, LayoutNode};
 use crate::compiler::types::{
-    Arena, Attr, Break, Id, PathId, PathNode, Prop, Range, Scope, ScopeKind, Term, TermLeaf,
-    append_range,
+    Arena, Attr, Break, Id, LayId, LayoutNode, PathId, PathNode, Prop, Range, Scope, ScopeKind,
+    Term, TermLeaf, append_range,
 };
 
 /// A flat list of leaf entries in document order; each entry is a term plus
@@ -100,9 +99,10 @@ struct Work {
     fixed: bool,
 }
 
-/// The output borrows only `text` (the layout text buffer). Every accumulator
-/// is a flat arena owned by this pass, so nothing else outlives the return.
-pub fn serialize<'a>(doc: &LayoutArena, text: &'a str) -> SerialDoc<'a> {
+/// `nodes` is a postorder layout arena whose root is its last node (the
+/// output of `resolve_breaks`) and `text` the layout's text buffer. The output
+/// borrows only `text`; every accumulator is a flat arena owned by this pass.
+pub fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> SerialDoc<'a> {
     let mut i: u32 = 0;
     let mut j: u32 = 0;
     let mut entries: Vec<Entry<'a>> = Vec::new();
@@ -115,7 +115,7 @@ pub fn serialize<'a>(doc: &LayoutArena, text: &'a str) -> SerialDoc<'a> {
     // before the left makes the left pop (and fully process) first, so the
     // counters thread left-to-right.
     let mut stack: Vec<Work> = vec![Work {
-        node: doc.root,
+        node: Id::from_index(nodes.len() - 1),
         terms: None,
         comps: None,
         glue: Glue::Last,
@@ -130,7 +130,7 @@ pub fn serialize<'a>(doc: &LayoutArena, text: &'a str) -> SerialDoc<'a> {
             glue,
             fixed,
         } = work;
-        match &doc.nodes[node] {
+        match &nodes[node] {
             // A leaf: emit its term under the accumulated wrapper path.
             leaf @ (LayoutNode::Null | LayoutNode::Text(_)) => {
                 let leaf = match leaf {
@@ -339,13 +339,13 @@ mod tests {
     const X: Range<str> = Range::new(0, 1);
 
     /// Wraps a `Text` leaf in `DEEP` layers of `wrap`.
-    fn deep_unary(wrap: fn(LayId) -> LayoutNode) -> LayoutArena {
+    fn deep_unary(wrap: fn(LayId) -> LayoutNode) -> Arena<LayoutNode> {
         let mut nodes: Arena<LayoutNode> = Arena::new();
         let mut cur = nodes.push(LayoutNode::Text(X));
         for _ in 0..DEEP {
             cur = nodes.push(wrap(cur));
         }
-        LayoutArena { nodes, root: cur }
+        nodes
     }
 
     #[test]
@@ -361,8 +361,8 @@ mod tests {
             let left = nodes.push(LayoutNode::Text(X));
             cur = nodes.push(LayoutNode::Comp(left, cur, attr));
         }
-        let doc = LayoutArena { nodes, root: cur };
-        let serial = serialize(&doc, TEXT);
+        let _ = cur;
+        let serial = serialize(&nodes, TEXT);
         // DEEP Next entries, then a final Last entry.
         let count = serial
             .entries

@@ -78,7 +78,7 @@ fn report(label: &str, before: Snap, elapsed_ns: u128, nodes: u64) {
     );
 }
 
-fn chain(n: usize, brk: Break) -> Box<Layout> {
+fn chain(n: usize, brk: Break) -> Layout {
     let mut layout = text("w0");
     for i in 1..n {
         layout = comp(layout, text(format!("w{i}")), Pad::Padded, brk);
@@ -86,11 +86,11 @@ fn chain(n: usize, brk: Break) -> Box<Layout> {
     layout
 }
 
-fn json(d: usize, fan: usize) -> Box<Layout> {
+fn json(d: usize, fan: usize) -> Layout {
     if d == 0 {
         return text("\"value\"");
     }
-    let mut body: Option<Box<Layout>> = None;
+    let mut body: Option<Layout> = None;
     for k in 0..fan {
         let entry = comp(
             text(format!("\"key_{k}\":")),
@@ -139,7 +139,7 @@ fn main() {
     // Node counts derived from the generators: chain(n) = n texts + (n-1)
     // comps; json adds per level: fan entries (text + comp) + comma fixes +
     // grp/seq/nest/braces.
-    let (layout, nodes): (Box<Layout>, u64) = match workload.as_str() {
+    let (layout, nodes): (Layout, u64) = match workload.as_str() {
         "wide" => (chain(n, Break::Breakable), (2 * n - 1) as u64),
         "fixed" => (fix(chain(n, Break::Fixed)), (2 * n) as u64),
         "json" => {

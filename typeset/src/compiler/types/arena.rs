@@ -124,6 +124,12 @@ impl<T> Arena<T> {
     pub(crate) fn as_slice(&self) -> &[T] {
         &self.items
     }
+
+    /// Appends every element of `other`, passed through `map` (which
+    /// typically shifts the element's ids by this arena's former length).
+    pub(crate) fn append(&mut self, other: Arena<T>, map: impl FnMut(T) -> T) {
+        self.items.extend(other.items.into_iter().map(map));
+    }
 }
 
 impl<T> Default for Arena<T> {

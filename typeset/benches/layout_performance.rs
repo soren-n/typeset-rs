@@ -2,7 +2,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use typeset::*;
 
 // Benchmark data structures for different complexity levels
-fn create_simple_layout() -> Box<Layout> {
+fn create_simple_layout() -> Layout {
     join_with_spaces(vec![
         text("Hello"),
         text("World"),
@@ -11,7 +11,7 @@ fn create_simple_layout() -> Box<Layout> {
     ])
 }
 
-fn create_nested_layout(depth: usize) -> Box<Layout> {
+fn create_nested_layout(depth: usize) -> Layout {
     let mut layout = text("base");
     for i in 0..depth {
         layout = nest(comp(
@@ -24,12 +24,12 @@ fn create_nested_layout(depth: usize) -> Box<Layout> {
     layout
 }
 
-fn create_wide_layout(width: usize) -> Box<Layout> {
+fn create_wide_layout(width: usize) -> Layout {
     let items: Vec<_> = (0..width).map(|i| text(format!("item_{}", i))).collect();
     join_with_spaces(items)
 }
 
-fn create_json_like_layout(size: usize) -> Box<Layout> {
+fn create_json_like_layout(size: usize) -> Layout {
     let entries: Vec<_> = (0..size)
         .map(|i| {
             unpad(
@@ -50,7 +50,7 @@ fn create_json_like_layout(size: usize) -> Box<Layout> {
                 }
             }))
             .chain(vec![null()])
-            .collect(),
+            .collect::<Vec<_>>(),
     )))
 }
 

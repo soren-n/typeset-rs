@@ -15,7 +15,7 @@ enum JsonValue {
 }
 
 /// Pretty print a JSON value using typeset combinators
-fn format_json(value: &JsonValue) -> Box<Layout> {
+fn format_json(value: &JsonValue) -> Layout {
     match value {
         JsonValue::Null => text("null"),
         JsonValue::Bool(b) => text(b.to_string()),

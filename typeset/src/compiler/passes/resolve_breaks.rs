@@ -1,4 +1,4 @@
-//! resolve_breaks: LayoutArena → LayoutArena (collapse broken sequences)
+//! resolve_breaks: Layout → Layout (collapse broken sequences)
 //!
 //! Resolves hard line breaks: a composition inside a broken sequence becomes a
 //! `Line`, and a seq wrapper whose subtree already breaks is dropped (its
@@ -10,16 +10,17 @@
 //! 3. build — forward: emit the new arena, rewriting compositions to lines
 //!    and dropping broken seq wrappers as the flags dictate.
 
-use super::flatten::{LayId, LayoutArena, LayoutNode};
-use crate::compiler::types::{Arena, Break, IdVec};
+use crate::compiler::types::{Arena, Break, Id, IdVec, LayId, LayoutNode};
 
-pub fn resolve_breaks(arena: &LayoutArena) -> LayoutArena {
-    let n = arena.nodes.len();
+/// `arena` is a layout's postorder node arena with the root last; the result
+/// has the same shape and references the same text buffer by range.
+pub fn resolve_breaks(arena: &Arena<LayoutNode>) -> Arena<LayoutNode> {
+    let n = arena.len();
 
     // 1. mark: whether each subtree contains a hard line break. Wrappers pass
     // the flag through; a Line is one; a Comp has one if either operand does.
     let mut has_line: IdVec<LayoutNode, bool> = IdVec::with_capacity(n);
-    for (_, node) in arena.nodes.iter() {
+    for (_, node) in arena.iter() {
         let flag = match *node {
             LayoutNode::Null | LayoutNode::Text(_) => false,
             LayoutNode::Fix(c)
@@ -37,7 +38,7 @@ pub fn resolve_breaks(arena: &LayoutArena) -> LayoutArena {
     // reset the context; a seq sets it to its own subtree's flag; everything
     // else passes it down. The root starts outside any sequence.
     let mut brk: IdVec<LayoutNode, bool> = IdVec::filled(false, n);
-    for (i, node) in arena.nodes.iter().rev() {
+    for (i, node) in arena.iter().rev() {
         match *node {
             LayoutNode::Null | LayoutNode::Text(_) => {}
             LayoutNode::Fix(c) | LayoutNode::Grp(c) => brk[c] = false,
@@ -53,7 +54,7 @@ pub fn resolve_breaks(arena: &LayoutArena) -> LayoutArena {
     // 3. build: emit the resolved arena bottom-up.
     let mut nodes: Arena<LayoutNode> = Arena::with_capacity(n);
     let mut out: IdVec<LayoutNode, LayId> = IdVec::with_capacity(n);
-    for (i, node) in arena.nodes.iter() {
+    for (i, node) in arena.iter() {
         let id = match *node {
             LayoutNode::Null => nodes.push(LayoutNode::Null),
             LayoutNode::Text(range) => nodes.push(LayoutNode::Text(range)),
@@ -84,18 +85,20 @@ pub fn resolve_breaks(arena: &LayoutArena) -> LayoutArena {
         out.push(id);
     }
 
-    LayoutArena {
-        nodes,
-        root: out[arena.root],
-    }
+    debug_assert_eq!(out[Id::from_index(n - 1)].index(), nodes.len() - 1);
+    nodes
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::compiler::constructors::{comp, line, seq, text};
-    use crate::compiler::passes::flatten::flatten;
     use crate::compiler::types::Pad;
+
+    /// The root of a resolved arena: always its last node.
+    fn root(nodes: &Arena<LayoutNode>) -> LayId {
+        Id::from_index(nodes.len() - 1)
+    }
 
     #[test]
     fn broken_seq_turns_comps_into_lines() {
@@ -107,23 +110,21 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let (arena, text) = flatten(*layout);
-        let out = resolve_breaks(&arena);
-        let LayoutNode::Line(l, _) = out.nodes[out.root] else {
+        let out = resolve_breaks(&layout.nodes);
+        let LayoutNode::Line(l, _) = out[root(&out)] else {
             panic!("expected the comp to become a line");
         };
-        assert!(matches!(out.nodes[l], LayoutNode::Text(r) if r.slice(&text) == "a"));
+        assert!(matches!(out[l], LayoutNode::Text(r) if r.slice(&layout.text) == "a"));
     }
 
     #[test]
     fn unbroken_seq_keeps_wrapper_and_comps() {
         let layout = seq(comp(text("a"), text("b"), Pad::Padded, Break::Breakable));
-        let (arena, _text) = flatten(*layout);
-        let out = resolve_breaks(&arena);
-        let LayoutNode::Seq(c) = out.nodes[out.root] else {
+        let out = resolve_breaks(&layout.nodes);
+        let LayoutNode::Seq(c) = out[root(&out)] else {
             panic!("expected the seq wrapper to survive");
         };
-        assert!(matches!(out.nodes[c], LayoutNode::Comp(..)));
+        assert!(matches!(out[c], LayoutNode::Comp(..)));
     }
 
     #[test]
@@ -136,12 +137,11 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let (arena, _text) = flatten(*layout);
-        let out = resolve_breaks(&arena);
+        let out = resolve_breaks(&layout.nodes);
         // Root is the outer comp turned line; its left is the fixed comp.
-        let LayoutNode::Line(l, _) = out.nodes[out.root] else {
+        let LayoutNode::Line(l, _) = out[root(&out)] else {
             panic!("expected the outer comp to become a line");
         };
-        assert!(matches!(out.nodes[l], LayoutNode::Comp(..)));
+        assert!(matches!(out[l], LayoutNode::Comp(..)));
     }
 }

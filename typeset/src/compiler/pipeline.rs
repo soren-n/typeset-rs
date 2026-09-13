@@ -5,36 +5,30 @@
 //!
 //! | Pass             | Lowers                    | Does |
 //! |------------------|---------------------------|------|
-//! | `flatten`        | `Layout` → `LayoutArena`  | flatten the input `Box` tree into a postorder arena |
-//! | `resolve_breaks` | `LayoutArena` → `LayoutArena` | collapse broken sequences into hard lines |
-//! | `serialize`      | `LayoutArena` → `SerialDoc` | flatten to leaf entries, computing scope open/close deltas |
+//! | `resolve_breaks` | `Layout` → layout arena   | collapse broken sequences into hard lines |
+//! | `serialize`      | layout arena → `SerialDoc` | flatten to leaf entries, computing scope open/close deltas |
 //! | `split_lines`    | `SerialDoc` → `FixedDoc`  | split at hard lines, coalesce fixed-composition runs |
 //! | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve, and read back the grp/seq scope graph |
 //! | `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms, strip term wrappers to prop lists |
 //! | `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq, right-associate compositions |
 //! | `rescope`        | `DenullDoc` → `Doc`       | factor shared nest/pack prefixes, build the heap `Doc` |
 //!
-//! Every representation after the input tree is a flat structure — postorder
-//! index arenas or plain vectors — so every pass is a loop (or an explicit
-//! work-stack walk) and the whole pipeline runs in constant native stack: no
-//! layout is too deep to compile, and depth shows up as O(depth) heap instead.
-//! No bump arena remains: every pass, `serialize` included, builds its
-//! accumulators in flat `Vec`-backed arenas it owns and frees on return.
-//! `flatten` concatenates all text into one buffer and every representation
-//! borrows from it — that small buffer is the only early structure that
-//! outlives its consumer pass (the node arena owns no text and drops right
-//! after `resolve_breaks`); every intermediate drops as soon as the next
-//! representation is built, so peak memory is a narrow window around the
-//! largest pair of adjacent IRs rather than the sum of all of them. The
-//! output [`Doc`] is a flat `Vec`-backed arena whose `Clone`/`Drop`/`Debug`
-//! are derived and non-recursive by construction.
+//! Every representation, the input [`Layout`] included, is a flat structure —
+//! postorder index arenas or plain vectors — so every pass is a loop (or an
+//! explicit work-stack walk) and the whole pipeline runs in constant native
+//! stack: no layout is too deep to compile, and depth shows up as O(depth)
+//! heap instead. Every pass builds its accumulators in flat `Vec`-backed
+//! arenas it owns and frees on return. The layout's text buffer is borrowed by
+//! every representation down the pipeline; every intermediate drops as soon as
+//! the next representation is built, so peak memory is a narrow window around
+//! the largest pair of adjacent IRs rather than the sum of all of them. The
+//! output [`Doc`] is a flat arena whose `Clone`/`Drop`/`Debug` are derived and
+//! non-recursive by construction.
 //!
 //! [`compile`] is the sole entry point and is infallible.
 
 use crate::compiler::{
-    passes::{
-        denull, flatten, normalize, rescope, resolve_breaks, resolve_scopes, serialize, split_lines,
-    },
+    passes::{denull, normalize, rescope, resolve_breaks, resolve_scopes, serialize, split_lines},
     types::{Doc, Layout},
 };
 
@@ -52,26 +46,15 @@ use crate::compiler::{
 /// let doc = compile(text("Hello, world!"));
 /// assert_eq!(render(&doc, 2, 80), "Hello, world!");
 /// ```
-// The public API composes `Box<Layout>` end to end (every constructor returns
-// one), so `compile` keeps the boxed parameter even though it immediately
-// moves the layout out.
-#[allow(clippy::boxed_local)]
-pub fn compile(layout: Box<Layout>) -> Box<Doc> {
-    // Flattening is the one step that walks the owning `Box` tree; every later
-    // pass folds flat structures. Text is concatenated into one buffer here and
-    // borrowed all the way down the pipeline; the node arena owns no text, so
-    // only the small text buffer outlives its consumer — everything else, the
-    // node arena included, drops as soon as its consumer pass ran.
-    let (arena, text) = flatten(*layout);
-
+pub fn compile(layout: Layout) -> Doc {
+    // The layout's text buffer is borrowed all the way down the pipeline; its
+    // node arena is dead once the breaks are resolved.
+    let Layout { nodes, text } = layout;
     let serial = {
-        // serialize builds its scope accumulators in flat arenas it owns and
-        // borrows only `text`, so both node arenas drop here.
-        let resolved = resolve_breaks(&arena);
+        let resolved = resolve_breaks(&nodes);
+        drop(nodes);
         serialize(&resolved, &text)
     };
-    // The node arena is dead now; only `text` lives on to feed `rescope`.
-    drop(arena);
 
     let denull_doc = {
         let line_doc = split_lines(&serial.entries);
@@ -83,6 +66,13 @@ pub fn compile(layout: Box<Layout>) -> Box<Doc> {
 
     let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)
+}
+
+impl Layout {
+    /// Compiles this layout into a [`Doc`]; see [`compile`].
+    pub fn compile(self) -> Doc {
+        compile(self)
+    }
 }
 
 #[cfg(test)]

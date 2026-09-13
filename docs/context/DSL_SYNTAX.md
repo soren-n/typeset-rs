@@ -25,7 +25,7 @@ A primary is the smallest unit an operator applies to:
   directly; do **not** write `text("literal")` inside the macro.
 - `null` — the empty layout, expands to `null()`.
 - `identifier` — any bare identifier that is not `null` or a unary operator is
-  treated as a variable holding a `Box<Layout>` in the surrounding scope; it
+  treated as a variable holding a `Layout` in the surrounding scope; it
   expands to `identifier.clone()`.
 - `( expr )` — a parenthesized sub-expression, used for grouping.
 
@@ -75,7 +75,7 @@ is not a simple right-leaning chain.
 ```rust
 use typeset_parser::layout;
 
-// A variable holding a Box<Layout> is referenced by bare name.
+// A variable holding a Layout is referenced by bare name.
 let body = typeset::text("body");
 
 // Padded composition, a hard break, then an indented group.

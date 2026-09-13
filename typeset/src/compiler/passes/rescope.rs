@@ -17,7 +17,7 @@ use crate::compiler::types::{
 };
 
 /// Rescope nest and pack, lowering the flat `DenullDoc` into the `Doc`.
-pub fn rescope(doc: DenullDoc) -> Box<Doc> {
+pub fn rescope(doc: DenullDoc) -> Doc {
     let DenullDoc {
         lines,
         objs,
@@ -101,7 +101,7 @@ pub fn rescope(doc: DenullDoc) -> Box<Doc> {
         })
         .collect();
 
-    Box::new(b.finish(lines))
+    b.finish(lines)
 }
 
 /// Length of the common prop prefix of `l` and `r`.

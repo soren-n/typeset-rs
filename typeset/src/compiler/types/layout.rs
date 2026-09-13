@@ -1,13 +1,6 @@
-use super::traversal::DismantleTree;
-use std::fmt;
-use std::mem;
+//! The public input type: a [`Layout`] tree stored as a flat arena.
 
-/// The two axes of a composition: padding and breakability.
-#[derive(Debug, Copy, Clone)]
-pub struct Attr {
-    pub pad: Pad,
-    pub brk: Break,
-}
+use super::arena::{Arena, Id, Range};
 
 /// Whether a composition puts a space between its two operands when they share
 /// a line — the padding axis of [`comp`](crate::comp).
@@ -50,272 +43,176 @@ impl Pad {
     }
 }
 
-/// Layout AST - the input language for the compiler
-///
-/// `Clone`, `Drop`, and `Debug` are implemented iteratively below rather than
-/// derived: a derived (recursive) impl would overflow the native stack on a
-/// deeply nested layout, the same hazard the compiler passes and renderer
-/// avoid.
-#[derive(Default)]
-pub enum Layout {
-    #[default]
+/// The two axes of a composition: padding and breakability.
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct Attr {
+    pub(crate) pad: Pad,
+    pub(crate) brk: Break,
+}
+
+pub(crate) type LayId = Id<LayoutNode>;
+
+/// One node of a [`Layout`]: children are arena ids, text is a range into
+/// the layout's text buffer.
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum LayoutNode {
     Null,
-    Text(String),
-    Fix(Box<Layout>),
-    Grp(Box<Layout>),
-    Seq(Box<Layout>),
-    Nest(Box<Layout>),
-    Pack(Box<Layout>),
-    Line(Box<Layout>, Box<Layout>),
-    Comp(Box<Layout>, Box<Layout>, Attr),
+    Text(Range<str>),
+    Fix(LayId),
+    Grp(LayId),
+    Seq(LayId),
+    Nest(LayId),
+    Pack(LayId),
+    Line(LayId, LayId),
+    Comp(LayId, LayId, Attr),
 }
 
-/// Move a node's children onto the worklist (moving each `Layout` value out of
-/// its `Box` and leaving `Null` in the box), so the recursive drop of each box
-/// terminates in O(1) and the tree is freed with a heap-allocated stack instead
-/// of the native one. See [`DismantleTree`] for the shared driver.
-///
-/// The value is moved out of the box (`mem::replace` on the pointee) rather
-/// than the box being taken whole: `mem::take` on a `Box` allocates a fresh
-/// placeholder box per child, which doubled teardown's allocator traffic.
-impl DismantleTree for Layout {
-    fn dismantle(&mut self, stack: &mut Vec<Self>) {
-        /// Move `child` onto the worklist unless it needs no dismantling: a
-        /// `Null`/`Text` leaf drops trivially, and skipping it keeps the drop
-        /// of an already-dismantled node (whose children are all `Null`
-        /// placeholders) from ever growing — and thus allocating — the
-        /// worklist.
-        fn push_child(stack: &mut Vec<Layout>, child: &mut Layout) {
-            if matches!(child, Layout::Null | Layout::Text(_)) {
-                return;
-            }
-            stack.push(mem::replace(child, Layout::Null));
-        }
+impl LayoutNode {
+    /// The same node with its child ids and text range shifted, for
+    /// appending one arena onto another.
+    fn offset(self, nodes: usize, text: usize) -> LayoutNode {
+        let id = |id: LayId| Id::from_index(id.index() + nodes);
         match self {
-            Layout::Null | Layout::Text(_) => {}
-            Layout::Fix(l)
-            | Layout::Grp(l)
-            | Layout::Seq(l)
-            | Layout::Nest(l)
-            | Layout::Pack(l) => push_child(stack, l),
-            Layout::Line(left, right) | Layout::Comp(left, right, _) => {
-                push_child(stack, left);
-                push_child(stack, right);
-            }
+            LayoutNode::Null => LayoutNode::Null,
+            LayoutNode::Text(r) => LayoutNode::Text(Range::new(r.start() + text, r.end() + text)),
+            LayoutNode::Fix(c) => LayoutNode::Fix(id(c)),
+            LayoutNode::Grp(c) => LayoutNode::Grp(id(c)),
+            LayoutNode::Seq(c) => LayoutNode::Seq(id(c)),
+            LayoutNode::Nest(c) => LayoutNode::Nest(id(c)),
+            LayoutNode::Pack(c) => LayoutNode::Pack(id(c)),
+            LayoutNode::Line(l, r) => LayoutNode::Line(id(l), id(r)),
+            LayoutNode::Comp(l, r, attr) => LayoutNode::Comp(id(l), id(r), attr),
         }
     }
 }
 
-impl Drop for Layout {
-    fn drop(&mut self) {
-        self.drain();
-    }
+/// A layout: the input to [`compile`](crate::compile). Built with the
+/// constructor functions ([`text`](crate::text), [`comp`](crate::comp),
+/// [`nest`](crate::nest), ...); never inspected directly.
+///
+/// Stored as a flat postorder arena — every node's children precede it and
+/// the root is the last node — with all text in one buffer. Combining two
+/// layouts appends the smaller arena onto the larger, so building a layout of
+/// `n` nodes costs O(n log n) in the worst case and O(n) for the usual
+/// left- or right-leaning chains. Being flat, a layout of any depth clones,
+/// drops, and prints without recursion.
+#[derive(Clone, Debug)]
+pub struct Layout {
+    pub(crate) nodes: Arena<LayoutNode>,
+    pub(crate) text: String,
 }
 
-/// Deep-copy a layout iteratively (bottom-up build with task/result stacks).
-fn clone_layout(layout: &Layout) -> Box<Layout> {
-    /// A unit of cloning work: visit a subtree, or build a parent from
-    /// already-cloned children on the result stack. A unary parent carries its
-    /// constructor directly.
-    enum Task<'a> {
-        Visit(&'a Layout),
-        Unary(fn(Box<Layout>) -> Layout),
-        Line,
-        Comp(Attr),
-    }
-    /// Push a unary parent task, then its child (which pops and clones first).
-    fn visit_unary<'a>(
-        tasks: &mut Vec<Task<'a>>,
-        ctor: fn(Box<Layout>) -> Layout,
-        child: &'a Layout,
-    ) {
-        tasks.push(Task::Unary(ctor));
-        tasks.push(Task::Visit(child));
-    }
-    let mut tasks: Vec<Task> = vec![Task::Visit(layout)];
-    let mut out: Vec<Box<Layout>> = Vec::new();
-    while let Some(task) = tasks.pop() {
-        match task {
-            Task::Visit(l) => match l {
-                Layout::Null => out.push(Box::new(Layout::Null)),
-                Layout::Text(data) => out.push(Box::new(Layout::Text(data.clone()))),
-                Layout::Fix(l1) => visit_unary(&mut tasks, Layout::Fix, l1),
-                Layout::Grp(l1) => visit_unary(&mut tasks, Layout::Grp, l1),
-                Layout::Seq(l1) => visit_unary(&mut tasks, Layout::Seq, l1),
-                Layout::Nest(l1) => visit_unary(&mut tasks, Layout::Nest, l1),
-                Layout::Pack(l1) => visit_unary(&mut tasks, Layout::Pack, l1),
-                Layout::Line(left, right) => {
-                    tasks.push(Task::Line);
-                    tasks.push(Task::Visit(right));
-                    tasks.push(Task::Visit(left));
-                }
-                Layout::Comp(left, right, attr) => {
-                    tasks.push(Task::Comp(*attr));
-                    tasks.push(Task::Visit(right));
-                    tasks.push(Task::Visit(left));
-                }
-            },
-            Task::Unary(ctor) => {
-                let inner = out.pop().expect("unary operand");
-                out.push(Box::new(ctor(inner)));
-            }
-            Task::Line => {
-                let right = out.pop().expect("line: right operand");
-                let left = out.pop().expect("line: left operand");
-                out.push(Box::new(Layout::Line(left, right)));
-            }
-            Task::Comp(attr) => {
-                let right = out.pop().expect("comp: right operand");
-                let left = out.pop().expect("comp: left operand");
-                out.push(Box::new(Layout::Comp(left, right, attr)));
-            }
+impl Layout {
+    /// A single-node layout.
+    pub(crate) fn leaf(node: LayoutNode) -> Layout {
+        let mut nodes = Arena::with_capacity(1);
+        nodes.push(node);
+        Layout {
+            nodes,
+            text: String::new(),
         }
     }
-    out.pop().expect("clone produced no result")
-}
 
-impl Clone for Layout {
-    fn clone(&self) -> Self {
-        *clone_layout(self)
+    /// A text leaf.
+    pub(crate) fn text(text: String) -> Layout {
+        let mut nodes = Arena::with_capacity(1);
+        nodes.push(LayoutNode::Text(Range::new(0, text.len())));
+        Layout { nodes, text }
     }
-}
 
-impl fmt::Debug for Layout {
-    // Iterative like `Clone` and `Drop`: a derived (recursive) `Debug` would
-    // overflow the native stack on a deep layout. Prints the derived-style
-    // compact form; the alternate (`{:#?}`) indented form is not reproduced
-    // and falls back to this compact form.
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        enum Task<'a> {
-            Visit(&'a Layout),
-            Lit(&'static str),
-            Owned(String),
-        }
-        /// Push `open` child `)` as tasks (in emit order).
-        fn visit_wrapped<'a>(stack: &mut Vec<Task<'a>>, open: &'static str, child: &'a Layout) {
-            stack.push(Task::Lit(")"));
-            stack.push(Task::Visit(child));
-            stack.push(Task::Lit(open));
-        }
-        let mut stack: Vec<Task> = vec![Task::Visit(self)];
-        while let Some(task) = stack.pop() {
-            match task {
-                Task::Lit(s) => f.write_str(s)?,
-                Task::Owned(s) => f.write_str(&s)?,
-                Task::Visit(l) => match l {
-                    Layout::Null => f.write_str("Null")?,
-                    Layout::Text(data) => f.write_str(&format!("Text({:?})", data))?,
-                    Layout::Fix(l1) => visit_wrapped(&mut stack, "Fix(", l1),
-                    Layout::Grp(l1) => visit_wrapped(&mut stack, "Grp(", l1),
-                    Layout::Seq(l1) => visit_wrapped(&mut stack, "Seq(", l1),
-                    Layout::Nest(l1) => visit_wrapped(&mut stack, "Nest(", l1),
-                    Layout::Pack(l1) => visit_wrapped(&mut stack, "Pack(", l1),
-                    Layout::Line(left, right) => {
-                        stack.push(Task::Lit(")"));
-                        stack.push(Task::Visit(right));
-                        stack.push(Task::Lit(", "));
-                        stack.push(Task::Visit(left));
-                        stack.push(Task::Lit("Line("));
-                    }
-                    Layout::Comp(left, right, attr) => {
-                        stack.push(Task::Owned(format!(", {:?})", attr)));
-                        stack.push(Task::Visit(right));
-                        stack.push(Task::Lit(", "));
-                        stack.push(Task::Visit(left));
-                        stack.push(Task::Lit("Comp("));
-                    }
-                },
-            }
-        }
-        Ok(())
+    /// The root node's id: always the last node.
+    pub(crate) fn root(&self) -> LayId {
+        Id::from_index(self.nodes.len() - 1)
+    }
+
+    /// Wraps the whole layout in a unary node.
+    pub(crate) fn unary(mut self, make: impl FnOnce(LayId) -> LayoutNode) -> Layout {
+        let root = self.root();
+        self.nodes.push(make(root));
+        self
+    }
+
+    /// Joins two layouts under a binary node. The smaller arena is appended
+    /// onto the larger (ids and text ranges shifted), then the parent is
+    /// pushed, so both operands still precede it.
+    pub(crate) fn binary(
+        left: Layout,
+        right: Layout,
+        make: impl FnOnce(LayId, LayId) -> LayoutNode,
+    ) -> Layout {
+        let left_is_base = left.nodes.len() >= right.nodes.len();
+        let (mut base, other) = if left_is_base {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        let base_root = base.root();
+        let node_offset = base.nodes.len();
+        let text_offset = base.text.len();
+        base.text.push_str(&other.text);
+        base.nodes
+            .append(other.nodes, |node| node.offset(node_offset, text_offset));
+        let other_root = base.root();
+        let (l, r) = if left_is_base {
+            (base_root, other_root)
+        } else {
+            (other_root, base_root)
+        };
+        base.nodes.push(make(l, r));
+        base
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::constructors::{comp, nest, text};
 
-    // Past where a recursive clone/drop/print aborted.
+    /// Deeper than a native-stack recursion could survive.
     const DEEP: usize = 50_000;
 
-    fn deep_nest(depth: usize) -> Box<Layout> {
-        let mut layout = Box::new(Layout::Text("x".to_string()));
-        for _ in 0..depth {
-            layout = Box::new(Layout::Nest(layout));
-        }
-        layout
+    #[test]
+    fn nodes_are_postorder_with_root_last() {
+        let layout = comp(text("a"), nest(text("b")), Pad::Padded, Break::Breakable);
+        let nodes = layout.nodes.as_slice();
+        assert_eq!(nodes.len(), 4);
+        let LayoutNode::Comp(l, r, _) = nodes[layout.root().index()] else {
+            panic!("root is the comp");
+        };
+        assert!(matches!(nodes[l.index()], LayoutNode::Text(s) if s.slice(&layout.text) == "a"));
+        let LayoutNode::Nest(c) = nodes[r.index()] else {
+            panic!("right is the nest");
+        };
+        assert!(matches!(nodes[c.index()], LayoutNode::Text(s) if s.slice(&layout.text) == "b"));
     }
 
     #[test]
-    fn deep_drop_is_iterative() {
-        let layout = deep_nest(DEEP);
-        drop(layout);
-    }
-
-    #[test]
-    fn deep_comp_drop_is_iterative() {
-        let mut layout = Box::new(Layout::Text("x".to_string()));
+    fn right_leaning_chain_merges_small_into_large() {
+        // Each step joins a one-node leaf with the growing chain; the chain
+        // stays the base, so the whole build is linear.
+        let mut layout = text("z");
         for _ in 0..DEEP {
-            layout = Box::new(Layout::Comp(
-                layout,
-                Box::new(Layout::Text("y".to_string())),
-                Attr {
-                    pad: Pad::Unpadded,
-                    brk: Break::Breakable,
-                },
-            ));
+            layout = comp(text("y"), layout, Pad::Unpadded, Break::Breakable);
         }
-        drop(layout);
+        assert_eq!(layout.nodes.len(), 2 * DEEP + 1);
+        // The text buffer holds every leaf regardless of merge direction.
+        assert_eq!(layout.text.len(), DEEP + 1);
+        let LayoutNode::Comp(l, _, _) = layout.nodes[layout.root()] else {
+            panic!("root is a comp");
+        };
+        assert!(matches!(layout.nodes[l], LayoutNode::Text(s) if s.slice(&layout.text) == "y"));
     }
 
     #[test]
-    fn deep_clone_is_iterative() {
-        let layout = deep_nest(DEEP);
+    fn deep_layout_clones_drops_and_debugs_flat() {
+        let mut layout = text("x");
+        for _ in 0..DEEP {
+            layout = nest(layout);
+        }
         let cloned = layout.clone();
-        let mut depth = 0usize;
-        let mut cur: &Layout = &cloned;
-        loop {
-            match cur {
-                Layout::Nest(inner) => {
-                    depth += 1;
-                    cur = inner;
-                }
-                Layout::Text(data) => {
-                    assert_eq!(data, "x");
-                    break;
-                }
-                _ => panic!("unexpected node"),
-            }
-        }
-        assert_eq!(depth, DEEP);
-        // Both `layout` and `cloned` drop here via the iterative Drop.
-    }
-
-    #[test]
-    fn clone_and_debug_match_expected() {
-        let layout = Layout::Comp(
-            Box::new(Layout::Text("a".to_string())),
-            Box::new(Layout::Grp(Box::new(Layout::Line(
-                Box::new(Layout::Text("b".to_string())),
-                Box::new(Layout::Null),
-            )))),
-            Attr {
-                pad: Pad::Padded,
-                brk: Break::Breakable,
-            },
-        );
-        let expected =
-            "Comp(Text(\"a\"), Grp(Line(Text(\"b\"), Null)), Attr { pad: Padded, brk: Breakable })";
-        assert_eq!(format!("{:?}", layout), expected);
-        assert_eq!(format!("{:?}", layout.clone()), expected);
-    }
-
-    #[test]
-    fn deep_debug_is_iterative() {
-        let layout = deep_nest(DEEP);
-        let s = format!("{:?}", *layout);
-        assert!(s.starts_with("Nest("));
-        assert_eq!(s.matches("Nest(").count(), DEEP);
-        assert!(s.contains("Text(\"x\")"));
+        assert_eq!(cloned.nodes.len(), DEEP + 1);
+        let _ = format!("{:?}", cloned);
+        drop(layout);
+        drop(cloned);
     }
 }

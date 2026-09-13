@@ -5,7 +5,6 @@
 //! [`pipeline`](crate::compiler::pipeline).
 
 pub mod denull;
-pub mod flatten;
 pub mod normalize;
 pub mod rescope;
 pub mod resolve_breaks;
@@ -15,7 +14,6 @@ pub mod split_lines;
 
 // Re-export all pass functions
 pub use denull::denull;
-pub use flatten::flatten;
 pub use normalize::normalize;
 pub use rescope::rescope;
 pub use resolve_breaks::resolve_breaks;
