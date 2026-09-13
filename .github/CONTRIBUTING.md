@@ -100,8 +100,8 @@ cargo fmt --check
 cargo clippy --all-targets --all-features
 cargo test --all --all-features
 
-# Run OCaml tests
-cd tests && ./build.sh && ./run.sh
+# Differential harness against the OCaml reference
+cd tests && ./build.sh && ./run.sh && python3 fuzz.py 3000 1
 
 # Quick formatting fix
 ./scripts/fix-code-quality.sh

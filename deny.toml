@@ -1,6 +1,5 @@
 # Configuration for cargo-deny
 # See: https://embarkstudios.github.io/cargo-deny/
-# Migrated to cargo-deny v2 schema (v1 lint-level fields removed upstream).
 
 [graph]
 # If true, metadata will be collected with `--all-features`
@@ -17,33 +16,27 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # Behaviour for yanked crate versions: "deny" | "warn" | "allow"
 yanked = "warn"
 # Scope of unmaintained-advisory checks: "all" | "workspace" | "transitive" | "none".
-# v1 used `unmaintained = "warn"` (non-failing); "none" preserves that
-# non-failing behaviour (vulnerabilities/unsound now always error in v2).
+# Unmaintained-only advisories do not fail the check; vulnerabilities do.
 unmaintained = "none"
 # A list of advisory IDs to ignore.
 ignore = []
 
 [licenses]
-# v2 is allow-only: anything not listed here is denied (the old explicit
-# `deny`/`unlicensed` keys were removed upstream; GPL/AGPL remain denied
-# implicitly by not being in `allow`).
+# Allow-only: anything not listed here is denied. This is exactly the set the
+# current dependency graph uses; a new dependency under another permissive
+# license fails the check and is added here deliberately.
 allow = [
     "MIT",
     "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
-    "Unicode-DFS-2016",
     "Unicode-3.0",
 ]
 confidence-threshold = 0.8
-# This project is GPL-3.0-or-later; its own first-party workspace crates
-# carry GPL via LICENSE files (no SPDX manifest field). Scope the GPL
-# allowance to those crates only — third-party deps must stay permissive.
+# This project is GPL-3.0-or-later. Scope the GPL allowance to the workspace
+# crates only; third-party dependencies must stay permissive.
 exceptions = [
     { name = "typeset", allow = ["GPL-3.0-or-later"] },
     { name = "typeset-parser", allow = ["GPL-3.0-or-later"] },
+    { name = "typeset-differential", allow = ["GPL-3.0-or-later"] },
 ]
 
 [bans]

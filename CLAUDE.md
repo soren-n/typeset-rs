@@ -5,25 +5,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 Rust workspace for typeset pretty printing library:
-- **typeset**: DSL for defining source code pretty printers
-- **typeset-parser**: Procedural macro parser for compile-time DSL parsing
+- **typeset**: the layout language, compiler, renderer, and `typeset::dsl` (runtime DSL parser)
+- **typeset-parser**: the `layout!` procedural macro (compile-time DSL)
+- **tests/differential**: unpublished driver the OCaml differential harness renders through
+
+The compiler is a port of an OCaml reference implementation; every change must
+render byte-identically to it (the pre-commit hook and CI run the QCheck suite
+and the differential fuzzer).
 
 ## Quick Reference
 
 ### Essential Commands
 ```bash
-# Build and test
-cargo build && cd tests && ./run.sh
+# Rust tests
+cargo test --all
 
-# Fix code quality issues  
+# Differential harness against the OCaml reference (needs opam: qcheck, typeset)
+cd tests && ./build.sh && ./run.sh && python3 fuzz.py 3000 1
+
+# Fix code quality issues
 ./scripts/fix-code-quality.sh
 
 # Run examples
-cargo run --example <name> -p typeset-parser
+cargo run --example <name> -p typeset
 ```
 
 ### Pre-commit Requirements
-All commits must pass: formatting, linting, type checking, Rust tests, and OCaml property-based tests. A git hook enforces these — run `./scripts/install-hooks.sh` once per clone to enable it.
+All commits must pass: formatting, linting, type checking, doc build, Rust tests, the differential fuzzer, and the OCaml QCheck suite. A git hook enforces these — run `./scripts/install-hooks.sh` once per clone to enable it.
 
 ## Detailed Context
 

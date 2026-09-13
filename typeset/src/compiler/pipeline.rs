@@ -9,7 +9,7 @@
 //! | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve, and read back the grp/seq scope graph |
 //! | `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms, strip term wrappers to prop lists |
 //! | `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq, right-associate compositions |
-//! | `rescope`        | `DenullDoc` → `Doc`       | factor shared nest/pack prefixes, build the heap `Doc` |
+//! | `rescope`        | `DenullDoc` → `Doc`       | factor shared nest/pack prefixes, build the `Doc` and its extent tables |
 //!
 //! Every representation, the input [`Layout`] included, is a flat structure —
 //! postorder index arenas or plain vectors — so every pass is a loop (or an

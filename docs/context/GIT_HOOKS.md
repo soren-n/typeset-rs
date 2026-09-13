@@ -35,8 +35,10 @@ The hook is not active in a fresh clone — run `./scripts/install-hooks.sh` onc
    - **Requirement**: All tests must pass (blocking)
    - **Coverage**: Unit tests, integration tests, doc tests
 
-6. **OCaml Property-Based Testing**
-   - **Requirement**: All OCaml tests must pass (blocking)
+6. **Differential harness** (`tests/build.sh`, then `fuzz.py 1000 1` and
+   `run.sh`)
+   - **Requirement**: the Rust renderer must match the OCaml reference byte
+     for byte on 1000 fuzzed layouts and the QCheck suite (blocking)
    - **Setup**: dependencies must be installed manually (see Prerequisites)
    - **Dependencies**: `qcheck`, `typeset` OCaml packages
    - **Skip**: set `SKIP_OCAML=1` to bypass this step only
@@ -97,7 +99,7 @@ Some issues require manual intervention:
 4. **Type Check**: All code must compile cleanly
 5. **Doc Build**: `cargo doc` must succeed (no broken intra-doc links)
 6. **Rust Tests**: All Rust unit and integration tests must pass
-7. **OCaml Tests**: Property-based tests must pass
+7. **Differential harness**: fuzzer and QCheck suite must match the reference
 8. **Commit**: Only proceeds if all checks pass
 
 Because the checks read the working tree rather than the index, a commit that

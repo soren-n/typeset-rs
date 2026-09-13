@@ -7,6 +7,7 @@
 cargo build                    # Build all workspace members
 cargo build -p typeset        # Build specific crate
 cargo build -p typeset-parser
+cargo build -p typeset-differential   # the differential driver (tests/differential)
 ```
 
 ### Release Builds
@@ -19,8 +20,11 @@ cargo build --release -p typeset
 
 ### Quick Test Setup
 ```bash
-cd tests && ./build.sh        # Build test infrastructure (OCaml tester + Rust unit tests)
-cd tests && ./run.sh          # Run all tests
+cargo test --all                 # Rust unit, integration and doc tests
+cd tests && ./build.sh           # OCaml tester + oracle, Rust differential driver
+./run.sh                         # QCheck property suite against the reference
+python3 fuzz.py 3000 1           # grp/seq-biased differential fuzzer (rounds, seed)
+./compare.sh '"a" + grp ("b" + "c")' 2 3   # one expression, both implementations
 ```
 
 ### Test System Architecture
@@ -44,8 +48,8 @@ cd tests && ./run.sh          # Run all tests
 # Rust only
 cargo test --all --all-features
 
-# OCaml only (requires setup)
-cd tests/tester && dune exec ./bin/main.exe
+# OCaml oracle only (after ./build.sh; run.sh and fuzz.py run from tests/)
+cd tests && ./run.sh
 
 # Benchmarks (small-input latency + asymptotic scaling suites)
 cargo bench -p typeset --bench layout_performance
@@ -94,9 +98,8 @@ cargo check --all-targets --all-features  # Type checking
 ## Key Dependencies
 
 ### Runtime Dependencies
-- **typeset**: none (the compiler is self-contained — only the standard
-  library; the former `bumpalo` bump allocator has been retired)
-- **typeset-parser**: `syn`, `quote`, `proc-macro2` for procedural macros
+- **typeset**: none, standard library only
+- **typeset-parser**: `syn`, `quote`, `proc-macro2`
 
 ### Development Dependencies
 - `criterion`: Benchmarking framework

@@ -72,7 +72,7 @@ cargo run --example full -p typeset-parser
 ## Documentation
 
 - [API reference (docs.rs)](https://docs.rs/typeset)
-- [DSL syntax reference](docs/context/DSL_SYNTAX.md)
+- [DSL syntax reference](docs/context/DSL_SYNTAX.md) (compile time via `layout!`, run time via `typeset::dsl::parse`)
 - [Architecture overview](docs/context/ARCHITECTURE.md)
 - [Contributing guide](.github/CONTRIBUTING.md)
 

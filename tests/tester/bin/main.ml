@@ -54,9 +54,9 @@ let rust_impl layout_dsl tab width =
 
 (* Each case pairs a layout with a (tab, width) to render at. Fixing the
    dimensions per case (rather than always 2/80) is what exercises the breaking
-   decisions structurize drives: the width is biased narrow, where grp/seq
-   scopes actually differ. tab/width are part of the case so shrinking keeps
-   the failing dimensions fixed while it minimizes the layout. *)
+   decisions: the width is biased narrow, where grp/seq scopes actually differ.
+   tab/width are part of the case so shrinking keeps the failing dimensions
+   fixed while it minimizes the layout. *)
 let gen_case =
   let open QCheck.Gen in
   gen_eDSL >>= fun layout ->
