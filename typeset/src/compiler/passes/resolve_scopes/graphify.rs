@@ -11,7 +11,7 @@
 //! linear in the number of scopes.
 
 use super::graph::{EdgeData, GraphDoc, GraphLine, NodeData, NodeId};
-use crate::compiler::passes::split_lines::{FixedComp, FixedDoc, FixedItem, FixedLine};
+use crate::compiler::passes::serialize::{FixedComp, FixedDoc, FixedItem, FixedLine};
 use crate::compiler::types::{Arena, Range, Scope, ScopeKind};
 use std::collections::BTreeMap;
 
@@ -44,7 +44,7 @@ fn apply_comp(
     }
 }
 
-pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>, scopes: &[Scope]) -> GraphDoc<'b, 'a> {
+pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>) -> GraphDoc<'b, 'a> {
     // Every item across all lines is one node.
     let mut g = GraphDoc {
         fixed: doc,
@@ -58,7 +58,7 @@ pub(super) fn graphify<'b, 'a>(doc: &'b FixedDoc<'a>, scopes: &[Scope]) -> Graph
     // resolving a line's item/sep ranges borrows `doc` while `g.nodes` is
     // pushed to — two disjoint borrows.
     for &line in &doc.lines {
-        visit_line(&mut g, doc, line, scopes, &mut edges);
+        visit_line(&mut g, doc, line, &mut edges);
     }
     g
 }
@@ -71,9 +71,9 @@ fn visit_line<'b, 'a>(
     g: &mut GraphDoc<'b, 'a>,
     doc: &FixedDoc<'a>,
     line: FixedLine<'a>,
-    scopes: &[Scope],
     edges: &mut Vec<Edge>,
 ) {
+    let scopes = &doc.scopes;
     let start = g.nodes.len();
     let mut open: OpenScopes = BTreeMap::new();
     edges.clear();

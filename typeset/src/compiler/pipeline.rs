@@ -5,9 +5,7 @@
 //!
 //! | Pass             | Lowers                    | Does |
 //! |------------------|---------------------------|------|
-//! | `resolve_breaks` | `Layout` → layout arena   | collapse broken sequences into hard lines |
-//! | `serialize`      | layout arena → `SerialDoc` | flatten to leaf entries, computing scope open/close deltas |
-//! | `split_lines`    | `SerialDoc` → `FixedDoc`  | split at hard lines, coalesce fixed-composition runs |
+//! | `serialize`      | `Layout` → `FixedDoc`     | split into lines at hard breaks (and inside broken sequences), coalesce fixed runs, record scope open/close deltas |
 //! | `resolve_scopes` | `FixedDoc` → `RebuildDoc` | build, solve, and read back the grp/seq scope graph |
 //! | `denull`         | `RebuildDoc` → `DenullDoc`| drop null/empty terms, strip term wrappers to prop lists |
 //! | `normalize`      | `DenullDoc` → `DenullDoc` | eliminate trivial grp/seq, right-associate compositions |
@@ -28,7 +26,7 @@
 //! [`compile`] is the sole entry point and is infallible.
 
 use crate::compiler::{
-    passes::{denull, normalize, rescope, resolve_breaks, resolve_scopes, serialize, split_lines},
+    passes::{denull, normalize, rescope, resolve_scopes, serialize},
     types::{Doc, Layout},
 };
 
@@ -48,21 +46,16 @@ use crate::compiler::{
 /// ```
 pub fn compile(layout: Layout) -> Doc {
     // The layout's text buffer is borrowed all the way down the pipeline; its
-    // node arena is dead once the breaks are resolved.
+    // node arena is dead once serialized.
     let Layout { nodes, text } = layout;
-    let serial = {
-        let resolved = resolve_breaks(&nodes);
-        drop(nodes);
-        serialize(&resolved, &text)
-    };
+    let fixed = serialize(&nodes, &text);
+    drop(nodes);
 
     let denull_doc = {
-        let line_doc = split_lines(&serial.entries);
-        let scoped_doc = resolve_scopes(&line_doc, &serial.scopes);
-        drop(line_doc);
-        denull(&scoped_doc, &serial.paths)
+        let scoped_doc = resolve_scopes(&fixed);
+        denull(&scoped_doc, &fixed.paths)
     };
-    drop(serial);
+    drop(fixed);
 
     let normalized_doc = normalize(denull_doc);
     rescope(normalized_doc)

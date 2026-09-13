@@ -15,8 +15,8 @@ mod graphify;
 mod rebuild;
 mod solve;
 
-use super::split_lines::FixedDoc;
-use crate::compiler::types::{Arena, Fix, Id, Obj, Scope, Term};
+use super::serialize::FixedDoc;
+use crate::compiler::types::{Arena, Fix, Id, Obj, Term};
 
 pub(crate) type RObjId<'a> = Id<Obj<Term<'a>>>;
 pub(crate) type RFixId<'a> = Id<Fix<Term<'a>>>;
@@ -32,8 +32,8 @@ pub(crate) struct RebuildDoc<'a> {
     pub(crate) fixes: Arena<Fix<Term<'a>>>,
 }
 
-pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>, scopes: &[Scope]) -> RebuildDoc<'a> {
-    let mut graph = graphify::graphify(doc, scopes);
+pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>) -> RebuildDoc<'a> {
+    let mut graph = graphify::graphify(doc);
     solve::solve(&mut graph);
     rebuild::rebuild(&graph)
 }
@@ -41,7 +41,7 @@ pub fn resolve_scopes<'a>(doc: &FixedDoc<'a>, scopes: &[Scope]) -> RebuildDoc<'a
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::passes::split_lines::{FixRun, FixedComp, FixedItem, FixedLine};
+    use crate::compiler::passes::serialize::{FixRun, FixedComp, FixedItem, FixedLine};
     use crate::compiler::types::{Pad, PathNode, Prop, Range, TermLeaf};
 
     /// Wraps `items` and `item_seps` arenas as a single-line [`FixedDoc`] with
@@ -57,6 +57,8 @@ mod tests {
             item_seps,
             terms: Vec::new(),
             run_seps: Vec::new(),
+            paths: Arena::new(),
+            scopes: Vec::new(),
         }
     }
 
@@ -95,7 +97,7 @@ mod tests {
         }
         items.push(FixedItem::Term(text_term("z")));
         let doc = one_line(items, item_seps);
-        let out = resolve_scopes(&doc, &[]);
+        let out = resolve_scopes(&doc);
         // One line, rebuilt as a right-nested composition spine.
         let [root] = out.lines[..] else {
             panic!("expected one line")
@@ -125,7 +127,7 @@ mod tests {
             leaf: TermLeaf::Text("x"),
         };
         let doc = one_line(vec![FixedItem::Term(term)], Vec::new());
-        let out = resolve_scopes(&doc, &[]);
+        let out = resolve_scopes(&doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -167,8 +169,10 @@ mod tests {
             item_seps: Vec::new(),
             terms,
             run_seps,
+            paths: Arena::new(),
+            scopes: Vec::new(),
         };
-        let out = resolve_scopes(&doc, &[]);
+        let out = resolve_scopes(&doc);
         let [root] = out.lines[..] else {
             panic!("expected one line")
         };
@@ -204,8 +208,10 @@ mod tests {
             item_seps: Vec::new(),
             terms: Vec::new(),
             run_seps: Vec::new(),
+            paths: Arena::new(),
+            scopes: Vec::new(),
         };
-        let out = resolve_scopes(&doc, &[]);
+        let out = resolve_scopes(&doc);
         assert_eq!(out.lines.len(), DEEP);
     }
 }
