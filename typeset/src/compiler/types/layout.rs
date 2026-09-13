@@ -174,16 +174,16 @@ mod tests {
     #[test]
     fn nodes_are_postorder_with_root_last() {
         let layout = comp(text("a"), nest(text("b")), Pad::Padded, Break::Breakable);
-        let nodes = layout.nodes.as_slice();
+        let nodes = &layout.nodes;
         assert_eq!(nodes.len(), 4);
-        let LayoutNode::Comp(l, r, _) = nodes[layout.root().index()] else {
+        let LayoutNode::Comp(l, r, _) = nodes[layout.root()] else {
             panic!("root is the comp");
         };
-        assert!(matches!(nodes[l.index()], LayoutNode::Text(s) if s.slice(&layout.text) == "a"));
-        let LayoutNode::Nest(c) = nodes[r.index()] else {
+        assert!(matches!(nodes[l], LayoutNode::Text(s) if s.slice(&layout.text) == "a"));
+        let LayoutNode::Nest(c) = nodes[r] else {
             panic!("right is the nest");
         };
-        assert!(matches!(nodes[c.index()], LayoutNode::Text(s) if s.slice(&layout.text) == "b"));
+        assert!(matches!(nodes[c], LayoutNode::Text(s) if s.slice(&layout.text) == "b"));
     }
 
     #[test]
