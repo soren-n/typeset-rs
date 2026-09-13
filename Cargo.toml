@@ -23,7 +23,7 @@ all = { level = "warn", priority = -1 }
 [workspace.dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "3.0", features = ["full"] }
+syn = "3.0"
 typeset = { version = "4.1.0", path = "typeset" }
 typeset-parser = { version = "4.1.0", path = "typeset-parser" }
 criterion = { version = "0.8", features = ["html_reports"] }

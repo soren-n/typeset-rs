@@ -17,7 +17,6 @@ readme = "README.md"
 workspace = true
 
 [dev-dependencies]
-typeset-parser.workspace = true
 criterion.workspace = true
 
 [[bench]]

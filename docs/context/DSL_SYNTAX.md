@@ -99,9 +99,13 @@ let regrouped = layout! { ("a" + "b") + "c" };
 
 ## Parser implementation notes
 
-- Built on the `syn` crate; primaries, unary operators, and infix operators are
-  parsed by ordered speculative alternatives (`parse_any`).
+- The grammar has one implementation, `typeset::dsl::parse_tokens`, an
+  iterative parser over `typeset::dsl::Token`s that hands the parsed
+  structure to a `typeset::dsl::Build`. `typeset::dsl::parse` tokenizes a
+  string and builds a `Layout`; the `layout!` macro flattens its Rust token
+  trees into the same tokens (with their spans as positions) and builds
+  constructor calls, so the two front ends cannot disagree.
 - Each node expands directly to the matching named constructor
-  (`unpad`/`pad`/`fix_unpad`/`fix_pad`/`line`/`null`/`text`/`fix`/`grp`/`seq`/`nest`/`pack`),
-  so the macro never re-derives raw composition booleans.
-- Errors carry span information for editor integration.
+  (`unpad`/`pad`/`fix_unpad`/`fix_pad`/`line`/`null`/`text`/`fix`/`grp`/`seq`/`nest`/`pack`).
+- Errors carry the offending token's byte offset (run time) or span
+  (compile time).

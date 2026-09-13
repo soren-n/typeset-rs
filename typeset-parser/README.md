@@ -72,8 +72,8 @@ binop   := & | + | !& | !+ | @ | @@
 ## Errors
 
 Parse failures are compile errors with the span of the offending token, for
-example `Expected a unary operator` on an unknown identifier in operator
-position.
+example `expected an operator` on two adjacent primaries. The grammar has one
+implementation, in `typeset::dsl`; the macro feeds it Rust tokens.
 
 ## Debugging
 
