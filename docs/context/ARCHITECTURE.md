@@ -129,14 +129,14 @@ source sits at `~/.opam/default/lib/typeset/Typeset.ml`.
 ## typeset-macro crate (`typeset-macro/src/`)
 
 `lib.rs`: the `layout!` macro. It flattens its Rust token trees into
-`typeset::dsl` tokens (spans as positions), reads each string literal's
+`typeset::dsl::grammar` tokens (spans as positions), reads each string literal's
 source text with the DSL's own string syntax, hands the tokens to the
 shared token parser, and builds constructor calls through its builder
 trait, so the macro and `Layout`'s `FromStr` share one grammar
 implementation and accept the same literals. A bare identifier is a
 variable: a `Layout` in scope, cloned. Errors are spanned `compile_error!`
-invocations. The crate depends on `proc-macro2` and `quote` alone; the
-crate README is its documentation.
+invocations. Beyond `typeset`, the crate depends on `proc-macro2` and
+`quote` alone; the crate README is its documentation.
 
 ## Layout language
 

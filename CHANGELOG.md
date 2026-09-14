@@ -63,7 +63,7 @@ git history.
   open spines that drop empty texts, decide the grp/seq identities,
   right-nest every spine and factor shared nest/pack wrappers). The
   intermediate is one line whatever the document's size.
-  Every item is a run of one or more fixed-joined terms; a `Doc` run is
+  Every item is a run of one or more fixed-joined texts; a `Doc` run is
   one contiguous string, and a `Doc` object is measured as it is pushed.
   The fix tree, the term leaf enum, the `Null` node, the rebuilt
   intermediate and the lowering pass are gone (`null()` is `text("")`,
@@ -71,7 +71,7 @@ git history.
   links replace sentinels throughout.
 * The nest/pack wrappers on the paths to the leaves and the grp/seq scope
   chains are both parent-linked trees of one type; the path tree is a trie
-  (one `Nest` child per node), so the wrappers two terms share are the
+  (one `Nest` child per node), so the wrappers two texts share are the
   chain of their lowest common ancestor. Factoring them out was
   O(leaves × depth): a 1000-word chain under 4096 nests compiled in
   2.45 ms and now compiles in 0.08 ms, flat in depth.

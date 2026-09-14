@@ -23,13 +23,14 @@ pub use self::layout::{Break, Layout, Pad};
 // The pipeline: `lines` (Layout -> lines of events) feeding `emit` (lines
 // -> Doc, through the scope `graph` of each line) one line at a time, since
 // nothing crosses a hard line; each module documents its pass, and
-// docs/context/ARCHITECTURE.md the whole. Every representation, the input [`Layout`] included, is a flat
-// structure — postorder index arenas or plain vectors — so every pass is a
-// loop (or an explicit work-stack walk) and the whole pipeline runs in
-// constant native stack: no layout is too deep to compile, and depth shows
-// up as O(depth) heap instead. The intermediate is one line, borrowing the
-// layout's text. The output [`Doc`] is a flat arena whose
-// `Clone`/`Drop`/`Debug` are derived and non-recursive by construction.
+// docs/context/ARCHITECTURE.md the whole. Every representation, the input
+// [`Layout`] included, is a flat structure — postorder index arenas or
+// plain vectors — so every pass is a loop (or an explicit work-stack walk)
+// and the whole pipeline runs in constant native stack: no layout is too
+// deep to compile, and depth shows up as O(depth) heap instead. The
+// intermediate is one line, borrowing the layout's text. The output
+// [`Doc`] is a flat arena: `Clone` and `Drop` derive, and `Debug` walks it
+// with an explicit stack, so none of them recurse.
 
 impl Layout {
     /// Compiles this layout into a [`Doc`].
