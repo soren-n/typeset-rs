@@ -6,6 +6,7 @@
 
 open Typeset
 open EDSL
+open Word
 
 let print_layout layout =
   let open Printf in
@@ -14,7 +15,7 @@ let print_layout layout =
   let rec _visit layout wrap =
     match layout with
     | UNull -> "null"
-    | UText data -> sprintf "\"%s\"" data
+    | UText data -> print_word data
     | UFix layout1 ->
       _visit layout1 _group |> fun dsl ->
       wrap (sprintf "fix %s" dsl)
