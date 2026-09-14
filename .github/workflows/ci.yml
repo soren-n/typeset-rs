@@ -95,3 +95,9 @@ jobs:
       run: |
         cd oracle
         for i in 1 2 3; do opam exec -- ./_build/tester; done
+
+    # The pinned cases' expected blocks must be what the reference renders.
+    - name: Pinned cases are current
+      run: |
+        cd oracle && opam exec -- ./pin.sh
+        git diff --exit-code -- ../typeset/tests/oracle.txt

@@ -1,0 +1,125 @@
+# Rendering cases pinned to the OCaml reference.
+#
+# A case is `[tab width] layout` in the DSL, followed by the reference's
+# rendering, one `|` line per output line. The expected blocks are written
+# by `oracle/pin.sh`, never by hand: run it after adding a header, and the
+# hook and CI fail if a block is stale.
+
+# Compositions with and without a space.
+[2 80] "Hello" & "World"
+|HelloWorld
+[2 80] "Hello" + "World"
+|Hello World
+
+# A hard line break.
+[2 80] "First" @ "Second"
+|First
+|Second
+
+# nest indents the lines after a break, and the first line when at the head.
+[2 80] "Prefix:" & nest ("Indented" @ "text")
+|Prefix:Indented
+|  text
+[2 5] nest ("aaaa" + "bbbb")
+|  aaaa
+|  bbbb
+
+# grp fits as a block or breaks every composition.
+[2 80] "Before" + grp ("grouped" + "content")
+|Before grouped content
+[2 12] "Before" + grp (("grouped" + "content") + ("that" + "breaks"))
+|Before
+|grouped
+|content that
+|breaks
+
+# seq inside grp breaks all-or-nothing; grp inside seq keeps its own fit.
+[2 3] grp (seq (("a" + "b") + "c"))
+|a
+|b
+|c
+[2 3] seq (grp (("a" + "b") + "c"))
+|a b
+|c
+
+# seq cascades once one composition breaks.
+[2 15] "Before" + seq ((("seq1" + "seq2") + "seq3") + "seq4")
+|Before seq1
+|seq2
+|seq3
+|seq4
+
+# A seq containing a hard line breaks everywhere.
+[2 80] seq (("a" + ("b" @ "c")) + "d")
+|a
+|b
+|c
+|d
+
+# pack aligns continuation lines to its first column.
+[2 20] "Start" + pack (("first" & "second") & "third")
+|Start firstsecond
+|      third
+[2 6] "f(" & (nest (pack (("x" + "y") + "z")) & ")")
+|f(x y
+|  z)
+[2 25] "Config:" + pack ((((("key1" + "value1") !& ",") + ("key2" + "value2")) !& ",") + ("longer_key" + "value3"))
+|Config: key1 value1, key2
+|        value2,
+|        longer_key value3
+
+# Comma lists align under the first argument.
+[2 80] "f(" & (pack (seq (("a" !& ",") + "b")) & ")")
+|f(a, b)
+[2 6] "f(" & (pack (seq (("aaa" !& ",") + "bbb")) & ")")
+|f(aaa,
+|  bbb)
+
+# A fixed run takes the wrappers of its first literal: `(` fixed before the
+# packed arguments joins the first argument into its run, so no alignment.
+[2 6] "f(" !& (pack (seq (("aaa" !& ",") + "bbb")) !& ")")
+|f(aaa,
+|bbb)
+
+# fix and fixed compositions never break.
+[2 10] ("breakable" + "content") & fix ("fixed" + "content")
+|breakable
+|content
+|fixed content
+[2 3] ("!" !+ "cond") & ("-" !& ">")
+|! cond
+|->
+
+# Mixed wrappers.
+[3 30] grp (seq (fix "FIXED" + nest (pack (((("item_a" !& ",") + "item_b") !& ",") + "item_c"))))
+|FIXED item_a, item_b, item_c
+
+# null and the empty text vanish, with their wrappers.
+[2 80] null
+|
+[2 80] ""
+|
+[2 80] "Before" + null
+|Before
+[2 3] nest null + "a"
+|a
+
+# Empty lines are kept, at the start, in the middle and at the end.
+[2 80] "Section 1" @ (null @ "Section 2")
+|Section 1
+|
+|Section 2
+[2 80] "a" @ null
+|a
+|
+[2 80] null @ "a"
+|
+|a
+
+# One document at two widths.
+[2 100] "This" + ("is" + ("a" + "test"))
+|This is a test
+[2 5] "This" + ("is" + ("a" + "test"))
+|This
+|is a
+|test

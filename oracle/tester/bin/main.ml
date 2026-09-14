@@ -1,7 +1,8 @@
 (* The oracle harness. With no arguments, the QCheck identity suite: for
    generated layouts, tabs and widths, the reference's rendering equals the
    Rust driver's. With a layout DSL string (and optionally a tab and width),
-   one case rendered by both implementations. *)
+   one case rendered by both implementations. With --reference, the
+   reference's rendering alone, as the `|` lines of a pinned case. *)
 
 open Typeset
 open EDSL
@@ -107,12 +108,18 @@ let rust_ocaml_identity =
         false
       end)
 
+let parse_or_exit layout_dsl =
+  try Parse.parse layout_dsl with
+  | Parse.Parse_error message ->
+    prerr_endline ("parse error: " ^ message); exit 2
+
+let reference layout_dsl tab width =
+  ocaml_impl (parse_or_exit layout_dsl) tab width
+  |> String.split_on_char '\n'
+  |> List.iter (fun line -> print_endline ("|" ^ line))
+
 let compare_one layout_dsl tab width =
-  let layout =
-    try Parse.parse layout_dsl with
-    | Parse.Parse_error message ->
-      prerr_endline ("parse error: " ^ message); exit 2
-  in
+  let layout = parse_or_exit layout_dsl in
   let expected = ocaml_impl layout tab width in
   let actual = rust_impl layout_dsl tab width in
   if expected = actual then begin
@@ -129,7 +136,11 @@ let () =
   | [ layout_dsl ] -> exit (compare_one layout_dsl 2 80)
   | [ layout_dsl; tab; width ] ->
     exit (compare_one layout_dsl (int_of_string tab) (int_of_string width))
+  | [ "--reference"; layout_dsl; tab; width ] ->
+    reference layout_dsl (int_of_string tab) (int_of_string width)
   | _ ->
     prerr_endline "usage: tester                          the identity suite";
     prerr_endline "       tester '<layout dsl>' [tab width] one case, both implementations";
+    prerr_endline "       tester --reference '<layout dsl>' tab width";
+    prerr_endline "                                        the reference's rendering, as a pinned case";
     exit 2

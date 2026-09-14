@@ -43,4 +43,8 @@ echo "pre-commit: building the oracle harness..."
 echo "pre-commit: running the oracle identity suite..."
 (cd oracle && ./_build/tester) || fail "the Rust renderer diverged from the OCaml reference"
 
+echo "pre-commit: checking the pinned cases against the reference..."
+(cd oracle && ./pin.sh) || fail "pinning failed"
+git diff --quiet -- typeset/tests/oracle.txt || fail "typeset/tests/oracle.txt was stale; oracle/pin.sh rewrote it, review and stage it"
+
 echo "pre-commit: all checks passed."

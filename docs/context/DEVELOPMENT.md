@@ -18,6 +18,7 @@ opam install dune qcheck typeset.0.4  # once
 cd oracle && ./build.sh           # OCaml tester and oracle, Rust driver, into _build/
 ./_build/tester                   # 20000 generated layouts, both implementations
 ./_build/tester '"a" + grp ("b" + "c")' 2 3    # one expression, both implementations
+./pin.sh                          # re-pin typeset/tests/oracle.txt from the reference
 ```
 
 The reference is pinned at `typeset.0.4`; the tester is a QCheck property: for a generated layout, tab and width, the
@@ -28,10 +29,14 @@ for fifteen runs). QCheck shrinks a failing case; the DSL it prints feeds
 the tester's single-case mode directly. The driver is one process for the
 whole run, answering one request per line, so a run takes seconds.
 
-The Rust tests in `typeset/tests/rendering.rs` pin exact outputs. Every
-expected string there came from the oracle for the same layout, tab and
-width; add cases the same way, never by pasting what the Rust
-implementation printed.
+`typeset/tests/oracle.txt` pins exact outputs: each case is a layout in
+the DSL with a tab and width, and the expected block under it is what the
+reference rendered. `oracle/pin.sh` writes those blocks (the tester's
+`--reference` mode prints one), so add a case as a header line and run it;
+the hook and CI re-pin and fail on a stale block, so no expected output
+can come from the Rust implementation. The one behaviour that cannot be
+pinned, width counted in characters rather than bytes, is a Rust test in
+`typeset/tests/rendering.rs`.
 
 ### Code standards
 
@@ -58,8 +63,9 @@ Hooks are tracked in `.githooks/` and activated once per clone:
 
 The hook runs what CI runs: `cargo fmt --check`, `cargo clippy` with
 warnings denied (which type-checks every target), `cargo doc`, `cargo
-test`, then the oracle harness. It fails if the OCaml toolchain is missing; `SKIP_OCAML=1` skips
-the harness explicitly. The checks read the working tree, not the index, so
+test`, then the oracle harness and the re-pin of `oracle.txt`. It fails if
+the OCaml toolchain is missing; `SKIP_OCAML=1` skips the harness
+explicitly. The checks read the working tree, not the index, so
 a partially staged commit is validated against everything on disk; CI
 validates each pushed commit. `git commit --no-verify` bypasses the hook;
 CI does not.
@@ -74,9 +80,10 @@ fixes.
   `cargo check` plus `cargo test` on the MSRV (1.96.0); lints run on
   stable alone so new lints never break the MSRV job. The committed
   `Cargo.lock` keeps the MSRV job deterministic.
-- `oracle`: installs OCaml, builds the oracle harness and runs the
-  tester three times with three random seeds. A contributor without OCaml
-  still gets their change checked against the reference here.
+- `oracle`: installs OCaml, builds the oracle harness, runs the tester
+  three times with three random seeds, and re-pins `oracle.txt` to check
+  it is current. A contributor without OCaml still gets their change
+  checked against the reference here.
 
 `deny.yml` runs `cargo deny` (advisories, the license allow-list in
 `deny.toml`, duplicate versions, sources) on every change and weekly, so a

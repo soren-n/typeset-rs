@@ -23,6 +23,7 @@ cargo test --all
 # Oracle harness against the OCaml reference (needs opam: dune, qcheck, typeset)
 cd oracle && ./build.sh && ./_build/tester
 ./_build/tester '"a" + grp ("b" + "c")' 2 3    # one expression, both implementations
+./pin.sh                                       # re-pin typeset/tests/oracle.txt
 
 # Run examples; profiling probes are harness-less benches
 cargo run --example <name> -p typeset

@@ -15,8 +15,9 @@ Rust stable (MSRV 1.96.0) and opam are the prerequisites.
 The compiler is a port of the OCaml `typeset` package and every change must
 render byte-identically to it. The pre-commit hook and CI run the oracle
 harness (`cd oracle && ./build.sh && ./_build/tester`); if it disagrees
-with you, the reference is right. Exact-output tests take their expected
-strings from the oracle, never from the Rust implementation.
+with you, the reference is right. Exact-output cases live in
+`typeset/tests/oracle.txt`, and their expected blocks are written from the
+reference by `oracle/pin.sh`, never by hand.
 
 ## Pull requests
 
