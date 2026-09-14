@@ -748,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_scopes_are_rebuilt_as_wrappers() {
+    fn nested_scopes_become_wrappers() {
         let layout = pad(text("x"), pad(grp(pad(text("a"), text("b"))), text("c")));
         assert_eq!(shape(&layout), "Comp(x, Comp(Grp(Comp(a, b)), c))");
         let layout = seq(pad(

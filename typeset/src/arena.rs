@@ -98,7 +98,7 @@ impl<T> Arena<T> {
     }
 
     /// The elements in id order, paired with their ids.
-    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = (Id<T>, &T)> + ExactSizeIterator {
+    pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
         self.items
             .iter()
             .enumerate()
@@ -178,9 +178,7 @@ impl<K, V> IdVec<K, V> {
     }
 
     /// Every id in order. The iterator does not borrow the table.
-    pub(crate) fn ids(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = Id<K>> + ExactSizeIterator + use<K, V> {
+    pub(crate) fn ids(&self) -> impl ExactSizeIterator<Item = Id<K>> + use<K, V> {
         (0..self.items.len()).map(Id::from_index)
     }
 }

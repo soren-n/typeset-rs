@@ -38,8 +38,9 @@ implementation printed.
 - Never recurse on the native stack over user-controlled depth. Every
   representation is a flat postorder arena, so bottom-up folds are forward
   loops, inherited context is a backward loop, and `Clone`/`Drop`/`Debug`
-  derive. Where a walk needs a stack (the DFS in `serialize`, the renderer,
-  the DSL parser), it is an explicit `Vec` of frames.
+  derive. Where a walk needs a stack (the DFS in `serialize`, the spines
+  open in `structure`'s emitter, the renderer, the DSL parser), it is an
+  explicit `Vec` of frames.
 - Use the arena primitives in `arena.rs`: `Arena<T>` with typed `Id<T>`s,
   `IdVec<K, V>` side tables, `Range<T>` into shared buffers, and
   `Option<Id<T>>` for absent links; never raw indices or sentinels.
