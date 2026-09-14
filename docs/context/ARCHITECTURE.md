@@ -86,12 +86,15 @@ reproduce it.
 ### `Doc` and the renderer
 
 `Doc` is one optional root object per line (`None` for an empty line), an
-object arena, one text buffer (a run is one contiguous range of it, with
-the spaces of its padded fixed compositions already joined), and one side
-table of measures: each object's mid-line extent and its mid-line distance
-to the first composition boundary. Mid-line, neither nest nor pack advances
-the position, so both are exact state-independent sums over the children,
-computed as each object is pushed (children always precede their parent).
+object arena, and one text buffer (a run is one contiguous range of it,
+with the spaces of its padded fixed compositions already joined). An
+object carries its node and its measures: its mid-line extent and its
+mid-line distance to the first composition boundary. Mid-line, neither
+nest nor pack advances the position, so both are exact state-independent
+sums over the children, computed as each object is pushed (children
+always precede their parent). `Debug` prints the document in the DSL,
+through the same iterative printer as `Layout`; the document is a normal
+form, so that DSL compiles to the same document.
 
 The renderer walks the arena with an explicit frame stack. `should_break`
 is arithmetic on the boundary measure. `will_fit` is arithmetic on the

@@ -1,6 +1,7 @@
 //! The public input type: a [`Layout`] tree stored as a flat arena.
 
 use crate::arena::{Arena, Id, Range};
+use crate::dsl::{self, Binary, Shape, Unary};
 use std::fmt;
 
 /// Whether a composition puts a space between its two operands when they share
@@ -164,91 +165,22 @@ impl Layout {
     }
 }
 
-/// The DSL form of the layout. Every binary operator has one precedence
-/// level and associates right, and a unary operator takes a primary, so a
-/// left operand or a wrapped layout is parenthesized when it is not a text.
+/// The DSL form of the layout.
 impl fmt::Debug for Layout {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        /// A pending piece of output: a node (parenthesized or not) or a
-        /// literal fragment.
-        enum Item {
-            Node(LayId, bool),
-            Str(&'static str),
-        }
-        let nodes = &self.nodes;
-        let is_text = |id: LayId| matches!(nodes[id], LayoutNode::Text(_));
-        // Pieces are pushed in reverse so they pop in reading order.
-        let mut stack = vec![Item::Node(self.root(), false)];
-        while let Some(item) = stack.pop() {
-            let (id, paren) = match item {
-                Item::Str(s) => {
-                    f.write_str(s)?;
-                    continue;
-                }
-                Item::Node(id, paren) => (id, paren),
-            };
-            if paren {
-                stack.push(Item::Str(")"));
+        dsl::write_dsl(f, self.root(), |id| match self.nodes[id] {
+            LayoutNode::Text(range) => Shape::Text(range.slice(&self.text)),
+            LayoutNode::Fix(child) => Shape::Unary(Unary::Fix, child),
+            LayoutNode::Grp(child) => Shape::Unary(Unary::Grp, child),
+            LayoutNode::Seq(child) | LayoutNode::Broken(child) => Shape::Unary(Unary::Seq, child),
+            LayoutNode::Nest(child) => Shape::Unary(Unary::Nest, child),
+            LayoutNode::Pack(child) => Shape::Unary(Unary::Pack, child),
+            LayoutNode::Line(left, right) => Shape::Binary(left, Binary::Line, right),
+            LayoutNode::Comp(left, right, pad, brk) => {
+                Shape::Binary(left, Binary::Comp(pad, brk), right)
             }
-            match nodes[id] {
-                LayoutNode::Text(range) => write_text(f, range.slice(&self.text))?,
-                LayoutNode::Fix(child)
-                | LayoutNode::Grp(child)
-                | LayoutNode::Seq(child)
-                | LayoutNode::Broken(child)
-                | LayoutNode::Nest(child)
-                | LayoutNode::Pack(child) => {
-                    let keyword = match nodes[id] {
-                        LayoutNode::Fix(_) => "fix ",
-                        LayoutNode::Grp(_) => "grp ",
-                        LayoutNode::Seq(_) | LayoutNode::Broken(_) => "seq ",
-                        LayoutNode::Nest(_) => "nest ",
-                        _ => "pack ",
-                    };
-                    stack.push(Item::Node(child, !is_text(child)));
-                    stack.push(Item::Str(keyword));
-                }
-                LayoutNode::Line(left, right) | LayoutNode::Comp(left, right, ..) => {
-                    let op = match nodes[id] {
-                        LayoutNode::Line(..) => " @ ",
-                        LayoutNode::Comp(_, _, pad, brk) => match (pad, brk) {
-                            (Pad::Unpadded, Break::Breakable) => " & ",
-                            (Pad::Padded, Break::Breakable) => " + ",
-                            (Pad::Unpadded, Break::Fixed) => " !& ",
-                            (Pad::Padded, Break::Fixed) => " !+ ",
-                        },
-                        _ => unreachable!("matched a binary node"),
-                    };
-                    let left_binary =
-                        matches!(nodes[left], LayoutNode::Line(..) | LayoutNode::Comp(..));
-                    stack.push(Item::Node(right, false));
-                    stack.push(Item::Str(op));
-                    stack.push(Item::Node(left, left_binary));
-                }
-            }
-            if paren {
-                stack.push(Item::Str("("));
-            }
-        }
-        Ok(())
+        })
     }
-}
-
-/// A DSL string literal: the DSL's escapes and every other character raw.
-fn write_text(f: &mut fmt::Formatter, text: &str) -> fmt::Result {
-    f.write_str("\"")?;
-    for c in text.chars() {
-        match c {
-            '\\' => f.write_str("\\\\")?,
-            '"' => f.write_str("\\\"")?,
-            '\n' => f.write_str("\\n")?,
-            '\r' => f.write_str("\\r")?,
-            '\t' => f.write_str("\\t")?,
-            '\0' => f.write_str("\\0")?,
-            c => write!(f, "{c}")?,
-        }
-    }
-    f.write_str("\"")
 }
 
 #[cfg(test)]

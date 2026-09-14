@@ -396,24 +396,13 @@ mod tests {
     use crate::constructors::{comp, fix, grp, nest, null, pack, seq, text};
     use crate::layout::{Break, Layout};
 
-    /// The document of a one-line layout, printed as nested constructor
-    /// names over the runs' texts.
+    /// The document of a layout in the DSL, checked to be a normal form:
+    /// compiling that DSL gives the same document.
     fn shape(layout: Layout) -> String {
-        let doc = layout.compile();
-        let [root] = doc.lines[..] else {
-            panic!("expected one line")
-        };
-        fn obj(doc: &Doc, id: ObjId) -> String {
-            match doc.objs[id] {
-                ObjNode::Run(range) => range.slice(&doc.text).to_string(),
-                ObjNode::Grp(c) => format!("Grp({})", obj(doc, c)),
-                ObjNode::Seq(c) => format!("Seq({})", obj(doc, c)),
-                ObjNode::Nest(c) => format!("Nest({})", obj(doc, c)),
-                ObjNode::Pack(_, c) => format!("Pack({})", obj(doc, c)),
-                ObjNode::Comp(l, r, _) => format!("Comp({}, {})", obj(doc, l), obj(doc, r)),
-            }
-        }
-        root.map_or_else(|| "Empty".to_string(), |root| obj(&doc, root))
+        let dsl = format!("{:?}", layout.compile());
+        let again = crate::dsl::parse(&dsl).expect("the document prints as the DSL");
+        assert_eq!(format!("{:?}", again.compile()), dsl, "not a normal form");
+        dsl
     }
 
     fn pad(l: Layout, r: Layout) -> Layout {
@@ -427,12 +416,12 @@ mod tests {
     #[test]
     fn nested_scopes_become_wrappers() {
         let layout = pad(text("x"), pad(grp(pad(text("a"), text("b"))), text("c")));
-        assert_eq!(shape(layout), "Comp(x, Comp(Grp(Comp(a, b)), c))");
+        assert_eq!(shape(layout), r#""x" + grp ("a" + "b") + "c""#);
         let layout = seq(pad(
             text("a"),
             pad(text("b"), grp(pad(text("c"), text("d")))),
         ));
-        assert_eq!(shape(layout), "Seq(Comp(a, Comp(b, Grp(Comp(c, d)))))");
+        assert_eq!(shape(layout), r#"seq ("a" + "b" + grp ("c" + "d"))"#);
     }
 
     #[test]
@@ -443,7 +432,7 @@ mod tests {
             text("x"),
             grp(seq(pad(text("a"), pad(text("b"), text("c"))))),
         );
-        assert_eq!(shape(layout), "Comp(x, Grp(Seq(Comp(a, Comp(b, c)))))");
+        assert_eq!(shape(layout), r#""x" + grp (seq ("a" + "b" + "c"))"#);
     }
 
     #[test]
@@ -452,7 +441,7 @@ mod tests {
         // into one run, so the grp cannot end between them; it widens to
         // include c.
         let layout = pad(text("x"), fixed(grp(pad(text("a"), text("b"))), text("c")));
-        assert_eq!(shape(layout), "Comp(x, Grp(Comp(a, b c)))");
+        assert_eq!(shape(layout), r#""x" + grp ("a" + "b c")"#);
     }
 
     #[test]
@@ -464,13 +453,13 @@ mod tests {
             seq(pad(text("a"), pad(text("b"), text("c")))),
             grp(pad(text("d"), text("e"))),
         );
-        assert_eq!(shape(layout), "Seq(Comp(a, Comp(b, Grp(Comp(c d, e)))))");
+        assert_eq!(shape(layout), r#"seq ("a" + "b" + grp ("c d" + "e"))"#);
     }
 
     #[test]
     fn a_fix_is_one_run() {
         let layout = fix(pad(pad(text("a"), text("b")), text("c")));
-        assert_eq!(shape(layout), "a b c");
+        assert_eq!(shape(layout), r#""a b c""#);
     }
 
     #[test]
@@ -478,14 +467,14 @@ mod tests {
         // (a + b) + grp(c) + d: the grp groups nothing and is dropped; the
         // whole line is one right-nested spine.
         let layout = pad(pad(text("a"), text("b")), pad(grp(text("c")), text("d")));
-        assert_eq!(shape(layout), "Comp(a, Comp(b, Comp(c, d)))");
+        assert_eq!(shape(layout), r#""a" + "b" + "c" + "d""#);
     }
 
     #[test]
     fn a_grp_at_the_head_of_its_group_is_absorbed() {
         assert_eq!(
             shape(pad(grp(pad(text("a"), text("b"))), text("c"))),
-            "Comp(a, Comp(b, c))"
+            r#""a" + "b" + "c""#
         );
         // Inside a kept seq the head resets, so the grp survives.
         assert_eq!(
@@ -493,16 +482,16 @@ mod tests {
                 grp(pad(text("a"), text("b"))),
                 pad(text("c"), text("d"))
             ))),
-            "Seq(Comp(Grp(Comp(a, b)), Comp(c, d)))"
+            r#"seq (grp ("a" + "b") + "c" + "d")"#
         );
     }
 
     #[test]
     fn a_seq_needs_two_compositions_and_no_seq_above_it() {
-        assert_eq!(shape(seq(pad(text("a"), text("b")))), "Comp(a, b)");
+        assert_eq!(shape(seq(pad(text("a"), text("b")))), r#""a" + "b""#);
         assert_eq!(
             shape(seq(pad(text("a"), seq(pad(text("b"), text("c")))))),
-            "Seq(Comp(a, Comp(b, c)))"
+            r#"seq ("a" + "b" + "c")"#
         );
         // A grp beneath a seq is opaque to its count.
         assert_eq!(
@@ -510,14 +499,14 @@ mod tests {
                 text("x"),
                 seq(grp(pad(text("a"), pad(text("b"), text("c")))))
             )),
-            "Comp(x, Grp(Comp(a, Comp(b, c))))"
+            r#""x" + grp ("a" + "b" + "c")"#
         );
     }
 
     #[test]
     fn empty_texts_vanish_and_their_pads_merge() {
-        assert_eq!(shape(null()), "Empty");
-        assert_eq!(shape(pad(nest(null()), text("a"))), "a");
+        assert_eq!(shape(null()), r#""""#);
+        assert_eq!(shape(pad(nest(null()), text("a"))), r#""a""#);
         // The pads around a vanished middle element merge; a vanished
         // leading element's pad is dropped even across a wrapper.
         let layout = comp(
@@ -526,27 +515,23 @@ mod tests {
             Pad::Unpadded,
             Break::Breakable,
         );
-        let doc = layout.compile();
-        let root = doc.lines[0].expect("a survives");
-        assert!(matches!(doc.objs[root], ObjNode::Comp(_, _, Pad::Padded)));
+        assert_eq!(shape(layout), r#""a" + "b""#);
         let layout = comp(
             text("a"),
             grp(comp(null(), text("b"), Pad::Padded, Break::Breakable)),
             Pad::Unpadded,
             Break::Breakable,
         );
-        let doc = layout.compile();
-        let root = doc.lines[0].expect("a survives");
-        assert!(matches!(doc.objs[root], ObjNode::Comp(_, _, Pad::Unpadded)));
+        assert_eq!(shape(layout), r#""a" & "b""#);
     }
 
     #[test]
     fn shared_wrapper_prefixes_are_factored_out() {
         let layout = pack(nest(pad(text("a"), text("b"))));
-        assert_eq!(shape(layout), "Pack(Nest(Comp(a, b)))");
+        assert_eq!(shape(layout), r#"pack (nest ("a" + "b"))"#);
         let layout = pad(nest(text("a")), nest(text("b")));
-        assert_eq!(shape(layout), "Nest(Comp(a, b))");
+        assert_eq!(shape(layout), r#"nest ("a" + "b")"#);
         let layout = pad(nest(text("a")), text("b"));
-        assert_eq!(shape(layout), "Comp(Nest(a), b)");
+        assert_eq!(shape(layout), r#"nest "a" + "b""#);
     }
 }

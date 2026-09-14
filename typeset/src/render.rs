@@ -156,12 +156,12 @@ impl<'a> Renderer<'a> {
     /// the first time would only lift the level to the position, which is
     /// no change at the head of a line, and a measure never records marks.
     fn head_end(&self, obj: ObjId, cur: Cursor) -> usize {
-        let Doc { objs, measures, .. } = self.doc;
+        let objs = &self.doc.objs;
         let mut lvl = cur.lvl;
         let mut pos = cur.pos;
         let mut o = obj;
         loop {
-            o = match &objs[o] {
+            o = match &objs[o].node {
                 ObjNode::Run(_) => break,
                 ObjNode::Grp(child) | ObjNode::Seq(child) => *child,
                 ObjNode::Comp(left, ..) => *left,
@@ -179,7 +179,7 @@ impl<'a> Renderer<'a> {
                 }
             };
         }
-        pos + measures[obj].extent
+        pos + objs[obj].extent
     }
 
     /// Whether `obj` fits within the width if laid out from `cur`.
@@ -187,7 +187,7 @@ impl<'a> Renderer<'a> {
         let end = if cur.head {
             self.head_end(obj, cur)
         } else {
-            cur.pos + self.doc.measures[obj].extent
+            cur.pos + self.doc.objs[obj].extent
         };
         end <= self.cfg.width
     }
@@ -196,27 +196,22 @@ impl<'a> Renderer<'a> {
     /// width. Break decisions are made mid-line, where the precomputed
     /// boundary distance is exact.
     fn should_break(&self, obj: ObjId, cur: Cursor) -> bool {
-        cur.broken || self.cfg.width < cur.pos + self.doc.measures[obj].next_comp
+        cur.broken || self.cfg.width < cur.pos + self.doc.objs[obj].next_comp
     }
 
     /// Renders one document object, threading the cursor. Marks recorded
     /// here are kept: they accumulate forward across the whole document.
     fn render_obj(&mut self, obj: ObjId, cur: &mut Cursor) {
-        let Doc {
-            objs,
-            text,
-            measures,
-            ..
-        } = self.doc;
+        let Doc { objs, text, .. } = self.doc;
         let mut stack = std::mem::take(&mut self.frames);
         stack.clear();
         stack.push(Frame::Obj(obj));
         while let Some(frame) = stack.pop() {
             match frame {
-                Frame::Obj(o) => match &objs[o] {
+                Frame::Obj(o) => match &objs[o].node {
                     ObjNode::Run(range) => {
                         self.out.push_str(range.slice(text));
-                        cur.advance(measures[o].extent);
+                        cur.advance(objs[o].extent);
                     }
                     ObjNode::Grp(child) => {
                         stack.push(Frame::RestoreBreak(cur.broken));

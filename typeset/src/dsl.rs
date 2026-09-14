@@ -43,6 +43,18 @@ pub enum Unary {
 }
 
 impl Unary {
+    /// The keyword.
+    #[must_use]
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Unary::Fix => "fix",
+            Unary::Grp => "grp",
+            Unary::Seq => "seq",
+            Unary::Nest => "nest",
+            Unary::Pack => "pack",
+        }
+    }
+
     /// The keyword for `name`, if it is one.
     #[must_use]
     pub fn from_keyword(name: &str) -> Option<Unary> {
@@ -70,6 +82,19 @@ pub enum Binary {
 }
 
 impl Binary {
+    /// The operator's spelling.
+    #[must_use]
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Binary::Line => "@",
+            Binary::BlankLine => "@@",
+            Binary::Comp(Pad::Unpadded, Break::Breakable) => "&",
+            Binary::Comp(Pad::Padded, Break::Breakable) => "+",
+            Binary::Comp(Pad::Unpadded, Break::Fixed) => "!&",
+            Binary::Comp(Pad::Padded, Break::Fixed) => "!+",
+        }
+    }
+
     /// The operator spelled `op`, if any. Longest match is the caller's job:
     /// `!&` and `@@` must arrive whole.
     #[must_use]
@@ -232,6 +257,86 @@ impl<O> Frame<O> {
         }
         result
     }
+}
+
+// --- Printing ---------------------------------------------------------------
+
+/// A node of a tree as the DSL printer sees it: a text, a unary operator
+/// over a node, or two nodes under a binary operator.
+pub(crate) enum Shape<'a, N> {
+    Text(&'a str),
+    Unary(Unary, N),
+    Binary(N, Binary, N),
+}
+
+/// Prints the tree under `root` in the DSL, reading each node's shape with
+/// `shape`. Every binary operator has one precedence level and associates
+/// right, and a unary operator takes a primary, so a left operand or a
+/// wrapped node is parenthesized when it is not a text. Iterative: depth
+/// costs heap, never native stack.
+pub(crate) fn write_dsl<'a, N: Copy>(
+    f: &mut fmt::Formatter,
+    root: N,
+    shape: impl Fn(N) -> Shape<'a, N>,
+) -> fmt::Result {
+    /// A pending piece of output: a node (parenthesized or not) or a
+    /// literal fragment.
+    enum Piece<N> {
+        Node(N, bool),
+        Str(&'static str),
+    }
+    let is_text = |node: N| matches!(shape(node), Shape::Text(_));
+    // Pieces are pushed in reverse so they pop in reading order.
+    let mut stack = vec![Piece::Node(root, false)];
+    while let Some(piece) = stack.pop() {
+        let (node, paren) = match piece {
+            Piece::Str(s) => {
+                f.write_str(s)?;
+                continue;
+            }
+            Piece::Node(node, paren) => (node, paren),
+        };
+        if paren {
+            stack.push(Piece::Str(")"));
+        }
+        match shape(node) {
+            Shape::Text(text) => write_text(f, text)?,
+            Shape::Unary(op, child) => {
+                stack.push(Piece::Node(child, !is_text(child)));
+                stack.push(Piece::Str(" "));
+                stack.push(Piece::Str(op.keyword()));
+            }
+            Shape::Binary(left, op, right) => {
+                let left_binary = matches!(shape(left), Shape::Binary(..));
+                stack.push(Piece::Node(right, false));
+                stack.push(Piece::Str(" "));
+                stack.push(Piece::Str(op.symbol()));
+                stack.push(Piece::Str(" "));
+                stack.push(Piece::Node(left, left_binary));
+            }
+        }
+        if paren {
+            stack.push(Piece::Str("("));
+        }
+    }
+    Ok(())
+}
+
+/// A DSL string literal: the DSL's escapes and every other character raw.
+fn write_text(f: &mut fmt::Formatter, text: &str) -> fmt::Result {
+    f.write_str("\"")?;
+    for c in text.chars() {
+        match c {
+            '\\' => f.write_str("\\\\")?,
+            '"' => f.write_str("\\\"")?,
+            '\n' => f.write_str("\\n")?,
+            '\r' => f.write_str("\\r")?,
+            '\t' => f.write_str("\\t")?,
+            '\0' => f.write_str("\\0")?,
+            c => write!(f, "{c}")?,
+        }
+    }
+    f.write_str("\"")
 }
 
 // --- The run-time front end ------------------------------------------------
