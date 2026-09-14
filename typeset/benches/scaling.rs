@@ -52,8 +52,9 @@ fn bench_render_scaling(c: &mut Criterion) {
         });
     }
 
-    // Width sweep on a grp/seq-heavy document: the renderer's look-ahead is
-    // width-bounded, so cost rises with width until subtree size caps it.
+    // Width sweep on a grp/seq-heavy document: break decisions are
+    // arithmetic on precomputed extents, so cost must stay flat in width
+    // (it varies only with the output size the width produces).
     let doc = json(5, 8).compile();
     for width in [20, 80, 1_280, 20_480, 100_000] {
         group.bench_with_input(

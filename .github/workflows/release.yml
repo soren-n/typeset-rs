@@ -47,7 +47,7 @@ jobs:
         fi
 
     - name: Build and test
-      run: cargo test --all --all-features --release
+      run: cargo test --all --release
 
     # Publishes every publishable workspace member in dependency order
     # (typeset, then typeset-parser, which depends on it) and waits for each

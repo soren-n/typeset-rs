@@ -4,7 +4,7 @@
 
 ```bash
 git clone https://github.com/soren-n/typeset-rs.git && cd typeset-rs
-opam install dune qcheck typeset   # the OCaml reference the tests compare against
+opam install dune qcheck typeset.0.4   # the OCaml reference the tests compare against
 ./scripts/install-hooks.sh         # the pre-commit gate
 ```
 

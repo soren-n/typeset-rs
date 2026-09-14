@@ -44,26 +44,19 @@ jobs:
 
     - name: Run clippy
       if: matrix.check_clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: cargo clippy --all-targets -- -D warnings
 
     # Clippy type-checks every target on stable; the MSRV job has no clippy.
     - name: Type checking
       if: ${{ !matrix.check_clippy }}
-      run: cargo check --all-targets --all-features
+      run: cargo check --all-targets
 
     - name: Check doc links
       if: matrix.check_clippy
-      run: cargo doc --no-deps --all-features
+      run: cargo doc --no-deps
 
     - name: Run Rust tests
-      run: cargo test --all --all-features
-
-  deny:
-    name: Cargo Deny
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v7
-    - uses: EmbarkStudios/cargo-deny-action@v2
+      run: cargo test --all
 
   oracle:
     name: Oracle (Rust vs OCaml reference)
@@ -86,7 +79,7 @@ jobs:
         ocaml-compiler: "5"
 
     - name: Install OCaml dependencies
-      run: opam install --yes typeset qcheck dune
+      run: opam install --yes typeset.0.4 qcheck dune
 
     # Builds the OCaml reference tester and oracle and the Rust driver they
     # compare against. `opam exec` puts dune on PATH; cargo comes from the

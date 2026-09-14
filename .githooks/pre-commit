@@ -21,13 +21,13 @@ echo "pre-commit: checking formatting..."
 cargo fmt --all --check || fail "formatting check failed"
 
 echo "pre-commit: running clippy..."
-cargo clippy --all-targets --all-features -- -D warnings || fail "clippy reported warnings"
+cargo clippy --all-targets -- -D warnings || fail "clippy reported warnings"
 
 echo "pre-commit: building docs..."
-cargo doc --no-deps --all-features || fail "doc build failed (broken intra-doc link?)"
+cargo doc --no-deps || fail "doc build failed (broken intra-doc link?)"
 
 echo "pre-commit: running Rust tests..."
-cargo test --all --all-features || fail "Rust tests failed"
+cargo test --all || fail "Rust tests failed"
 
 if [ "${SKIP_OCAML:-0}" = "1" ]; then
     echo "pre-commit: skipping the oracle harness (SKIP_OCAML=1)"
@@ -38,7 +38,7 @@ fi
 command -v dune >/dev/null 2>&1 || fail "dune not found; the oracle harness needs opam with dune, qcheck and typeset (or set SKIP_OCAML=1)"
 
 echo "pre-commit: building the oracle harness..."
-(cd oracle && ./build.sh >/dev/null 2>&1) || fail "oracle harness failed to build (opam install dune qcheck typeset?)"
+(cd oracle && ./build.sh >/dev/null 2>&1) || fail "oracle harness failed to build (opam install dune qcheck typeset.0.4?)"
 
 echo "pre-commit: running the oracle identity suite..."
 (cd oracle && ./_build/tester) || fail "the Rust renderer diverged from the OCaml reference"

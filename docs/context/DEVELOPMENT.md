@@ -14,13 +14,13 @@ The compiler is a port of the OCaml `typeset` package, and every change is
 held to byte-identical output against it. `oracle/` holds the harness:
 
 ```bash
-opam install dune qcheck typeset  # once
+opam install dune qcheck typeset.0.4  # once
 cd oracle && ./build.sh           # OCaml tester and oracle, Rust driver, into _build/
 ./_build/tester                   # 20000 generated layouts, both implementations
 ./_build/tester '"a" + grp ("b" + "c")' 2 3    # one expression, both implementations
 ```
 
-The tester is a QCheck property: for a generated layout, tab and width, the
+The reference is pinned at `typeset.0.4`; the tester is a QCheck property: for a generated layout, tab and width, the
 reference's rendering equals the Rust driver's. The generator is biased
 toward stacked grp/seq wrappers and narrow widths, which is where breaking
 decisions diverge (a uniform generator missed a `grp(seq(x))` ordering bug
@@ -74,13 +74,13 @@ fixes.
   `cargo check` plus `cargo test` on the MSRV (1.96.0); lints run on
   stable alone so new lints never break the MSRV job. The committed
   `Cargo.lock` keeps the MSRV job deterministic.
-- `deny`: `cargo deny` (advisories, the license allow-list in `deny.toml`,
-  duplicate versions, sources).
 - `oracle`: installs OCaml, builds the oracle harness and runs the
   tester three times with three random seeds. A contributor without OCaml
   still gets their change checked against the reference here.
 
-`dependencies.yml` runs `cargo audit` weekly. Dependabot opens grouped
+`deny.yml` runs `cargo deny` (advisories, the license allow-list in
+`deny.toml`, duplicate versions, sources) on every change and weekly, so a
+new advisory against an unchanged lockfile still surfaces. Dependabot opens grouped
 weekly PRs for GitHub Actions and Cargo dependencies, and
 `dependabot-auto-merge.yml` squash-merges them once CI passes (the repo has
 no branch protection, so the gate lives in the workflow).
