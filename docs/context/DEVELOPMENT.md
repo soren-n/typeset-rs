@@ -126,7 +126,7 @@ best-of-`iters` timings; `loop=1 phase=compile|render` runs one phase
 forever for a sampling profiler. `alloc_probe` counts heap traffic per phase
 through a counting global allocator. The workloads (`wide`, `fixed`,
 `lines`, `nestwide`, `deepgrp`, `packs`, `json`) are shared with the bench
-in `typeset/benches/workloads.rs`.
+in `typeset/benches/workloads/mod.rs`.
 
 Two things to know when reading numbers:
 - Criterion's wall-clock change on the compile benches is dominated by

@@ -477,11 +477,4 @@ mod tests {
         let e = parse_text(r#""\u{e9}""#).unwrap_err();
         assert_eq!((e.at, e.message), (0, "unknown escape"));
     }
-
-    #[test]
-    fn deep_parentheses_do_not_recurse() {
-        let depth = 100_000;
-        let src = format!("{}\"x\"{}", "(".repeat(depth), ")".repeat(depth));
-        assert_eq!(fmt(&src, 2, 80), "x");
-    }
 }

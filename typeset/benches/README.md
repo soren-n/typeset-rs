@@ -4,7 +4,7 @@
 inputs large enough to expose growth (word chains to 64k, JSON-like trees to
 32k leaves, nest-depth and width sweeps). `perf_probe` and `alloc_probe` are
 harness-less profiling tools that share the workload generators in
-`workloads.rs`. The full guide, including how to read the numbers, is in
+`workloads/`. The full guide, including how to read the numbers, is in
 [docs/context/DEVELOPMENT.md](../../docs/context/DEVELOPMENT.md).
 
 ```bash
