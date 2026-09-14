@@ -1,57 +1,63 @@
-//! The `layout!` macro: the `typeset` layout DSL at compile time.
-//!
-//! The grammar and parser live in `typeset::dsl`; this crate turns the
-//! macro's Rust tokens into DSL tokens, parses them, and emits the matching
-//! `typeset` constructor calls. A bare identifier is a variable: a `Layout`
-//! in scope, cloned.
-//!
-//! ```rust
-//! use typeset::text;
-//! use typeset_parser::layout;
-//!
-//! let name = text("Alice");
-//! let layout = layout! { "Hello" + name @ nest ("Indented" + "content") };
-//! assert_eq!(layout.compile().render(2, 40), "Hello Alice\n  Indented content");
-//! ```
+#![doc = include_str!("../README.md")]
 
 use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
-use quote::quote;
-use syn::LitStr;
-use typeset::dsl::{Binary, Build, Token, Unary, parse_tokens};
+use quote::{quote, quote_spanned};
+use typeset::dsl::{self, Binary, Build, Token, Unary};
 use typeset::{Break, Pad};
+
+/// A parse failure: the span of the offending token and what was wrong.
+struct Error {
+    span: Span,
+    message: &'static str,
+}
+
+impl Error {
+    fn into_compile_error(self) -> TokenStream {
+        let message = self.message;
+        quote_spanned! {self.span=> ::core::compile_error!(#message) }
+    }
+}
 
 /// Flattens the macro input into DSL tokens with their spans. Parenthesized
 /// groups become `(` … `)`; multi-character operators are recognized from
 /// jointly spaced punctuation, so `!&` and `@@` arrive whole.
-fn tokenize(input: TokenStream) -> syn::Result<Vec<(Span, Token<Ident>)>> {
+fn tokenize(input: TokenStream) -> Result<Vec<(Span, Token<Ident>)>, Error> {
     let mut tokens = Vec::new();
     // A stack of the token streams being flattened, each with its group's
     // span, so group nesting costs heap rather than native stack.
     let mut streams = vec![(Span::call_site(), input.into_iter().peekable())];
-    while let Some((group_span, stream)) = streams.last_mut() {
+    while let Some((_, stream)) = streams.last_mut() {
         let Some(tree) = stream.next() else {
-            let (group_span, _) = streams.pop().expect("a stream is open");
+            let (span, _) = streams.pop().expect("a stream is open");
             if !streams.is_empty() {
-                tokens.push((group_span, Token::Close));
+                tokens.push((span, Token::Close));
             }
             continue;
         };
-        let _ = group_span;
         let span = tree.span();
         let token = match tree {
             TokenTree::Group(group) => {
                 if group.delimiter() != Delimiter::Parenthesis {
-                    return Err(syn::Error::new(span, "expected parentheses"));
+                    return Err(Error {
+                        span,
+                        message: "expected parentheses",
+                    });
                 }
                 tokens.push((span, Token::Open));
                 streams.push((span, group.stream().into_iter().peekable()));
                 continue;
             }
-            TokenTree::Literal(lit) => {
-                let lit: LitStr = syn::parse2(TokenTree::Literal(lit).into())
-                    .map_err(|_| syn::Error::new(span, "expected a string literal"))?;
-                Token::Text(lit.value())
-            }
+            // The literal's source text, escapes as written, read by the
+            // DSL's own string syntax.
+            TokenTree::Literal(literal) => match dsl::parse_text(&literal.to_string()) {
+                Ok(text) => Token::Text(text),
+                Err(e) => {
+                    return Err(Error {
+                        span,
+                        message: e.message(),
+                    });
+                }
+            },
             TokenTree::Ident(ident) => match ident.to_string().as_str() {
                 "null" => Token::Null,
                 name => match Unary::from_keyword(name) {
@@ -70,7 +76,12 @@ fn tokenize(input: TokenStream) -> syn::Result<Vec<(Span, Token<Ident>)>> {
                 }
                 match Binary::from_symbol(&op) {
                     Some(op) => Token::Binary(op),
-                    None => return Err(syn::Error::new(span, "expected an operator")),
+                    None => {
+                        return Err(Error {
+                            span,
+                            message: "expected an operator",
+                        });
+                    }
                 }
             }
         };
@@ -121,16 +132,19 @@ impl Build for Reify {
     }
 }
 
-fn expand(input: TokenStream) -> syn::Result<TokenStream> {
+fn expand(input: TokenStream) -> Result<TokenStream, Error> {
     let tokens = tokenize(input)?;
     let end = tokens.last().map_or(Span::call_site(), |(span, _)| *span);
-    parse_tokens(tokens, end, &mut Reify).map_err(|e| syn::Error::new(e.at, e.message))
+    dsl::parse_tokens(tokens, end, &mut Reify).map_err(|e| Error {
+        span: e.at,
+        message: e.message,
+    })
 }
 
 /// Builds a [`typeset::Layout`] from the layout DSL.
 #[proc_macro]
 pub fn layout(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     expand(input.into())
-        .unwrap_or_else(syn::Error::into_compile_error)
+        .unwrap_or_else(Error::into_compile_error)
         .into()
 }

@@ -1,13 +1,8 @@
 # typeset-parser
 
-The `layout!` procedural macro: the [typeset](../typeset/) layout DSL,
-parsed at compile time and expanded to `typeset` constructor calls.
-
-```toml
-[dependencies]
-typeset = "5"
-typeset-parser = "5"
-```
+The `layout!` procedural macro: the [typeset](https://docs.rs/typeset)
+layout DSL, parsed at compile time and expanded to `typeset` constructor
+calls. A bare identifier is a variable: a `Layout` in scope, cloned.
 
 ```rust
 use typeset::text;
@@ -18,11 +13,12 @@ let layout = layout! {
     "Hello" + name @
     nest ("Indented" + "content")
 };
-println!("{}", layout.compile().render(2, 40));
+assert_eq!(layout.compile().render(2, 40), "Hello Alice\n  Indented content");
 ```
 
-The same language is available at run time as `typeset::dsl::parse`, minus
-variables.
+The grammar has one implementation, `typeset::dsl`, which also parses the
+same language from a string at run time (`typeset::dsl::parse`, minus
+variables). The macro feeds it Rust tokens, so the two cannot disagree.
 
 ## Syntax
 
@@ -54,10 +50,17 @@ right**: `a + b & c` is `a + (b & c)`, and `"a" + "b" @ "c"` is
 `"a" + ("b" @ "c")`. Parenthesize for any other grouping.
 
 ```rust
+use typeset::text;
+use typeset_parser::layout;
+
 let params = vec![text("x"), text("y")];
+let (x, y) = (params[0].clone(), params[1].clone());
 let call = layout! {
-    "f" & "(" & pack (seq (params[0].clone() & "," + params[1].clone())) & ")"
+    "f" & "(" & pack (seq (x !& "," + y)) & ")"
 };
+let doc = call.compile();
+assert_eq!(doc.render(2, 80), "f(x, y)");
+assert_eq!(doc.render(2, 4), "f(x,\n  y)");
 ```
 
 Grammar:
@@ -69,17 +72,15 @@ primary := IDENT | STRING | null | "(" expr ")"
 binop   := & | + | !& | !+ | @ | @@
 ```
 
+String literals are read by the DSL's own string syntax, not Rust's: the
+escapes `\n \r \t \0 \\ \" \'` are accepted; raw strings, byte strings and
+other Rust escapes are compile errors.
+
 ## Errors
 
-Parse failures are compile errors with the span of the offending token, for
-example `expected an operator` on two adjacent primaries. The grammar has one
-implementation, in `typeset::dsl`; the macro feeds it Rust tokens.
+Parse failures are compile errors at the span of the offending token, for
+example `expected an operator` on two adjacent primaries.
 
 ## Debugging
 
 `cargo expand` shows the constructor calls a `layout!` expands to.
-
-## See also
-
-- [DSL syntax reference](../docs/context/DSL_SYNTAX.md)
-- [typeset](../typeset/) and its [examples](../typeset/examples/)

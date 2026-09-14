@@ -313,40 +313,9 @@ fn tokenize(src: &str) -> Result<Vec<(usize, Token<NoVar>)>, ParseError> {
                 Token::Close
             }
             b'"' => {
-                let mut data = String::new();
-                i += 1;
-                loop {
-                    let Some(&c) = bytes.get(i) else {
-                        return Err(err("unterminated string"));
-                    };
-                    i += 1;
-                    match c {
-                        b'"' => break,
-                        b'\\' => {
-                            let Some(&e) = bytes.get(i) else {
-                                return Err(err("dangling escape"));
-                            };
-                            i += 1;
-                            data.push(match e {
-                                b'n' => '\n',
-                                b'r' => '\r',
-                                b't' => '\t',
-                                b'0' => '\0',
-                                b'\\' => '\\',
-                                b'"' => '"',
-                                b'\'' => '\'',
-                                _ => return Err(err("unknown escape")),
-                            });
-                        }
-                        _ => {
-                            // Copy the whole UTF-8 sequence starting here.
-                            let ch = src[i - 1..].chars().next().expect("in bounds");
-                            data.push(ch);
-                            i += ch.len_utf8() - 1;
-                        }
-                    }
-                }
-                Token::Text(data)
+                let (text, end) = scan_text(src, i)?;
+                i = end;
+                Token::Text(text)
             }
             b'a'..=b'z' => {
                 while i < bytes.len() && bytes[i].is_ascii_lowercase() {
@@ -376,6 +345,64 @@ fn tokenize(src: &str) -> Result<Vec<(usize, Token<NoVar>)>, ParseError> {
         tokens.push((start, token));
     }
     Ok(tokens)
+}
+
+/// Reads one string literal, quotes included, into its text. This is the
+/// DSL's string syntax: the `layout!` macro feeds it the source text of its
+/// Rust string literals, so both front ends accept exactly the same
+/// literals (and raw strings or Rust-only escapes are rejected).
+pub fn parse_text(literal: &str) -> Result<String, ParseError> {
+    let (text, end) = scan_text(literal, 0)?;
+    if end != literal.len() {
+        return Err(ParseErrorAt {
+            at: end,
+            message: "expected the end of the literal",
+        });
+    }
+    Ok(text)
+}
+
+/// Scans the string literal starting at `start` in `src`, returning its
+/// text and the offset just past its closing quote.
+fn scan_text(src: &str, start: usize) -> Result<(String, usize), ParseError> {
+    let bytes = src.as_bytes();
+    let err = |message| ParseErrorAt { at: start, message };
+    if bytes.get(start) != Some(&b'"') {
+        return Err(err("expected a string literal"));
+    }
+    let mut data = String::new();
+    let mut i = start + 1;
+    loop {
+        let Some(&c) = bytes.get(i) else {
+            return Err(err("unterminated string"));
+        };
+        i += 1;
+        match c {
+            b'"' => return Ok((data, i)),
+            b'\\' => {
+                let Some(&e) = bytes.get(i) else {
+                    return Err(err("dangling escape"));
+                };
+                i += 1;
+                data.push(match e {
+                    b'n' => '\n',
+                    b'r' => '\r',
+                    b't' => '\t',
+                    b'0' => '\0',
+                    b'\\' => '\\',
+                    b'"' => '"',
+                    b'\'' => '\'',
+                    _ => return Err(err("unknown escape")),
+                });
+            }
+            _ => {
+                // Copy the whole UTF-8 sequence starting here.
+                let ch = src[i - 1..].chars().next().expect("in bounds");
+                data.push(ch);
+                i += ch.len_utf8() - 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -447,6 +474,20 @@ mod tests {
             parse("").unwrap_err().message(),
             "expected a primary expression"
         );
+    }
+
+    #[test]
+    fn text_literals_are_read_whole() {
+        assert_eq!(parse_text(r#""a\"b""#).unwrap(), "a\"b");
+        let e = parse_text(r#"r"a""#).unwrap_err();
+        assert_eq!((e.offset(), e.message()), (0, "expected a string literal"));
+        let e = parse_text(r#""a"b"#).unwrap_err();
+        assert_eq!(
+            (e.offset(), e.message()),
+            (3, "expected the end of the literal")
+        );
+        let e = parse_text(r#""\u{e9}""#).unwrap_err();
+        assert_eq!((e.offset(), e.message()), (0, "unknown escape"));
     }
 
     #[test]
