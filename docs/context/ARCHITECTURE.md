@@ -18,8 +18,8 @@ A Rust workspace of three crates:
 - `layout.rs`: `Layout`, the public input type
 - `dsl.rs`: the DSL grammar, parser and run-time front end
 - `arena.rs`: the arena primitives every representation is built from
-- `serialize.rs`, `structure.rs`: the two passes; `serialize` owns the
-  line representation it lends, `structure` the graph it solves
+- `lines.rs`, `graph.rs`, `emit.rs`: the compiler; `lines` owns the line
+  it lends, `graph` the scope graph it solves, `emit` the `Doc` it fills
 - `doc.rs`: `Doc`, the public output type, which measures objects as they
   are pushed
 - `render.rs`: `Doc::render`
@@ -42,7 +42,7 @@ a node refers to its children by index. `arena.rs` gives that shape types:
 - `Tree<T>` is a forest of parent-linked nodes with depths, so two chains
   that share their outer spine by id give their lowest common ancestor,
   and the nodes each has beyond it, in a walk of the difference. Both
-  wrapper chains in `serialize` are trees.
+  wrapper chains in `lines` are trees.
 
 Because everything is flat, every pass is a loop: a bottom-up fold runs
 forward over the arena, inherited context runs backward, and a walk that
@@ -66,89 +66,22 @@ same layout.
 
 ### Pipeline
 
-| Pass        | Lowers                       | Does |
-|-------------|------------------------------|------|
-| `serialize` | `Layout` → lines of terms    | split into lines at hard breaks and inside broken sequences; mark each composition fixed or breakable; record scope deltas |
-| `structure` | lines of terms → `Doc`       | per line: read the items off the glue, build and solve the grp/seq scope graph, then read it back into the `Doc`: drop empty terms, decide the grp/seq identities, right-nest every spine, factor shared nest/pack wrappers, measure every object |
+| Pass    | Lowers                    | Does |
+|---------|---------------------------|------|
+| `lines` | `Layout` → lines of events | one DFS, paused at each hard line: split into lines at hard breaks and inside broken sequences; mark each composition fixed or breakable; before each composition, the scopes that close and open |
+| `graph` | a line → its scope graph  | read the items (runs of fixed-joined texts) off the events, build the grp/seq scope graph, solve the runs that straddle a scope boundary |
+| `emit`  | solved lines → `Doc`      | two walks over a stack of open spines: drop empty texts, decide the grp/seq identities, right-nest every spine, factor shared nest/pack wrappers, measure every object |
 
-Nothing crosses a hard line, so the passes are a pipeline of lines: the
-`Serializer` runs its DFS up to the next hard line and lends that line, and
-`Structure` consumes it with scratch reused across lines. The intermediate
-is one line, whatever the document's size.
-
-**serialize.** One left-to-right DFS with an explicit stack, paused between
-lines. It threads:
-- the innermost nest/pack wrapper, as a node of the path tree. The tree is
-  a trie: a node has at most one `Nest` child and a `Pack` node is unique
-  to its index, so two terms under the same wrappers hold the same node,
-  and the wrappers two terms share are the chain of their lowest common
-  ancestor. Sibling leaves share their spine, so path storage is O(input);
-- the innermost grp/seq wrapper, as a node of the scope-chain tree.
-  Scopes nest, so the scopes open at any point of a line form a stack: a
-  composition records how many scopes close at it and which open (outermost
-  first), by diffing its chain against the previous composition's along
-  their shared spine, an O(delta) walk. Carrying deltas rather than full
-  scope stacks is what keeps deeply nested scopes linear;
-- `fixed` (under a `fix`, every surviving composition is fixed) and `broken`
-  (under a `Broken` sequence, whose wrapper is dropped and whose breakable
-  compositions become lines; `fix` and `grp` reset it). The line decision
-  uses the composition's own attribute, before the fix override.
-
-A line is its terms in order, each carrying the *glue* to the next: a
-composition (pad, fixed or breakable, scope delta) or, on the last term,
-the hard line. An item of a line is a run: one or more terms joined by
-fixed compositions, which never breaks; `structure` reads the items off
-the glue.
-
-**structure: the graph.** Scopes are ranges over a line's items, and items
-only exist once fixed compositions have been read as runs, so a scope's
-extent cannot be read off the tree. Every item is a graph node and every
-scope an edge from the node it opened at to the node it closed at, built
-by replaying the stack deltas in opening order, which is document
-pre-order. A node has both incoming and outgoing edges only when a run
-straddles a scope boundary (`grp(a + b) !& c`: the run `[b c]` both closes
-the grp and follows it). `solve` resolves those by widening: leading seq
-out-edges are re-sourced onto the incoming side, and the incoming list is
-handed forward past the first grp out-edge, with tie-breaks that depend on
-edge-list order.
-
-The graph's nodes are the line's items (each a range of its terms) plus one
-edge arena; a node's incident edges are intrusive linked lists through
-that arena, so every list move is O(1). This is the reference
-implementation's formulation and its widening rules are defined over it; a
-tree rewrite would re-encode the same item ranges less directly.
-
-**structure: the emitter.** After `solve` a line's scopes nest, every node
-either closes scopes or opens them, and the scopes open at any item form a
-stack. So a line reads back as a tree of *spines*: the line's own and one
-per scope, each a left-to-right sequence of elements (an item or a nested
-scope) with a pad between neighbours. The line is walked twice with a
-stack of open spines, applying the rules the reference runs as five
-tree rewrites afterwards (null removal, seq identities, grp identities,
-reassociation, rescoping). The rules are not confluent, so their order is
-part of the semantics, and the two walks reproduce it:
-
-1. The counting walk decides which seqs survive. Empty items vanish, and a
-   scope with no surviving element vanishes with them. A seq is kept when
-   it groups two or more compositions and is not directly under a seq; for
-   that count a grp beneath it is opaque and a seq is transparent. Seq
-   survival never depends on a grp decision.
-2. The emitting walk lowers each run (empty terms dropped, the pads between
-   survivors merged, the first survivor's wrappers kept), threads the pad
-   between surviving neighbours of a spine (a vanished element's pads merge
-   into the one composition that remains; a spine's leading and trailing
-   pads drop, which is the reference discarding a forwarded pad at every
-   wrapper), decides the grps, composes each surviving spine right-nested
-   with the nest/pack wrappers its operands share (the chain of their
-   paths' lowest common ancestor) factored out, and splices a
-   dropped or absorbed scope's elements into the enclosing spine. A grp is
-   absorbed when it is the first surviving element of a spine that is
-   itself at the head of its group (a kept seq resets the head), and
-   dropped when it groups no composition; for that count seqs and absorbed
-   grps are transparent, kept grps opaque.
-
-Right-nesting is native to the read-back, so reassociation is not a step;
-it only existed because dropped wrappers spliced spines together.
+Nothing crosses a hard line, so the passes are a pipeline of lines:
+`Lines` lends one line at a time and `Emitter` consumes it with scratch
+reused across lines. The intermediate is one line, whatever the document's
+size. Each module's doc comment is the description of its pass: the
+representation it owns, the invariants it keeps, and which of the
+reference's rewrites it performs. The reference runs the emitter's rules
+as five separate tree rewrites in a fixed order (null removal, seq
+identities, grp identities, reassociation, rescoping); the rules are not
+confluent, so the order is part of the semantics and the two walks
+reproduce it.
 
 ### `Doc` and the renderer
 

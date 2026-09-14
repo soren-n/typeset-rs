@@ -1,53 +1,56 @@
-//! serialize: Layout → lines of terms with glue, scopes as deltas
+//! lines: Layout → lines of events
 //!
-//! One left-to-right DFS over the layout arena emits the document's terms
-//! in order, each with the *glue* that attaches it to the next: a hard line
-//! or a composition. The [`Serializer`] lends the terms one line at a time,
-//! since nothing downstream crosses a hard line.
+//! One left-to-right DFS over the layout arena emits the document as a
+//! stream of [`Event`]s: a text, a composition between two texts, and the
+//! grp/seq scopes that open and close before a composition. [`Lines`]
+//! lends the events one line at a time, since nothing downstream crosses a
+//! hard line.
 //!
 //! - A hard line break ends a line. So does every breakable composition
 //!   inside a *broken* sequence — a `seq` with a hard line beneath it, which
 //!   the constructors mark as such — so its wrapper is dropped and its
 //!   breakable compositions become lines. `fix` and `grp` reset that context.
 //! - A composition is fixed or breakable; every composition under a `fix`
-//!   is fixed. The terms a fixed composition joins form one unbreakable run,
-//!   which `structure` reads off the glue.
+//!   is fixed. The texts a fixed composition joins form one unbreakable run,
+//!   which the graph reads off the events.
 //! - Each `nest`/`pack` descended through is a node of the shared path tree
-//!   (a trie: one `Nest` child per node), so a term is just (path, text)
+//!   (a trie: one `Nest` child per node), so a text carries just its path
 //!   and sibling leaves share their path spine.
 //! - Each `grp`/`seq` descended through pushes one node onto a parent-linked
-//!   scope-chain tree. A composition records how the chain changed since the
-//!   previous composition on its line — the scopes that *open* and how many
-//!   *close* at it — by diffing the two chains along their shared spine,
-//!   which is O(delta), so deeply nested scopes stay linear.
+//!   scope-chain tree. Before each composition the line records how the
+//!   chain changed since the previous composition on the line — the scopes
+//!   that *close* and those that *open* — by diffing the two chains along
+//!   their shared spine, which is O(delta), so deeply nested scopes stay
+//!   linear. Every scope still open at the end of a line closes there, so
+//!   every `Open` on a line has its `Close`.
 //!
 //! Pack indices are DFS pre-order counters, dense so the renderer keys its
 //! marks by plain index.
 
-use crate::arena::{Arena, Id, IdVec, Node, Range, Tree, append_range};
+use crate::arena::{Arena, Id, IdVec, Node, Tree};
 use crate::layout::{Break, LayId, LayoutNode, Pad};
 
-/// A nest/pack wrapper on a term. Pack indices are dense DFS counters.
+/// A nest/pack wrapper on a text. Pack indices are dense DFS counters.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) enum Prop {
+pub(crate) enum Indent {
     Nest,
     Pack(u32),
 }
 
 /// A node of the path tree: one nest/pack wrapper on the DFS path to a
 /// leaf, under the next-outer wrapper.
-pub(crate) type PathId = Id<Node<Prop>>;
+pub(crate) type PathId = Id<Node<Indent>>;
 
 /// The nest/pack wrappers on the paths to the leaves, as a trie: a node has
 /// at most one `Nest` child, and a `Pack` node is unique to its index, so two
 /// paths with the same wrappers outermost-in are the same node, and the
-/// wrappers two terms share are exactly the chain of their lowest common
+/// wrappers two texts share are exactly the chain of their lowest common
 /// ancestor. Sibling leaves under the same wrappers share their spine, so
 /// total path storage is O(input tree), not O(leaves × depth).
 pub(crate) struct Paths {
-    tree: Tree<Prop>,
+    pub(crate) tree: Tree<Indent>,
     /// The `Nest` child of each node, once made.
-    nest_child: IdVec<Node<Prop>, Option<PathId>>,
+    nest_child: IdVec<Node<Indent>, Option<PathId>>,
     /// The `Nest` child of the root.
     root_nest: Option<PathId>,
 }
@@ -70,7 +73,7 @@ impl Paths {
         if let Some(id) = *slot {
             return id;
         }
-        let id = self.tree.push(Prop::Nest, parent);
+        let id = self.tree.push(Indent::Nest, parent);
         self.nest_child.push(None);
         match parent {
             None => self.root_nest = Some(id),
@@ -81,76 +84,54 @@ impl Paths {
 
     /// A fresh `Pack` node under `parent`.
     fn pack(&mut self, parent: Option<PathId>, index: u32) -> PathId {
-        let id = self.tree.push(Prop::Pack(index), parent);
+        let id = self.tree.push(Indent::Pack(index), parent);
         self.nest_child.push(None);
         id
-    }
-}
-
-impl std::ops::Deref for Paths {
-    type Target = Tree<Prop>;
-    fn deref(&self) -> &Tree<Prop> {
-        &self.tree
     }
 }
 
 /// Which of the two breaking disciplines a grp/seq scope imposes: `Grp`
 /// breaks its compositions all-or-nothing, `Seq` cascades a break forward.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) enum ScopeKind {
+pub(crate) enum Scope {
     Grp,
     Seq,
 }
 
-/// A composition between two terms: its attributes and how the enclosing
-/// grp/seq scopes changed since the previous composition on the line. Scopes
-/// nest, so the open scopes at any point form a stack: `closes` scopes pop
-/// off it and `opens` (outermost first, a range into the line's scope
-/// buffer) push onto it. `structure` replays these deltas to build the scope
-/// graph.
+/// One event of a line. Scopes nest, so the scopes open at any point form
+/// a stack: `Close` pops it and `Open` pushes onto it; the opens before a
+/// composition are listed outermost first. The graph replays the events.
 ///
 /// Carrying deltas (total size O(number of scopes)) rather than each
-/// composition's full enclosing scope stack (O(depth) per composition) is what
-/// keeps the grp/seq passes linear on deeply nested scopes.
+/// composition's full enclosing scope stack (O(depth) per composition) is
+/// what keeps the grp/seq passes linear on deeply nested scopes.
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct Comp {
-    pub(crate) pad: Pad,
-    pub(crate) brk: Break,
-    pub(crate) opens: Range<ScopeKind>,
-    pub(crate) closes: u32,
+pub(crate) enum Event<'a> {
+    /// A layout leaf: its innermost nest/pack wrapper (a node of the path
+    /// tree, `None` for no wrappers) over its text. The empty layout is the
+    /// empty text; both vanish in the emitter.
+    Text { path: Option<PathId>, text: &'a str },
+    /// A scope opens, before the next composition.
+    Open(Scope),
+    /// The innermost open scope closes, before the next composition or at
+    /// the end of the line.
+    Close,
+    /// A composition between the text before it and the text after it.
+    Comp(Pad, Break),
 }
 
-/// How a term attaches to the next: the last term of a line ends it.
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum Glue {
-    Line,
-    Comp(Comp),
-}
-
-/// A layout leaf: its innermost nest/pack wrapper (a node of the path tree,
-/// `None` for no wrappers) over its text, and its glue to the next term. The
-/// empty layout is the empty text; both vanish in `structure`.
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct Term<'a> {
-    pub(crate) path: Option<PathId>,
-    pub(crate) text: &'a str,
-    pub(crate) next: Glue,
-}
-
-/// One line of the document, lent by the [`Serializer`]: its terms (the
-/// last one's glue is [`Glue::Line`]), the path tree the terms' paths point
-/// into, and the scope buffer the compositions' `opens` range into.
+/// One line of the document, lent by [`Lines`]: its events, and the path
+/// tree the texts' paths point into.
 pub(crate) struct Line<'s, 'a> {
-    pub(crate) terms: &'s [Term<'a>],
+    pub(crate) events: &'s [Event<'a>],
     pub(crate) paths: &'s Paths,
-    pub(crate) scopes: &'s [ScopeKind],
 }
 
 /// The innermost enclosing grp/seq wrapper, a node of the scope-chain tree;
 /// `None` at the root.
-type ChainId = Option<Id<Node<ScopeKind>>>;
+type ChainId = Option<Id<Node<Scope>>>;
 
-/// How a leaf's term attaches to what follows it, as the DFS inherits it.
+/// How a leaf's text attaches to what follows it, as the DFS inherits it.
 #[derive(Copy, Clone)]
 enum Join {
     /// A hard line break, or the end of the document.
@@ -179,9 +160,9 @@ struct Work {
 }
 
 /// The DFS over a layout, paused between lines. `nodes` is the layout's
-/// postorder arena (root last) and `text` its text buffer; the terms borrow
-/// only `text`.
-pub(crate) struct Serializer<'a> {
+/// postorder arena (root last) and `text` its text buffer; the events
+/// borrow only `text`.
+pub(crate) struct Lines<'a> {
     nodes: &'a Arena<LayoutNode>,
     text: &'a str,
     /// Pending subtrees. Pushing the right child before the left makes the
@@ -190,20 +171,17 @@ pub(crate) struct Serializer<'a> {
     stack: Vec<Work>,
     pack_count: u32,
     paths: Paths,
-    chains: Tree<ScopeKind>,
+    chains: Tree<Scope>,
     /// The chain of the previous composition *on the same line*: grp/seq
     /// scopes never cross a hard line, so it resets at every line.
     prev: ChainId,
-    // The line being built, reused across lines.
-    terms: Vec<Term<'a>>,
-    scopes: Vec<ScopeKind>,
-    /// Scratch for one composition's opens.
-    opens: Vec<ScopeKind>,
+    /// The line being built, reused across lines.
+    events: Vec<Event<'a>>,
 }
 
-impl<'a> Serializer<'a> {
+impl<'a> Lines<'a> {
     pub(crate) fn new(nodes: &'a Arena<LayoutNode>, text: &'a str) -> Self {
-        Serializer {
+        Lines {
             nodes,
             text,
             stack: vec![Work {
@@ -218,17 +196,14 @@ impl<'a> Serializer<'a> {
             paths: Paths::new(),
             chains: Tree::new(),
             prev: None,
-            terms: Vec::new(),
-            scopes: Vec::new(),
-            opens: Vec::new(),
+            events: Vec::new(),
         }
     }
 
     /// Runs the DFS up to the next hard line and lends that line; `None`
     /// once the layout is exhausted.
     pub(crate) fn next_line(&mut self) -> Option<Line<'_, 'a>> {
-        self.terms.clear();
-        self.scopes.clear();
+        self.events.clear();
         while let Some(work) = self.stack.pop() {
             let Work {
                 node,
@@ -241,35 +216,23 @@ impl<'a> Serializer<'a> {
             match &self.nodes[node] {
                 LayoutNode::Text(range) => {
                     let text = range.slice(self.text);
-                    let next = match join {
+                    self.events.push(Event::Text { path, text });
+                    match join {
                         Join::Line => {
+                            // Every scope still open closes with the line.
+                            let closes = self.chains.ancestors(self.prev, None).count();
+                            self.events
+                                .extend(std::iter::repeat_n(Event::Close, closes));
                             self.prev = None;
-                            Glue::Line
+                            return Some(Line {
+                                events: &self.events,
+                                paths: &self.paths,
+                            });
                         }
                         Join::Comp { chain, pad, brk } => {
-                            self.opens.clear();
-                            let closes =
-                                diff_chains(&self.chains, self.prev, chain, &mut self.opens);
-                            self.prev = chain;
-                            // The diff walks the chain innermost-first; the
-                            // delta lists opens outermost-first, in stack
-                            // order.
-                            self.opens.reverse();
-                            Glue::Comp(Comp {
-                                pad,
-                                brk,
-                                opens: append_range(&mut self.scopes, &self.opens),
-                                closes,
-                            })
+                            self.delta(chain);
+                            self.events.push(Event::Comp(pad, brk));
                         }
-                    };
-                    self.terms.push(Term { path, text, next });
-                    if let Glue::Line = next {
-                        return Some(Line {
-                            terms: &self.terms,
-                            paths: &self.paths,
-                            scopes: &self.scopes,
-                        });
                     }
                 }
                 LayoutNode::Fix(child) => self.stack.push(Work {
@@ -292,8 +255,8 @@ impl<'a> Serializer<'a> {
                 }),
                 wrapper @ (LayoutNode::Grp(child) | LayoutNode::Seq(child)) => {
                     let kind = match wrapper {
-                        LayoutNode::Grp(_) => ScopeKind::Grp,
-                        _ => ScopeKind::Seq,
+                        LayoutNode::Grp(_) => Scope::Grp,
+                        _ => Scope::Seq,
                     };
                     let id = self.chains.push(kind, chain);
                     self.stack.push(Work {
@@ -377,21 +340,27 @@ impl<'a> Serializer<'a> {
         }
         None
     }
-}
 
-/// Diffs two scope chains: the scopes that *open* (in `cur`, not `prev`)
-/// are appended innermost-first to the caller's scratch, and the number that
-/// *close* (in `prev`, not `cur`) is returned. Both are the chains beyond
-/// the shared spine, so the diff costs O(delta).
-fn diff_chains(
-    chains: &Tree<ScopeKind>,
-    prev: ChainId,
-    cur: ChainId,
-    opens: &mut Vec<ScopeKind>,
-) -> u32 {
-    let shared = chains.lca(prev, cur);
-    opens.extend(chains.ancestors(cur, shared).map(|id| chains[id].value));
-    u32::try_from(chains.ancestors(prev, shared).count()).expect("closes fit u32")
+    /// Records how the scope chain changed since the previous composition
+    /// on the line: the scopes beyond the shared spine of the two chains
+    /// close (those in the previous chain only) and open (those in `chain`
+    /// only, outermost first). The diff costs O(delta).
+    fn delta(&mut self, chain: ChainId) {
+        let chains = &self.chains;
+        let shared = chains.lca(self.prev, chain);
+        let closes = chains.ancestors(self.prev, shared).count();
+        self.events
+            .extend(std::iter::repeat_n(Event::Close, closes));
+        let start = self.events.len();
+        self.events.extend(
+            chains
+                .ancestors(chain, shared)
+                .map(|id| Event::Open(chains[id].value)),
+        );
+        // The walk is innermost-first; opens are listed in stack order.
+        self.events[start..].reverse();
+        self.prev = chain;
+    }
 }
 
 #[cfg(test)]
@@ -402,84 +371,70 @@ mod tests {
 
     const DEEP: usize = 50_000;
 
-    /// A line, copied out of the serializer.
-    struct Owned<'a> {
-        terms: Vec<Term<'a>>,
-        scopes: Vec<ScopeKind>,
-    }
-
-    impl<'a> Owned<'a> {
-        /// The items: maximal runs of terms joined by fixed compositions.
-        fn items(&self) -> Vec<&[Term<'a>]> {
-            let mut items = Vec::new();
-            let mut start = 0;
-            for (i, term) in self.terms.iter().enumerate() {
-                if !matches!(
-                    term.next,
-                    Glue::Comp(Comp {
-                        brk: Break::Fixed,
-                        ..
-                    })
-                ) {
-                    items.push(&self.terms[start..=i]);
-                    start = i + 1;
+    /// A line's events, one token each: a text in quotes, `(grp`/`(seq`
+    /// for an open, `)` for a close, and the DSL operator for a composition.
+    fn show(events: &[Event<'_>]) -> String {
+        events
+            .iter()
+            .map(|event| match *event {
+                Event::Text { text, .. } => format!("{text:?}"),
+                Event::Open(Scope::Grp) => "(grp".to_string(),
+                Event::Open(Scope::Seq) => "(seq".to_string(),
+                Event::Close => ")".to_string(),
+                Event::Comp(pad, brk) => match (pad, brk) {
+                    (Pad::Unpadded, Break::Breakable) => "&",
+                    (Pad::Padded, Break::Breakable) => "+",
+                    (Pad::Unpadded, Break::Fixed) => "!&",
+                    (Pad::Padded, Break::Fixed) => "!+",
                 }
-            }
-            items
-        }
-
-        /// The breakable compositions between the items.
-        fn seps(&self) -> Vec<Comp> {
-            self.terms
-                .iter()
-                .filter_map(|term| match term.next {
-                    Glue::Comp(
-                        comp @ Comp {
-                            brk: Break::Breakable,
-                            ..
-                        },
-                    ) => Some(comp),
-                    _ => None,
-                })
-                .collect()
-        }
-
-        /// The texts of the items, each a single term.
-        fn texts(&self) -> Vec<&'a str> {
-            self.items()
-                .iter()
-                .map(|item| match item {
-                    [term] => term.text,
-                    other => panic!("expected a single-term item, found {other:?}"),
-                })
-                .collect()
-        }
+                .to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
-    fn lines(layout: &Layout) -> (Vec<Owned<'_>>, Paths) {
-        let mut ser = Serializer::new(&layout.nodes, &layout.text);
-        let mut lines = Vec::new();
-        while let Some(line) = ser.next_line() {
-            lines.push(Owned {
-                terms: line.terms.to_vec(),
-                scopes: line.scopes.to_vec(),
-            });
+    /// Every line, shown.
+    fn lines(layout: &Layout) -> Vec<String> {
+        let mut lines = Lines::new(&layout.nodes, &layout.text);
+        let mut shown = Vec::new();
+        while let Some(line) = lines.next_line() {
+            shown.push(show(line.events));
         }
-        (lines, ser.paths)
+        shown
     }
 
-    fn one_line(layout: &Layout) -> (Owned<'_>, Paths) {
-        let (lines, paths) = lines(layout);
-        let [line] = lines.try_into().ok().expect("expected a single line");
-        (line, paths)
+    /// The events of a one-line layout, copied out, with the path tree.
+    fn one_line(layout: &Layout) -> (Vec<Event<'_>>, Paths) {
+        let mut lines = Lines::new(&layout.nodes, &layout.text);
+        let events = lines.next_line().expect("one line").events.to_vec();
+        assert!(lines.next_line().is_none(), "expected a single line");
+        (events, lines.paths)
+    }
+
+    fn texts<'a>(events: &[Event<'a>]) -> Vec<&'a str> {
+        events
+            .iter()
+            .filter_map(|event| match *event {
+                Event::Text { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn paths(events: &[Event<'_>]) -> Vec<Option<PathId>> {
+        events
+            .iter()
+            .filter_map(|event| match *event {
+                Event::Text { path, .. } => Some(path),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
     fn hard_lines_split_lines() {
         let layout = line(text("a"), line(text("b"), text("c")));
-        let (lines, _) = lines(&layout);
-        assert_eq!(lines.len(), 3);
-        assert!(lines.iter().all(|l| l.terms.len() == 1));
+        assert_eq!(lines(&layout), [r#""a""#, r#""b""#, r#""c""#]);
     }
 
     #[test]
@@ -492,31 +447,20 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         ));
-        let (lines, _) = lines(&layout);
-        assert_eq!(lines.len(), 3);
-        assert!(
-            lines
-                .iter()
-                .all(|l| l.scopes.is_empty() && l.seps().is_empty())
-        );
+        assert_eq!(lines(&layout), [r#""a""#, r#""b""#, r#""c""#]);
     }
 
     #[test]
     fn fixed_comp_survives_inside_broken_seq() {
-        // seq((a !+ b) + (c @ d)): the fixed comp stays a two-term run on the
-        // first line even though the enclosing seq is broken.
+        // seq((a !+ b) + (c @ d)): the fixed comp stays a two-text run on
+        // the first line even though the enclosing seq is broken.
         let layout = seq(comp(
             comp(text("a"), text("b"), Pad::Padded, Break::Fixed),
             line(text("c"), text("d")),
             Pad::Padded,
             Break::Breakable,
         ));
-        let (lines, _) = lines(&layout);
-        assert_eq!(lines.len(), 3);
-        let [first] = lines[0].items()[..] else {
-            panic!("expected the first line to be one run")
-        };
-        assert_eq!(first.len(), 2);
+        assert_eq!(lines(&layout), [r#""a" !+ "b""#, r#""c""#, r#""d""#]);
     }
 
     #[test]
@@ -530,20 +474,13 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         )));
-        let (lines, _) = lines(&layout);
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines(&layout).len(), 3);
     }
 
     #[test]
-    fn unbroken_seq_opens_a_scope_at_its_first_comp() {
+    fn unbroken_seq_opens_at_its_first_comp_and_closes_with_the_line() {
         let layout = seq(comp(text("a"), text("b"), Pad::Padded, Break::Breakable));
-        let (line, _) = one_line(&layout);
-        assert_eq!(line.texts(), ["a", "b"]);
-        let [sep] = line.seps()[..] else {
-            panic!("expected one separator")
-        };
-        assert_eq!(sep.opens.slice(&line.scopes), [ScopeKind::Seq]);
-        assert_eq!(sep.closes, 0);
+        assert_eq!(lines(&layout), [r#""a" (seq + "b" )"#]);
     }
 
     #[test]
@@ -555,13 +492,7 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         );
-        let (line, _) = one_line(&layout);
-        assert_eq!(line.texts(), ["a", "b", "c"]);
-        let seps = line.seps();
-        assert_eq!(seps.len(), 2);
-        assert_eq!(seps[0].opens.slice(&line.scopes), [ScopeKind::Grp]);
-        assert_eq!(seps[1].closes, 1);
-        assert_eq!(seps[1].opens.slice(&line.scopes), []);
+        assert_eq!(lines(&layout), [r#""a" (grp + "b" ) + "c""#]);
     }
 
     #[test]
@@ -573,16 +504,29 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         )));
-        let (line, _) = one_line(&layout);
-        assert_eq!(
-            line.seps()[0].opens.slice(&line.scopes),
-            [ScopeKind::Grp, ScopeKind::Seq]
+        assert_eq!(lines(&layout), [r#""a" (grp (seq + "b" ) )"#]);
+    }
+
+    #[test]
+    fn scopes_do_not_cross_a_hard_line() {
+        // grp(a + (b @ c)) + d: the grp closes with the first line.
+        let layout = comp(
+            grp(comp(
+                text("a"),
+                line(text("b"), text("c")),
+                Pad::Padded,
+                Break::Breakable,
+            )),
+            text("d"),
+            Pad::Padded,
+            Break::Breakable,
         );
+        assert_eq!(lines(&layout), [r#""a" (grp + "b" )"#, r#""c" + "d""#]);
     }
 
     #[test]
     fn fix_coalesces_everything_under_it() {
-        // fix(a + (b & c)) & d: one run of three terms, then a run of one.
+        // fix(a + (b & c)) & d: one run of three texts, then a run of one.
         let layout = comp(
             fix(comp(
                 text("a"),
@@ -594,13 +538,7 @@ mod tests {
             Pad::Unpadded,
             Break::Breakable,
         );
-        let (line, _) = one_line(&layout);
-        let [abc, d] = line.items()[..] else {
-            panic!("expected two runs")
-        };
-        assert_eq!(abc.len(), 3);
-        assert_eq!(d.len(), 1);
-        assert_eq!(line.seps().len(), 1);
+        assert_eq!(lines(&layout), [r#""a" !+ "b" !& "c" & "d""#]);
     }
 
     #[test]
@@ -612,15 +550,15 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         )));
-        let (line, paths) = one_line(&layout);
-        let [a, b] = line.terms[..] else {
-            panic!("expected two terms")
+        let (events, paths_tree) = one_line(&layout);
+        let [a, b] = paths(&events)[..] else {
+            panic!("expected two texts")
         };
-        assert_eq!(a.path, b.path);
-        let inner = paths[a.path.expect("wrapped")];
-        assert_eq!(inner.value, Prop::Nest);
-        let outer = paths[inner.parent.expect("pack outside nest")];
-        assert_eq!(outer.value, Prop::Pack(0));
+        assert_eq!(a, b);
+        let inner = paths_tree.tree[a.expect("wrapped")];
+        assert_eq!(inner.value, Indent::Nest);
+        let outer = paths_tree.tree[inner.parent.expect("pack outside nest")];
+        assert_eq!(outer.value, Indent::Pack(0));
         assert!(outer.parent.is_none());
     }
 
@@ -644,12 +582,12 @@ mod tests {
             Pad::Padded,
             Break::Breakable,
         );
-        let (line, _) = one_line(&layout);
-        let [a, b, c, d] = line.terms[..] else {
-            panic!("expected four terms")
+        let (events, _) = one_line(&layout);
+        let [a, b, c, d] = paths(&events)[..] else {
+            panic!("expected four texts")
         };
-        assert_eq!(a.path, b.path);
-        assert_ne!(c.path, d.path);
+        assert_eq!(a, b);
+        assert_ne!(c, d);
     }
 
     #[test]
@@ -658,9 +596,9 @@ mod tests {
         for _ in 0..DEEP {
             layout = comp(text("y"), layout, Pad::Unpadded, Break::Breakable);
         }
-        let (line, _) = one_line(&layout);
-        assert_eq!(line.items().len(), DEEP + 1);
-        assert_eq!(line.seps().len(), DEEP);
+        let (events, _) = one_line(&layout);
+        assert_eq!(texts(&events).len(), DEEP + 1);
+        assert_eq!(events.len(), 2 * DEEP + 1);
     }
 
     #[test]
@@ -669,11 +607,12 @@ mod tests {
         for _ in 0..DEEP {
             layout = comp(text("y"), layout, Pad::Unpadded, Break::Fixed);
         }
-        let (line, _) = one_line(&layout);
-        let [run] = line.items()[..] else {
-            panic!("expected a single run")
-        };
-        assert_eq!(run.len(), DEEP + 1);
+        let (events, _) = one_line(&layout);
+        assert!(
+            events
+                .iter()
+                .all(|event| matches!(event, Event::Text { .. } | Event::Comp(_, Break::Fixed)))
+        );
     }
 
     #[test]
@@ -682,10 +621,10 @@ mod tests {
         for _ in 0..DEEP {
             layout = nest(grp(layout));
         }
-        let (line, paths) = one_line(&layout);
-        let [term] = line.terms[..] else {
-            panic!("expected a single term")
+        let (events, paths_tree) = one_line(&layout);
+        let [path] = paths(&events)[..] else {
+            panic!("expected a single text")
         };
-        assert_eq!(paths.ancestors(term.path, None).count(), DEEP);
+        assert_eq!(paths_tree.tree.ancestors(path, None).count(), DEEP);
     }
 }

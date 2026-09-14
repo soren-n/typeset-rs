@@ -7,10 +7,11 @@ mod arena;
 mod constructors;
 mod doc;
 pub mod dsl;
+mod emit;
+mod graph;
 mod layout;
+mod lines;
 mod render;
-mod serialize;
-mod structure;
 
 pub use self::constructors::{
     comp, fix, fix_pad, fix_unpad, grp, join_with_commas, join_with_lines, join_with_spaces, line,
@@ -19,10 +20,10 @@ pub use self::constructors::{
 pub use self::doc::Doc;
 pub use self::layout::{Break, Layout, Pad};
 
-// The pipeline: `serialize` (Layout -> lines of terms) feeding `structure`
-// (lines -> Doc) one line at a time, since nothing crosses a hard line;
-// each module documents its pass, and docs/context/ARCHITECTURE.md the
-// whole. Every representation, the input [`Layout`] included, is a flat
+// The pipeline: `lines` (Layout -> lines of events) feeding `emit` (lines
+// -> Doc, through the scope `graph` of each line) one line at a time, since
+// nothing crosses a hard line; each module documents its pass, and
+// docs/context/ARCHITECTURE.md the whole. Every representation, the input [`Layout`] included, is a flat
 // structure — postorder index arenas or plain vectors — so every pass is a
 // loop (or an explicit work-stack walk) and the whole pipeline runs in
 // constant native stack: no layout is too deep to compile, and depth shows
@@ -43,11 +44,11 @@ impl Layout {
     /// assert_eq!(text("Hello, world!").compile().render(2, 80), "Hello, world!");
     /// ```
     pub fn compile(self) -> Doc {
-        let mut lines = serialize::Serializer::new(&self.nodes, &self.text);
-        let mut structure = structure::Structure::new(self.nodes.len());
+        let mut lines = lines::Lines::new(&self.nodes, &self.text);
+        let mut emitter = emit::Emitter::new(self.nodes.len());
         while let Some(line) = lines.next_line() {
-            structure.push_line(&line);
+            emitter.push_line(&line);
         }
-        structure.finish()
+        emitter.finish()
     }
 }

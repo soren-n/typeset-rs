@@ -162,15 +162,6 @@ impl<K, V> IdVec<K, V> {
         }
     }
 
-    /// Makes the table `len` copies of `value`.
-    pub(crate) fn reset(&mut self, value: V, len: usize)
-    where
-        V: Clone,
-    {
-        self.items.clear();
-        self.items.resize(len, value);
-    }
-
     /// Appends the value for the next id in order.
     pub(crate) fn push(&mut self, value: V) {
         self.items.push(value);
@@ -342,11 +333,4 @@ impl<T> Index<Id<Node<T>>> for Tree<T> {
     fn index(&self, id: Id<Node<T>>) -> &Node<T> {
         &self.nodes[id]
     }
-}
-
-/// Appends `items` to `buf` and returns the range they occupy.
-pub(crate) fn append_range<T: Clone>(buf: &mut Vec<T>, items: &[T]) -> Range<T> {
-    let start = buf.len();
-    buf.extend_from_slice(items);
-    Range::new(start, buf.len())
 }
