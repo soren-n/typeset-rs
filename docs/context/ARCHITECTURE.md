@@ -20,10 +20,11 @@ A Rust workspace of three crates:
 - `arena.rs`: the arena primitives every representation is built from
 - `serialize.rs`, `structure.rs`: the two passes; `serialize` owns the
   line representation it lends, `structure` the graph it solves
-- `doc.rs`: `Doc`, the public output type, and its builder
+- `doc.rs`: `Doc`, the public output type, which measures objects as they
+  are pushed
 - `render.rs`: `Doc::render`
 
-### Arenas, ids, ranges
+### Arenas, ids, ranges, trees
 
 Every representation, the public `Layout` and `Doc` included, is a flat
 postorder arena: nodes live in a `Vec`, children precede their parents, and
@@ -160,8 +161,8 @@ the position, so both are exact state-independent sums over the children,
 computed as each object is pushed (children always precede their parent).
 
 The renderer walks the arena with an explicit frame stack. `should_break`
-is arithmetic on the boundary table. `will_fit` is arithmetic on the extent
-table mid-line; at the head of a line indentation offsets depend on the
+is arithmetic on the boundary measure. `will_fit` is arithmetic on the
+extent measure mid-line; at the head of a line indentation offsets depend on the
 live level and pack marks, but offsets are only emitted before the first
 text on the line, so the head-of-line measure walks the object's left
 spine and adds the flat extent. Pack marks are a dense `Vec<Option<usize>>`

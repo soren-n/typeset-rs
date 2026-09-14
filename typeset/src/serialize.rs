@@ -56,7 +56,7 @@ impl Paths {
     fn new() -> Self {
         Paths {
             tree: Tree::new(),
-            nest_child: IdVec::with_capacity(0),
+            nest_child: IdVec::new(),
             root_nest: None,
         }
     }

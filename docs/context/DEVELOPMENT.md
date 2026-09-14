@@ -42,14 +42,16 @@ pinned, width counted in characters rather than bytes, is a Rust test in
 
 - Never recurse on the native stack over user-controlled depth. Every
   representation is a flat postorder arena, so bottom-up folds are forward
-  loops, inherited context is a backward loop, and `Clone`/`Drop`/`Debug`
+  loops, inherited context is a backward loop, and `Clone` and `Drop`
   derive. Where a walk needs a stack (the DFS in `serialize`, the spines
-  open in `structure`'s emitter, the renderer, the DSL parser), it is an
-  explicit `Vec` of frames.
+  open in `structure`'s read-back, the renderer, the DSL parser,
+  `Layout`'s `Debug`), it is an explicit `Vec` of frames.
 - Use the arena primitives in `arena.rs`: `Arena<T>` with typed `Id<T>`s,
-  `IdVec<K, V>` side tables, `Range<T>` into shared buffers, and
-  `Option<Id<T>>` for absent links; never raw indices or sentinels.
-- A pass owns the type it produces.
+  `IdVec<K, V>` side tables, `Range<T>` into shared buffers, `Tree<T>` for
+  parent-linked chains, and `Option<Id<T>>` for absent links; never raw
+  indices or sentinels.
+- A pass owns the type it produces: `serialize` the line it lends,
+  `structure` the graph it solves and the `Doc` it fills.
 - Every compiler change is gated on the oracle harness. If the reference
   and the Rust implementation disagree, the reference is right.
 

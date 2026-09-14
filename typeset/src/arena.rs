@@ -122,12 +122,6 @@ impl<T> Arena<T> {
     }
 }
 
-impl<T> Default for Arena<T> {
-    fn default() -> Self {
-        Arena::new()
-    }
-}
-
 impl<T> Index<Id<T>> for Arena<T> {
     type Output = T;
     fn index(&self, id: Id<T>) -> &T {
@@ -138,13 +132,6 @@ impl<T> Index<Id<T>> for Arena<T> {
 impl<T> IndexMut<Id<T>> for Arena<T> {
     fn index_mut(&mut self, id: Id<T>) -> &mut T {
         &mut self.items[id.index()]
-    }
-}
-
-impl<T> Index<Range<T>> for Arena<T> {
-    type Output = [T];
-    fn index(&self, range: Range<T>) -> &[T] {
-        range.slice(&self.items)
     }
 }
 
@@ -164,6 +151,10 @@ pub(crate) struct IdVec<K, V> {
 }
 
 impl<K, V> IdVec<K, V> {
+    pub(crate) fn new() -> Self {
+        IdVec::with_capacity(0)
+    }
+
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         IdVec {
             items: Vec::with_capacity(capacity),
@@ -205,10 +196,10 @@ impl<K, V: fmt::Debug> fmt::Debug for IdVec<K, V> {
     }
 }
 
-/// A half-open `[start, end)` range into a buffer of `T` — a slice of an
-/// arena, a `Vec<T>`, or (for `Range<str>`) a text buffer — stored as two
-/// `u32` offsets. Ranges are how every IR refers to a sub-sequence of a shared
-/// buffer without owning a `Vec` of its own.
+/// A half-open `[start, end)` range into a buffer of `T` — a `Vec<T>` or,
+/// for `Range<str>`, a text buffer — stored as two `u32` offsets. Ranges are
+/// how every IR refers to a sub-sequence of a shared buffer without owning
+/// a `Vec` of its own.
 pub(crate) struct Range<T: ?Sized> {
     pub(crate) start: u32,
     pub(crate) end: u32,

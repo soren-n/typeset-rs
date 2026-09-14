@@ -56,7 +56,7 @@ impl<'a> Structure<'a> {
     pub(crate) fn new(capacity: usize) -> Self {
         Structure {
             graph: Graph::new(),
-            kept: IdVec::with_capacity(0),
+            kept: IdVec::new(),
             counting: Vec::new(),
             spines: Vec::new(),
             elements: Vec::new(),
