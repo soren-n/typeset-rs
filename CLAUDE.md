@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rust workspace for typeset pretty printing library:
 - **typeset**: the layout language, compiler, renderer, and `typeset::dsl` (runtime DSL parser)
-- **typeset-parser**: the `layout!` procedural macro (compile-time DSL)
+- **typeset-macro**: the `layout!` procedural macro (compile-time DSL)
 - **oracle/driver**: unpublished driver the OCaml oracle harness renders through
 
 The compiler is a port of an OCaml reference implementation; every change must
@@ -41,5 +41,5 @@ For comprehensive information, see context documents in `/docs/context/`:
 - **[DEVELOPMENT.md](docs/context/DEVELOPMENT.md)**: building, the oracle harness, code standards, the pre-commit hook, CI, releasing, benchmarking and profiling
 
 The DSL grammar is documented where it is implemented: the `typeset::dsl`
-module doc (`typeset/src/dsl.rs`) and the `typeset-parser` README, which is
+module doc (`typeset/src/dsl.rs`) and the `typeset-macro` README, which is
 that crate's documentation.

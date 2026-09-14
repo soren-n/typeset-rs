@@ -1,4 +1,4 @@
-# typeset-parser
+# typeset-macro
 
 The `layout!` procedural macro: the [typeset](https://docs.rs/typeset)
 layout DSL, parsed at compile time and expanded to `typeset` constructor
@@ -6,7 +6,7 @@ calls. A bare identifier is a variable: a `Layout` in scope, cloned.
 
 ```rust
 use typeset::text;
-use typeset_parser::layout;
+use typeset_macro::layout;
 
 let name = text("Alice");
 let layout = layout! {
@@ -51,7 +51,7 @@ right**: `a + b & c` is `a + (b & c)`, and `"a" + "b" @ "c"` is
 
 ```rust
 use typeset::text;
-use typeset_parser::layout;
+use typeset_macro::layout;
 
 let params = vec![text("x"), text("y")];
 let (x, y) = (params[0].clone(), params[1].clone());

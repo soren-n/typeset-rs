@@ -10,7 +10,7 @@ An embedded DSL for defining source code pretty printers. A layout is a tree of 
 ## Installation
 
 ```bash
-cargo add typeset typeset-parser
+cargo add typeset typeset-macro
 ```
 
 ## Quick Start
@@ -28,10 +28,10 @@ assert_eq!(doc.render(2, 80), "f(x, y, z)");
 assert_eq!(doc.render(2, 6), "f(x,\n  y,\n  z)");
 ```
 
-The `typeset-parser` crate provides a procedural macro for more succinct layout definitions:
+The `typeset-macro` crate provides a procedural macro for more succinct layout definitions:
 
 ```rust
-use typeset_parser::layout;
+use typeset_macro::layout;
 
 let my_layout = layout! {
     nest ("foo" !& "bar") @
@@ -46,7 +46,7 @@ let result = my_layout.compile().render(2, 80);
 | Crate | Description |
 |-------|-------------|
 | [typeset](typeset/) | Core library: layout constructors, compiler, and renderer |
-| [typeset-parser](typeset-parser/) | Procedural macro parser for the layout DSL |
+| [typeset-macro](typeset-macro/) | The `layout!` procedural macro |
 
 ## Examples
 
@@ -56,13 +56,13 @@ See the [examples](typeset/examples/) directory:
 cargo run --example json_formatter -p typeset
 cargo run --example lisp_formatter -p typeset
 cargo run --example code_formatter -p typeset
-cargo run --example full -p typeset-parser
+cargo run --example full -p typeset-macro
 ```
 
 ## Documentation
 
 - [API reference and tutorial (docs.rs)](https://docs.rs/typeset)
-- [DSL reference (docs.rs)](https://docs.rs/typeset-parser): the `layout!` macro; the same language at run time is `Layout`'s `FromStr`
+- [DSL reference (docs.rs)](https://docs.rs/typeset-macro): the `layout!` macro; the same language at run time is `Layout`'s `FromStr`
 - [Architecture](docs/context/ARCHITECTURE.md) and [development guide](docs/context/DEVELOPMENT.md)
 - [Contributing](.github/CONTRIBUTING.md)
 

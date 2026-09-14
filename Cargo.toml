@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
   "typeset",
-  "typeset-parser",
+  "typeset-macro",
   "oracle/driver"
 ]
 
@@ -27,5 +27,5 @@ doc_markdown = "warn"
 proc-macro2 = "1.0"
 quote = "1.0"
 typeset = { version = "5.0.0", path = "typeset" }
-typeset-parser = { version = "5.0.0", path = "typeset-parser" }
+typeset-macro = { version = "5.0.0", path = "typeset-macro" }
 criterion = { version = "0.8", features = ["html_reports"] }

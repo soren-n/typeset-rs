@@ -108,7 +108,7 @@ git tag v5.0.0 && git push origin main --tags
 
 `release.yml` verifies the tag matches the workspace version, tests in
 release mode, runs `cargo publish --workspace` (which publishes `typeset`
-and then `typeset-parser`, waiting for each to be available, and skips the
+and then `typeset-macro`, waiting for each to be available, and skips the
 unpublishable oracle driver), and creates the GitHub release pointing at
 the changelog. A crates.io publish is immutable: a bad release is yanked
 and a new version tagged.

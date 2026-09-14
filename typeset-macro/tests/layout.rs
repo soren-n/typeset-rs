@@ -2,7 +2,7 @@
 //! `Layout`'s `Display` is the DSL, so the two print identically.
 
 use typeset::Layout;
-use typeset_parser::layout;
+use typeset_macro::layout;
 
 fn same(macro_layout: Layout, src: &str) {
     let expected: Layout = src.parse().expect("parses");

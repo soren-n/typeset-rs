@@ -9,7 +9,7 @@ cd "$(git rev-parse --show-toplevel)"
 # own crates are required at (path dependencies need one to publish).
 sed -i.bak -E \
     -e "s/^version = \".*\"/version = \"$1\"/" \
-    -e "s/^(typeset(-parser)? = \{ version = )\"[^\"]*\"/\1\"$1\"/" \
+    -e "s/^(typeset(-macro)? = \{ version = )\"[^\"]*\"/\1\"$1\"/" \
     Cargo.toml
 rm -f Cargo.toml.bak
 cargo update --workspace --offline >/dev/null

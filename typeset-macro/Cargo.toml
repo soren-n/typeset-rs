@@ -1,13 +1,13 @@
 [package]
-name = "typeset-parser"
-description = "Compile time macro parser for typeset"
+name = "typeset-macro"
+description = "The layout! macro: the typeset layout DSL at compile time"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-homepage = "https://docs.rs/typeset-parser/latest/typeset-parser/"
-repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset-parser"
-documentation = "https://docs.rs/typeset-parser/latest/typeset-parser/"
+homepage = "https://docs.rs/typeset-macro/latest/typeset-macro/"
+repository = "https://github.com/soren-n/typeset-rs/tree/main/typeset-macro"
+documentation = "https://docs.rs/typeset-macro/latest/typeset-macro/"
 keywords = ["dsl", "pretty", "printer", "parser", "macro"]
 categories.workspace = true
 license.workspace = true

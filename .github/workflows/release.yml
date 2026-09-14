@@ -50,7 +50,7 @@ jobs:
       run: cargo test --all --release
 
     # Publishes every publishable workspace member in dependency order
-    # (typeset, then typeset-parser, which depends on it) and waits for each
+    # (typeset, then typeset-macro, which depends on it) and waits for each
     # to be available before the next. The oracle driver is publish = false.
     - name: Publish to crates.io
       run: cargo publish --workspace --token ${{ secrets.CRATES_API_TOKEN }}
@@ -65,7 +65,7 @@ jobs:
 
           ### Published Crates
           - `typeset` ${{ github.ref_name }}
-          - `typeset-parser` ${{ github.ref_name }}
+          - `typeset-macro` ${{ github.ref_name }}
 
           See [CHANGELOG.md](./CHANGELOG.md) for details.
         draft: false

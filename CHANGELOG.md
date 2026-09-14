@@ -25,7 +25,7 @@ git history.
   the composition attribute type are no longer public; build layouts
   through the constructors. The joins take any `IntoIterator<Item = Layout>`.
   `Layout` no longer implements `Default`.
-* **`typeset-parser` depends on `typeset`** (it feeds the shared parser) and
+* **`typeset-macro` depends on `typeset`** (it feeds the shared parser) and
   reads its string literals with the DSL's own string syntax: the escapes
   `\n \r \t \0 \\ \" \'` are accepted, and raw strings, byte strings and
   other Rust escapes are compile errors. The crate depends on `proc-macro2`

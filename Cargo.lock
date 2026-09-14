@@ -511,18 +511,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "typeset-oracle-driver"
-version = "0.0.0"
-dependencies = [
- "typeset",
-]
-
-[[package]]
-name = "typeset-parser"
+name = "typeset-macro"
 version = "5.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "typeset",
+]
+
+[[package]]
+name = "typeset-oracle-driver"
+version = "0.0.0"
+dependencies = [
  "typeset",
 ]
 

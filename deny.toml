@@ -35,7 +35,7 @@ confidence-threshold = 0.8
 # crates only; third-party dependencies must stay permissive.
 exceptions = [
     { name = "typeset", allow = ["GPL-3.0-or-later"] },
-    { name = "typeset-parser", allow = ["GPL-3.0-or-later"] },
+    { name = "typeset-macro", allow = ["GPL-3.0-or-later"] },
     { name = "typeset-oracle-driver", allow = ["GPL-3.0-or-later"] },
 ]
 

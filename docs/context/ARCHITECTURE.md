@@ -5,7 +5,7 @@
 A Rust workspace of three crates:
 - **typeset**: the layout language, compiler, renderer, and the DSL parser
   (`typeset::dsl`)
-- **typeset-parser**: the `layout!` procedural macro, a token adapter over
+- **typeset-macro**: the `layout!` procedural macro, a token adapter over
   `typeset::dsl`
 - **oracle/driver** (`typeset-oracle-driver`, unpublished): the process the
   OCaml oracle harness renders through
@@ -124,7 +124,7 @@ behaviour diverges, and every change is held to byte-identical output
 against it (see DEVELOPMENT.md). With the OCaml packages installed the
 source sits at `~/.opam/default/lib/typeset/Typeset.ml`.
 
-## typeset-parser crate (`typeset-parser/src/`)
+## typeset-macro crate (`typeset-macro/src/`)
 
 `lib.rs`: the `layout!` macro. It flattens its Rust token trees into
 `typeset::dsl` tokens (spans as positions), reads each string literal's

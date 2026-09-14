@@ -21,7 +21,7 @@ assert_eq!(doc.render(2, 80), "f(x, y, z)");
 assert_eq!(doc.render(2, 6), "f(x,\n  y,\n  z)");
 ```
 
-The crate has no dependencies. The `typeset-parser` crate adds the same
+The crate has no dependencies. The `typeset-macro` crate adds the same
 language as a compile-time macro (see the end of this page).
 
 ## Literals and the empty layout
@@ -200,7 +200,7 @@ assert_eq!(doc.render(2, 5), "This\nis a\ntest");
 
 The same language as a string, which `Layout` parses (`FromStr`) and
 prints (`Display`) at run time, or as a compile-time macro from the
-`typeset-parser` crate, where a bare identifier names a `Layout` in scope:
+`typeset-macro` crate, where a bare identifier names a `Layout` in scope:
 
 ```text
 null      the empty layout

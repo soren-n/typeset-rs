@@ -1,4 +1,4 @@
-use typeset_parser::layout;
+use typeset_macro::layout;
 
 fn main() {
     let name = typeset::text("foo");

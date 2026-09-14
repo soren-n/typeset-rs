@@ -1,7 +1,7 @@
 //! The layout DSL.
 //!
 //! One grammar, two front ends: [`Layout`]'s `FromStr` reads it from a
-//! string at run time, and the `typeset-parser` crate's `layout!` macro
+//! string at run time, and the `typeset-macro` crate's `layout!` macro
 //! reads it from Rust tokens at compile time by feeding the same token
 //! parser (the hidden `grammar` module, a contract between the two crates).
 //! `Layout`'s `Display` prints it.
