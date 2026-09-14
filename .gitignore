@@ -21,3 +21,6 @@ target/
 
 # Claude Code
 .claude/
+
+# Oracle harness staging (built by oracle/build.sh)
+oracle/_build/
