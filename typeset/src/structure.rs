@@ -29,7 +29,7 @@
 //! or edge.
 
 use crate::arena::{Arena, Id, IdVec, Range};
-use crate::doc::{Doc, DocBuilder, ObjId, ObjNode};
+use crate::doc::{Doc, ObjId, ObjNode};
 use crate::layout::Pad;
 use crate::serialize::{FixedComp, FixedDoc, FixedLine, PathId, PathNode, Prop, Run, ScopeKind};
 
@@ -425,7 +425,7 @@ struct Spine {
 struct Emitter<'d, 'a> {
     fixed: &'d FixedDoc<'a>,
     g: &'d Graph<'a>,
-    b: DocBuilder,
+    doc: Doc,
     props: Props,
     /// Which seq edges survive, from the counting walk.
     kept: IdVec<Edge<'a>, bool>,
@@ -452,7 +452,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
             g,
             // Every surviving item yields at least one object, so the item
             // total is a capacity floor for the object arena.
-            b: DocBuilder::with_capacity(fixed.items.len()),
+            doc: Doc::with_capacity(fixed.items.len()),
             props: Props {
                 buf: Vec::new(),
                 memo: IdVec::filled(None, fixed.paths.len()),
@@ -465,16 +465,12 @@ impl<'d, 'a> Emitter<'d, 'a> {
     }
 
     fn emit(mut self) -> Doc {
-        let lines = self
-            .fixed
-            .lines
-            .iter()
-            .map(|line| {
-                self.count_line(line);
-                self.emit_line(line)
-            })
-            .collect();
-        self.b.finish(lines)
+        for line in &self.fixed.lines {
+            self.count_line(line);
+            let root = self.emit_line(line);
+            self.doc.lines.push(root);
+        }
+        self.doc
     }
 
     /// The counting walk: decides `kept` for every seq of the line.
@@ -567,7 +563,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
                         "every scope closes by the end of its line"
                     );
                     return self.compose(top.start).map(|(props, obj)| {
-                        wrap_props(&mut self.b, props.slice(&self.props.buf), obj)
+                        wrap_props(&mut self.doc, props.slice(&self.props.buf), obj)
                     });
                 }
             }
@@ -633,7 +629,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
                     parent.inner = parent.inner.add(count);
                 }
                 let (props, obj) = self.compose(top.start)?;
-                let obj = self.b.obj(match wrap {
+                let obj = self.doc.push(match wrap {
                     Wrap::Grp => ObjNode::Grp(obj),
                     _ => ObjNode::Seq(obj),
                 });
@@ -657,9 +653,9 @@ impl<'d, 'a> Emitter<'d, 'a> {
             let l = l_props.slice(&self.props.buf);
             let r = res_props.slice(&self.props.buf);
             let common = l.iter().zip(r.iter()).take_while(|(a, b)| a == b).count();
-            let left = wrap_props(&mut self.b, &l[common..], left);
-            let right = wrap_props(&mut self.b, &r[common..], result);
-            result = self.b.obj(ObjNode::Comp(left, right, pad));
+            let left = wrap_props(&mut self.doc, &l[common..], left);
+            let right = wrap_props(&mut self.doc, &r[common..], result);
+            result = self.doc.push(ObjNode::Comp(left, right, pad));
             res_props = Range::new(l_props.start(), l_props.start() + common);
         }
         self.elements.truncate(start);
@@ -678,10 +674,10 @@ impl<'d, 'a> Emitter<'d, 'a> {
         // survivor (its leading pads are dropped), then the merge of every
         // pad since the previous survivor.
         let mut pending: Option<Pad> = None;
-        let start = self.b.start_run();
+        let start = self.doc.start_run();
         for (k, term) in terms.iter().enumerate() {
             if !term.text.is_empty() {
-                self.b
+                self.doc
                     .push_text(pending.unwrap_or(Pad::Unpadded), term.text);
                 if first_props.is_none() {
                     first_props = Some(self.props.of(&self.fixed.paths, term.path));
@@ -693,19 +689,19 @@ impl<'d, 'a> Emitter<'d, 'a> {
             }
         }
         let first_props = first_props?;
-        Some((first_props, self.b.end_run(start)))
+        Some((first_props, self.doc.end_run(start)))
     }
 }
 
 /// Wraps an object with its props (index 0 outermost), returning the id of the
 /// outermost wrapper.
-fn wrap_props(b: &mut DocBuilder, props: &[Prop], obj: ObjId) -> ObjId {
+fn wrap_props(doc: &mut Doc, props: &[Prop], obj: ObjId) -> ObjId {
     // Apply from the tail so the first prop ends up outermost.
     let mut obj = obj;
     for prop in props.iter().rev() {
         obj = match prop {
-            Prop::Nest => b.obj(ObjNode::Nest(obj)),
-            Prop::Pack(index) => b.obj(ObjNode::Pack(*index, obj)),
+            Prop::Nest => doc.push(ObjNode::Nest(obj)),
+            Prop::Pack(index) => doc.push(ObjNode::Pack(*index, obj)),
         };
     }
     obj

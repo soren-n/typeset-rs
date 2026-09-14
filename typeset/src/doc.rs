@@ -3,9 +3,9 @@
 //! The object graph (the `Comp`/`Grp`/`Nest`/… nodes) is one flat arena with
 //! children referenced by arena id; a run of unbreakable text is a range into
 //! the one `String` all text is concatenated in. The spine is one optional
-//! root object per line in document order (`None` for an empty line), and
-//! two side tables hold each object's precomputed mid-line extents for the
-//! renderer's O(1) break decisions.
+//! root object per line in document order (`None` for an empty line), and a
+//! side table holds each object's mid-line measure, computed as the object
+//! is pushed, for the renderer's O(1) break decisions.
 //!
 //! Being flat, dropping, cloning, or debug-printing a `Doc` touches a few
 //! `Vec`s of shallow records and one `String`, so `Clone`, `Drop`, and `Debug`
@@ -55,37 +55,39 @@ pub struct Doc {
     pub(crate) objs: Arena<ObjNode>,
     /// All text, concatenated; runs hold ranges into it.
     pub(crate) text: String,
-    /// Per-object flat extent: how many columns the object advances when laid
-    /// out mid-line (`head == false`). Mid-line, `Nest`/`Pack` never emit an
-    /// offset, so this is the plain sum of text widths and pads — exact and
-    /// state-independent. See [`DocBuilder::finish`].
-    pub(crate) extents: IdVec<ObjNode, usize>,
-    /// Per-object advance to the first composition boundary, mid-line: the sum
-    /// along the left spine, resolving a group as one already-laid-out block
-    /// (its full extent). Exact for the same reason as `extents`.
-    pub(crate) next_comps: IdVec<ObjNode, usize>,
+    /// Each object's mid-line measure, computed as the object is pushed.
+    pub(crate) measures: IdVec<ObjNode, Measure>,
     /// Number of pack-mark slots the renderer needs (max pack index + 1).
     /// Pack indices are dense DFS counters assigned during compilation, so
     /// the renderer keys its marks by plain vector index.
     pub(crate) packs: usize,
 }
 
-/// Appends object nodes and runs while lowering into a [`Doc`]. Nodes are
-/// pushed children before parents (so a parent's child ids always already
-/// exist); the spine rows are collected separately and handed to
-/// [`finish`](DocBuilder::finish).
-pub(crate) struct DocBuilder {
-    objs: Arena<ObjNode>,
-    text: String,
+/// An object's precomputed mid-line extents, which the renderer's break
+/// decisions read in O(1). Mid-line (`head == false`) neither `Nest` nor
+/// `Pack` advances the position — their offsets only apply at the head of a
+/// line — so both are exact, state-independent sums over the children, which
+/// always precede their parent in the arena.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Measure {
+    /// How many columns the object advances when laid out mid-line.
+    pub(crate) extent: usize,
+    /// The advance to the first composition boundary: the sum along the left
+    /// spine, resolving a group as one already-laid-out block (its full
+    /// extent).
+    pub(crate) next_comp: usize,
 }
 
-impl DocBuilder {
-    /// A builder with the object arena's capacity reserved (callers pass the
-    /// size of the representation they are lowering from).
+impl Doc {
+    /// An empty document with the object arena's capacity reserved (callers
+    /// pass the size of the representation they are lowering from).
     pub(crate) fn with_capacity(objs: usize) -> Self {
-        DocBuilder {
+        Doc {
+            lines: Vec::new(),
             objs: Arena::with_capacity(objs),
             text: String::new(),
+            measures: IdVec::with_capacity(objs),
+            packs: 0,
         }
     }
 
@@ -105,62 +107,38 @@ impl DocBuilder {
 
     /// Closes the run opened at `start` and returns its object.
     pub(crate) fn end_run(&mut self, start: usize) -> ObjId {
-        self.objs
-            .push(ObjNode::Run(Range::new(start, self.text.len())))
+        self.push(ObjNode::Run(Range::new(start, self.text.len())))
     }
 
-    /// Append an object node and return its id.
-    pub(crate) fn obj(&mut self, node: ObjNode) -> ObjId {
-        self.objs.push(node)
-    }
-
-    /// Assemble the finished document from the collected spine rows, computing
-    /// the mid-line extent tables the renderer's break decisions read.
-    ///
-    /// Mid-line (`head == false`) neither `Nest` nor `Pack` advances the
-    /// position (their offsets only apply at the head of a line), so an
-    /// object's extent — and its distance to the first composition boundary —
-    /// is a plain sum over the arena. The arena is postorder (children precede
-    /// parents), so one forward loop suffices.
-    pub(crate) fn finish(self, lines: Vec<Option<ObjId>>) -> Doc {
-        let mut packs: usize = 0;
-        let mut extents: IdVec<ObjNode, usize> = IdVec::with_capacity(self.objs.len());
-        let mut next_comps: IdVec<ObjNode, usize> = IdVec::with_capacity(self.objs.len());
-        for (_, node) in self.objs.iter() {
-            if let ObjNode::Pack(index, _) = node {
-                packs = packs.max(*index as usize + 1);
+    /// Appends an object node, whose children must already be in the arena,
+    /// with its measure, and returns its id.
+    pub(crate) fn push(&mut self, node: ObjNode) -> ObjId {
+        let measure = match node {
+            // A run never contains a composition boundary.
+            ObjNode::Run(range) => {
+                let width = text_width(range.slice(&self.text));
+                Measure {
+                    extent: width,
+                    next_comp: width,
+                }
             }
-            let (extent, next_comp) = match node {
-                // A run never contains a composition boundary.
-                ObjNode::Run(range) => {
-                    let width = text_width(range.slice(&self.text));
-                    (width, width)
-                }
-                // A mid-line group is laid out as one opaque block, so the
-                // whole group stands before the next boundary.
-                ObjNode::Grp(child) => {
-                    let extent = extents[*child];
-                    (extent, extent)
-                }
-                ObjNode::Seq(child) | ObjNode::Nest(child) | ObjNode::Pack(_, child) => {
-                    (extents[*child], next_comps[*child])
-                }
-                ObjNode::Comp(left, right, pad) => (
-                    extents[*left] + pad.width() + extents[*right],
-                    next_comps[*left],
-                ),
-            };
-            extents.push(extent);
-            next_comps.push(next_comp);
-        }
-
-        Doc {
-            lines,
-            objs: self.objs,
-            text: self.text,
-            extents,
-            next_comps,
-            packs,
-        }
+            // A mid-line group is laid out as one opaque block, so the whole
+            // group stands before the next boundary.
+            ObjNode::Grp(child) => Measure {
+                extent: self.measures[child].extent,
+                next_comp: self.measures[child].extent,
+            },
+            ObjNode::Seq(child) | ObjNode::Nest(child) => self.measures[child],
+            ObjNode::Pack(index, child) => {
+                self.packs = self.packs.max(index as usize + 1);
+                self.measures[child]
+            }
+            ObjNode::Comp(left, right, pad) => Measure {
+                extent: self.measures[left].extent + pad.width() + self.measures[right].extent,
+                next_comp: self.measures[left].next_comp,
+            },
+        };
+        self.measures.push(measure);
+        self.objs.push(node)
     }
 }

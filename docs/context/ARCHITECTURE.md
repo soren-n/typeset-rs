@@ -136,11 +136,11 @@ it only existed because dropped wrappers spliced spines together.
 
 `Doc` is one optional root object per line (`None` for an empty line), an
 object arena, one text buffer (a run is one contiguous range of it, with
-the spaces of its padded fixed compositions already joined), and two side
-tables: each object's mid-line extent and its mid-line distance to the
-first composition boundary. Mid-line, neither nest nor pack advances the
-position, so both are exact state-independent sums computed once in
-`DocBuilder::finish`.
+the spaces of its padded fixed compositions already joined), and one side
+table of measures: each object's mid-line extent and its mid-line distance
+to the first composition boundary. Mid-line, neither nest nor pack advances
+the position, so both are exact state-independent sums over the children,
+computed as each object is pushed (children always precede their parent).
 
 The renderer walks the arena with an explicit frame stack. `should_break`
 is arithmetic on the boundary table. `will_fit` is arithmetic on the extent

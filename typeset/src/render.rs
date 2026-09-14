@@ -156,7 +156,7 @@ impl<'a> Renderer<'a> {
     /// the first time would only lift the level to the position, which is
     /// no change at the head of a line, and a measure never records marks.
     fn head_end(&self, obj: ObjId, cur: Cursor) -> usize {
-        let Doc { objs, extents, .. } = self.doc;
+        let Doc { objs, measures, .. } = self.doc;
         let mut lvl = cur.lvl;
         let mut pos = cur.pos;
         let mut o = obj;
@@ -179,7 +179,7 @@ impl<'a> Renderer<'a> {
                 }
             };
         }
-        pos + extents[obj]
+        pos + measures[obj].extent
     }
 
     /// Whether `obj` fits within the width if laid out from `cur`.
@@ -187,7 +187,7 @@ impl<'a> Renderer<'a> {
         let end = if cur.head {
             self.head_end(obj, cur)
         } else {
-            cur.pos + self.doc.extents[obj]
+            cur.pos + self.doc.measures[obj].extent
         };
         end <= self.cfg.width
     }
@@ -196,7 +196,7 @@ impl<'a> Renderer<'a> {
     /// width. Break decisions are made mid-line, where the precomputed
     /// boundary distance is exact.
     fn should_break(&self, obj: ObjId, cur: Cursor) -> bool {
-        cur.broken || self.cfg.width < cur.pos + self.doc.next_comps[obj]
+        cur.broken || self.cfg.width < cur.pos + self.doc.measures[obj].next_comp
     }
 
     /// Renders one document object, threading the cursor. Marks recorded
@@ -205,7 +205,7 @@ impl<'a> Renderer<'a> {
         let Doc {
             objs,
             text,
-            extents,
+            measures,
             ..
         } = self.doc;
         let mut stack = std::mem::take(&mut self.frames);
@@ -216,7 +216,7 @@ impl<'a> Renderer<'a> {
                 Frame::Obj(o) => match &objs[o] {
                     ObjNode::Run(range) => {
                         self.out.push_str(range.slice(text));
-                        cur.advance(extents[o]);
+                        cur.advance(measures[o].extent);
                     }
                     ObjNode::Grp(child) => {
                         stack.push(Frame::RestoreBreak(cur.broken));
