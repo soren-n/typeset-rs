@@ -6,7 +6,7 @@ entry for each release before tagging it (see the release steps in
 [Semantic Versioning](https://semver.org/). Releases before 4.0.0 are in the
 git history.
 
-## [5.0.0] (unreleased)
+## [5.0.0](https://github.com/soren-n/typeset-rs/compare/v4.1.0...v5.0.0) (2026-09-14)
 
 ### Breaking
 
