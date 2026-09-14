@@ -16,9 +16,8 @@ held to byte-identical output against it. `oracle/` holds the harness:
 ```bash
 opam install dune qcheck typeset  # once
 cd oracle && ./build.sh           # OCaml tester and oracle, Rust driver, into _build/
-./_build/tester                   # 3000 generated layouts, both implementations
-./compare.sh '"a" + grp ("b" + "c")' 2 3    # one expression, both implementations
-./_build/oracle '"a" + grp ("b" + "c")' 2 3 # the reference alone
+./_build/tester                   # 20000 generated layouts, both implementations
+./_build/tester '"a" + grp ("b" + "c")' 2 3    # one expression, both implementations
 ```
 
 The tester is a QCheck property: for a generated layout, tab and width, the
@@ -26,7 +25,8 @@ reference's rendering equals the Rust driver's. The generator is biased
 toward stacked grp/seq wrappers and narrow widths, which is where breaking
 decisions diverge (a uniform generator missed a `grp(seq(x))` ordering bug
 for fifteen runs). QCheck shrinks a failing case; the DSL it prints feeds
-`compare.sh` directly.
+the tester's single-case mode directly. The driver is one process for the
+whole run, answering one request per line, so a run takes seconds.
 
 The Rust tests in `typeset/tests/rendering.rs` pin exact outputs. Every
 expected string there came from the oracle for the same layout, tab and

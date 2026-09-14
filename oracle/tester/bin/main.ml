@@ -1,3 +1,8 @@
+(* The oracle harness. With no arguments, the QCheck identity suite: for
+   generated layouts, tabs and widths, the reference's rendering equals the
+   Rust driver's. With a layout DSL string (and optionally a tab and width),
+   one case rendered by both implementations. *)
+
 open Typeset
 open EDSL
 
@@ -39,18 +44,23 @@ let print_layout layout =
   in
   _visit layout _skip
 
-(* Must close with Unix.close_process_in, not In_channel.close: the latter
-   closes the descriptor without reaping the child, so one zombie accumulates
-   per generated case until fork fails with EAGAIN. *)
-let run cmd =
-  let channel = Unix.open_process_in cmd in
-  let lines = In_channel.input_lines channel in
-  ignore (Unix.close_process_in channel);
-  String.concat "\n" lines
+(* The Rust driver: one process for the whole run. A request is one line,
+   `tab width dsl`; the reply is `ok bytes` or `error bytes` on a line, then
+   exactly that many bytes. *)
+let driver = lazy (Unix.open_process_args "./_build/driver" [| "driver" |])
 
 let rust_impl layout_dsl tab width =
-  let open Printf in
-  run (sprintf "./_build/driver '%s' %d %d" layout_dsl tab width)
+  let (reply, request) = Lazy.force driver in
+  Printf.fprintf request "%d %d %s\n" tab width layout_dsl;
+  flush request;
+  let header = input_line reply in
+  match String.split_on_char ' ' header with
+  | [ "ok"; bytes ] -> really_input_string reply (int_of_string bytes)
+  | [ "error"; bytes ] ->
+    failwith ("driver: " ^ really_input_string reply (int_of_string bytes))
+  | _ -> failwith ("driver: unexpected reply " ^ header)
+
+let ocaml_impl layout tab width = render (compile layout) tab width
 
 (* Each case pairs a layout with a (tab, width) to render at. Fixing the
    dimensions per case (rather than always 2/80) is what exercises the breaking
@@ -78,15 +88,14 @@ let arbitrary_case =
   QCheck.make gen_case ~print ~shrink
 
 let rust_ocaml_identity =
-  QCheck.Test.make ~count: 3000
+  QCheck.Test.make ~count: 20000
     ~name: "rust_ocaml_identity"
     arbitrary_case
     (fun (layout, tab, width) ->
       let open Printf in
-      print_layout layout |> fun layout_dsl ->
-      compile layout |> fun document ->
-      render document tab width |> fun expected_output ->
-      rust_impl layout_dsl tab width |> fun actual_output ->
+      let layout_dsl = print_layout layout in
+      let expected_output = ocaml_impl layout tab width in
+      let actual_output = rust_impl layout_dsl tab width in
       if expected_output = actual_output then true else begin
         printf "============ layout (tab=%d width=%d) ==============\n" tab width;
         printf "%s\n" layout_dsl;
@@ -98,7 +107,29 @@ let rust_ocaml_identity =
         false
       end)
 
+let compare_one layout_dsl tab width =
+  let layout =
+    try Parse.parse layout_dsl with
+    | Parse.Parse_error message ->
+      prerr_endline ("parse error: " ^ message); exit 2
+  in
+  let expected = ocaml_impl layout tab width in
+  let actual = rust_impl layout_dsl tab width in
+  if expected = actual then begin
+    Printf.printf "MATCH: %s\n%s\n" layout_dsl expected; 0
+  end else begin
+    Printf.printf "DIFF:  %s\n--- ocaml ---\n%s\n--- rust ---\n%s\n" layout_dsl expected actual; 1
+  end
+
 (* Propagate the runner's status: discarding it made the executable exit 0 even
    when a property failed, so no caller could detect a failure. *)
 let () =
-  exit (QCheck_runner.run_tests [ rust_ocaml_identity ])
+  match List.tl (Array.to_list Sys.argv) with
+  | [] -> exit (QCheck_runner.run_tests [ rust_ocaml_identity ])
+  | [ layout_dsl ] -> exit (compare_one layout_dsl 2 80)
+  | [ layout_dsl; tab; width ] ->
+    exit (compare_one layout_dsl (int_of_string tab) (int_of_string width))
+  | _ ->
+    prerr_endline "usage: tester                          the identity suite";
+    prerr_endline "       tester '<layout dsl>' [tab width] one case, both implementations";
+    exit 2

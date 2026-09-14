@@ -1,6 +1,6 @@
-(* One-off oracle: parse a layout DSL string and render it with the OCaml
-   reference implementation. Mirrors the grammar of `typeset::dsl` (all binary
-   operators share one precedence level and associate right). *)
+(* The layout DSL, parsed into the reference's eDSL. Mirrors the grammar of
+   `typeset::dsl` (all binary operators share one precedence level and
+   associate right); the tester's single-case mode reads its input with it. *)
 
 open Typeset
 
@@ -103,14 +103,3 @@ let parse input =
   match parse_expr (tokenize input) with
   | (layout, []) -> layout
   | (_, _) -> raise (Parse_error "trailing tokens")
-
-let () =
-  if Array.length Sys.argv < 2 then begin
-    prerr_endline "usage: oracle '<layout dsl>' [tab] [width]";
-    exit 2
-  end;
-  let tab = if Array.length Sys.argv > 2 then int_of_string Sys.argv.(2) else 2 in
-  let width = if Array.length Sys.argv > 3 then int_of_string Sys.argv.(3) else 80 in
-  match parse Sys.argv.(1) with
-  | layout -> print_string (render (compile layout) tab width); print_newline ()
-  | exception Parse_error msg -> prerr_endline ("parse error: " ^ msg); exit 2

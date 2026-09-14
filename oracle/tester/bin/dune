@@ -1,9 +1,4 @@
 (executable
  (name main)
- (modules main EDSL Word)
- (libraries typeset qcheck))
-
-(executable
- (name oracle)
- (modules oracle)
- (libraries typeset))
+ (modules main EDSL Word Parse)
+ (libraries typeset qcheck unix))
