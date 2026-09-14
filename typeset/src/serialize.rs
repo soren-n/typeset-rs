@@ -25,7 +25,7 @@
 //! marks by plain index.
 
 use crate::arena::{Arena, Id, IdVec, Node, Range, Tree, append_range};
-use crate::layout::{Attr, Break, LayId, LayoutNode, Pad};
+use crate::layout::{Break, LayId, LayoutNode, Pad};
 
 /// A nest/pack wrapper on a term. Pack indices are dense DFS counters.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -156,7 +156,11 @@ enum Join {
     /// A hard line break, or the end of the document.
     Line,
     /// A composition, under the captured scope chain.
-    Comp { chain: ChainId, attr: Attr },
+    Comp {
+        chain: ChainId,
+        pad: Pad,
+        brk: Break,
+    },
 }
 
 /// A pending subtree to visit, with its inherited context.
@@ -242,7 +246,7 @@ impl<'a> Serializer<'a> {
                             self.prev = None;
                             Glue::Line
                         }
-                        Join::Comp { chain, attr } => {
+                        Join::Comp { chain, pad, brk } => {
                             self.opens.clear();
                             let closes =
                                 diff_chains(&self.chains, self.prev, chain, &mut self.opens);
@@ -252,8 +256,8 @@ impl<'a> Serializer<'a> {
                             // order.
                             self.opens.reverse();
                             Glue::Comp(Comp {
-                                pad: attr.pad,
-                                brk: attr.brk,
+                                pad,
+                                brk,
                                 opens: append_range(&mut self.scopes, &self.opens),
                                 closes,
                             })
@@ -337,19 +341,19 @@ impl<'a> Serializer<'a> {
                         broken,
                     });
                 }
-                LayoutNode::Comp(left, right, attr) => {
+                LayoutNode::Comp(left, right, pad, brk) => {
                     // Under a broken seq every breakable composition is a
                     // hard line (a fix inside a broken seq resets `broken`,
                     // so this is decided on the composition's own
                     // attribute); every composition that remains under a
                     // fix is fixed.
-                    let left_join = if broken && attr.brk == Break::Breakable {
+                    let left_join = if broken && *brk == Break::Breakable {
                         Join::Line
                     } else {
-                        let brk = if fixed { Break::Fixed } else { attr.brk };
                         Join::Comp {
                             chain,
-                            attr: Attr { pad: attr.pad, brk },
+                            pad: *pad,
+                            brk: if fixed { Break::Fixed } else { *brk },
                         }
                     };
                     self.stack.push(Work {

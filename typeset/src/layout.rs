@@ -44,13 +44,6 @@ impl Pad {
     }
 }
 
-/// The two axes of a composition: padding and breakability.
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct Attr {
-    pub(crate) pad: Pad,
-    pub(crate) brk: Break,
-}
-
 pub(crate) type LayId = Id<LayoutNode>;
 
 /// One node of a [`Layout`]: children are arena ids, text is a range into
@@ -69,7 +62,7 @@ pub(crate) enum LayoutNode {
     Nest(LayId),
     Pack(LayId),
     Line(LayId, LayId),
-    Comp(LayId, LayId, Attr),
+    Comp(LayId, LayId, Pad, Break),
 }
 
 impl LayoutNode {
@@ -86,7 +79,7 @@ impl LayoutNode {
             LayoutNode::Nest(c) => LayoutNode::Nest(id(c)),
             LayoutNode::Pack(c) => LayoutNode::Pack(id(c)),
             LayoutNode::Line(l, r) => LayoutNode::Line(id(l), id(r)),
-            LayoutNode::Comp(l, r, attr) => LayoutNode::Comp(id(l), id(r), attr),
+            LayoutNode::Comp(l, r, pad, brk) => LayoutNode::Comp(id(l), id(r), pad, brk),
         }
     }
 }
@@ -215,10 +208,10 @@ impl fmt::Debug for Layout {
                     stack.push(Item::Node(child, !is_text(child)));
                     stack.push(Item::Str(keyword));
                 }
-                LayoutNode::Line(left, right) | LayoutNode::Comp(left, right, _) => {
+                LayoutNode::Line(left, right) | LayoutNode::Comp(left, right, ..) => {
                     let op = match nodes[id] {
                         LayoutNode::Line(..) => " @ ",
-                        LayoutNode::Comp(_, _, attr) => match (attr.pad, attr.brk) {
+                        LayoutNode::Comp(_, _, pad, brk) => match (pad, brk) {
                             (Pad::Unpadded, Break::Breakable) => " & ",
                             (Pad::Padded, Break::Breakable) => " + ",
                             (Pad::Unpadded, Break::Fixed) => " !& ",
@@ -271,7 +264,7 @@ mod tests {
         let layout = comp(text("a"), nest(text("b")), Pad::Padded, Break::Breakable);
         let nodes = &layout.nodes;
         assert_eq!(nodes.len(), 4);
-        let LayoutNode::Comp(l, r, _) = nodes[layout.root()] else {
+        let LayoutNode::Comp(l, r, ..) = nodes[layout.root()] else {
             panic!("root is the comp");
         };
         assert!(matches!(nodes[l], LayoutNode::Text(s) if s.slice(&layout.text) == "a"));
@@ -319,7 +312,7 @@ mod tests {
         assert_eq!(layout.nodes.len(), 2 * DEEP + 1);
         // The text buffer holds every leaf regardless of merge direction.
         assert_eq!(layout.text.len(), DEEP + 1);
-        let LayoutNode::Comp(l, _, _) = layout.nodes[layout.root()] else {
+        let LayoutNode::Comp(l, ..) = layout.nodes[layout.root()] else {
             panic!("root is a comp");
         };
         assert!(matches!(layout.nodes[l], LayoutNode::Text(s) if s.slice(&layout.text) == "y"));

@@ -14,7 +14,7 @@
 //! assert_eq!(doc.render(2, 5), "f(x,\n  y)");
 //! ```
 
-use crate::layout::{Attr, Break, Layout, LayoutNode, Pad};
+use crate::layout::{Break, Layout, LayoutNode, Pad};
 
 // --- Primitives ------------------------------------------------------------
 
@@ -144,9 +144,7 @@ pub fn line(left: Layout, right: Layout) -> Layout {
 /// assert_eq!(padded.compile().render(2, 80), "function name()");
 /// ```
 pub fn comp(left: Layout, right: Layout, pad: Pad, brk: Break) -> Layout {
-    Layout::binary(left, right, |l, r| {
-        LayoutNode::Comp(l, r, Attr { pad, brk })
-    })
+    Layout::binary(left, right, |l, r| LayoutNode::Comp(l, r, pad, brk))
 }
 
 /// Padded, breakable composition — `comp(left, right, Pad::Padded,
