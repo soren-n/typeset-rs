@@ -101,14 +101,6 @@ impl<T> Arena<T> {
         (0..self.items.len()).map(Id::from_index)
     }
 
-    /// The elements in id order, paired with their ids.
-    pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
-        self.items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| (Id::from_index(i), item))
-    }
-
     /// Appends every element of `other`, passed through `map` (which
     /// typically shifts the element's ids by this arena's former length).
     pub(crate) fn append(&mut self, other: Arena<T>, map: impl FnMut(T) -> T) {
@@ -131,7 +123,7 @@ impl<T> IndexMut<Id<T>> for Arena<T> {
 
 impl<T: fmt::Debug> fmt::Debug for Arena<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
+        f.debug_list().entries(&self.items).finish()
     }
 }
 
@@ -146,12 +138,8 @@ pub(crate) struct IdVec<K, V> {
 
 impl<K, V> IdVec<K, V> {
     pub(crate) fn new() -> Self {
-        IdVec::with_capacity(0)
-    }
-
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
         IdVec {
-            items: Vec::with_capacity(capacity),
+            items: Vec::new(),
             _marker: PhantomData,
         }
     }
