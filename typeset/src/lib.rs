@@ -43,7 +43,6 @@ impl Layout {
     ///
     /// assert_eq!(text("Hello, world!").compile().render(2, 80), "Hello, world!");
     /// ```
-    #[must_use]
     pub fn compile(self) -> Doc {
         // The layout's text buffer is borrowed all the way down the pipeline;
         // its node arena is dead once serialized.

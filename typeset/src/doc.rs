@@ -46,6 +46,7 @@ pub(crate) fn text_width(data: &str) -> usize {
 /// (they touch only flat `Vec`s), so no amount of document nesting can
 /// overflow the stack.
 #[derive(Clone, Debug)]
+#[must_use = "a document does nothing until it is rendered"]
 pub struct Doc {
     /// One entry per line, in document order; `None` is an empty line. Lines
     /// are joined by newlines when rendered, so there is no trailing newline

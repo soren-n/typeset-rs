@@ -77,7 +77,7 @@ fn main() {
         match args.phase.as_str() {
             "compile" => loop {
                 let layout = build(&args);
-                std::hint::black_box(layout.compile());
+                drop(std::hint::black_box(layout.compile()));
             },
             _ => {
                 let doc = layout.compile();

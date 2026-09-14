@@ -101,6 +101,7 @@ impl LayoutNode {
 /// left- or right-leaning chains. Being flat, a layout of any depth clones,
 /// drops, and prints without recursion.
 #[derive(Clone, Debug)]
+#[must_use = "a layout does nothing until it is compiled"]
 pub struct Layout {
     pub(crate) nodes: Arena<LayoutNode>,
     pub(crate) text: String,
