@@ -2,20 +2,15 @@
 
 use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
 use quote::{quote, quote_spanned};
-use typeset::dsl::{self, Binary, Build, Token, Unary};
+use typeset::dsl::{self, Binary, Build, ParseErrorAt, Token, Unary};
 use typeset::{Break, Pad};
 
-/// A parse failure: the span of the offending token and what was wrong.
-struct Error {
-    span: Span,
-    message: &'static str,
-}
+/// A parse failure at the span of the offending token.
+type Error = ParseErrorAt<Span>;
 
-impl Error {
-    fn into_compile_error(self) -> TokenStream {
-        let message = self.message;
-        quote_spanned! {self.span=> ::core::compile_error!(#message) }
-    }
+fn compile_error(error: Error) -> TokenStream {
+    let message = error.message;
+    quote_spanned! {error.at=> ::core::compile_error!(#message) }
 }
 
 /// Flattens the macro input into DSL tokens with their spans. Parenthesized
@@ -39,7 +34,7 @@ fn tokenize(input: TokenStream) -> Result<Vec<(Span, Token<Ident>)>, Error> {
             TokenTree::Group(group) => {
                 if group.delimiter() != Delimiter::Parenthesis {
                     return Err(Error {
-                        span,
+                        at: span,
                         message: "expected parentheses",
                     });
                 }
@@ -53,7 +48,7 @@ fn tokenize(input: TokenStream) -> Result<Vec<(Span, Token<Ident>)>, Error> {
                 Ok(text) => Token::Text(text),
                 Err(e) => {
                     return Err(Error {
-                        span,
+                        at: span,
                         message: e.message,
                     });
                 }
@@ -78,7 +73,7 @@ fn tokenize(input: TokenStream) -> Result<Vec<(Span, Token<Ident>)>, Error> {
                     Some(op) => Token::Binary(op),
                     None => {
                         return Err(Error {
-                            span,
+                            at: span,
                             message: "expected an operator",
                         });
                     }
@@ -135,16 +130,11 @@ impl Build for Reify {
 fn expand(input: TokenStream) -> Result<TokenStream, Error> {
     let tokens = tokenize(input)?;
     let end = tokens.last().map_or(Span::call_site(), |(span, _)| *span);
-    dsl::parse_tokens(tokens, end, &mut Reify).map_err(|e| Error {
-        span: e.at,
-        message: e.message,
-    })
+    dsl::parse_tokens(tokens, end, &mut Reify)
 }
 
 /// Builds a [`typeset::Layout`] from the layout DSL.
 #[proc_macro]
 pub fn layout(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    expand(input.into())
-        .unwrap_or_else(Error::into_compile_error)
-        .into()
+    expand(input.into()).unwrap_or_else(compile_error).into()
 }

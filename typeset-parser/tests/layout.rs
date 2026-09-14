@@ -1,18 +1,16 @@
-//! The macro expands to the same layouts the run-time parser builds.
+//! The macro expands to the same layouts the run-time parser builds:
+//! `Layout`'s `Debug` is the DSL, so the two print identically.
 
 use typeset::dsl;
 use typeset_parser::layout;
 
 fn same(macro_layout: typeset::Layout, src: &str) {
-    let expected = dsl::parse(src).expect("parses").compile();
-    let actual = macro_layout.compile();
-    for width in [1, 3, 8, 80] {
-        assert_eq!(
-            actual.render(2, width),
-            expected.render(2, width),
-            "{src} at {width}"
-        );
-    }
+    let expected = dsl::parse(src).expect("parses");
+    assert_eq!(
+        format!("{macro_layout:?}"),
+        format!("{expected:?}"),
+        "{src}"
+    );
 }
 
 #[test]

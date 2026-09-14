@@ -1,6 +1,7 @@
 //! The public input type: a [`Layout`] tree stored as a flat arena.
 
 use crate::arena::{Arena, Id, Range};
+use std::fmt;
 
 /// Whether a composition puts a space between its two operands when they share
 /// a line — the padding axis of [`comp`](crate::comp).
@@ -100,7 +101,10 @@ impl LayoutNode {
 /// `n` nodes costs O(n log n) in the worst case and O(n) for the usual
 /// left- or right-leaning chains. Being flat, a layout of any depth clones,
 /// drops, and prints without recursion.
-#[derive(Clone, Debug)]
+///
+/// `Debug` prints the layout in the DSL of [`dsl`](crate::dsl), which
+/// parses back to the same layout.
+#[derive(Clone)]
 #[must_use = "a layout does nothing until it is compiled"]
 pub struct Layout {
     pub(crate) nodes: Arena<LayoutNode>,
@@ -167,10 +171,97 @@ impl Layout {
     }
 }
 
+/// The DSL form of the layout. Every binary operator has one precedence
+/// level and associates right, and a unary operator takes a primary, so a
+/// left operand or a wrapped layout is parenthesized when it is not a text.
+impl fmt::Debug for Layout {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        /// A pending piece of output: a node (parenthesized or not) or a
+        /// literal fragment.
+        enum Item {
+            Node(LayId, bool),
+            Str(&'static str),
+        }
+        let nodes = &self.nodes;
+        let is_text = |id: LayId| matches!(nodes[id], LayoutNode::Text(_));
+        // Pieces are pushed in reverse so they pop in reading order.
+        let mut stack = vec![Item::Node(self.root(), false)];
+        while let Some(item) = stack.pop() {
+            let (id, paren) = match item {
+                Item::Str(s) => {
+                    f.write_str(s)?;
+                    continue;
+                }
+                Item::Node(id, paren) => (id, paren),
+            };
+            if paren {
+                stack.push(Item::Str(")"));
+            }
+            match nodes[id] {
+                LayoutNode::Text(range) => write_text(f, range.slice(&self.text))?,
+                LayoutNode::Fix(child)
+                | LayoutNode::Grp(child)
+                | LayoutNode::Seq(child)
+                | LayoutNode::Broken(child)
+                | LayoutNode::Nest(child)
+                | LayoutNode::Pack(child) => {
+                    let keyword = match nodes[id] {
+                        LayoutNode::Fix(_) => "fix ",
+                        LayoutNode::Grp(_) => "grp ",
+                        LayoutNode::Seq(_) | LayoutNode::Broken(_) => "seq ",
+                        LayoutNode::Nest(_) => "nest ",
+                        _ => "pack ",
+                    };
+                    stack.push(Item::Node(child, !is_text(child)));
+                    stack.push(Item::Str(keyword));
+                }
+                LayoutNode::Line(left, right) | LayoutNode::Comp(left, right, _) => {
+                    let op = match nodes[id] {
+                        LayoutNode::Line(..) => " @ ",
+                        LayoutNode::Comp(_, _, attr) => match (attr.pad, attr.brk) {
+                            (Pad::Unpadded, Break::Breakable) => " & ",
+                            (Pad::Padded, Break::Breakable) => " + ",
+                            (Pad::Unpadded, Break::Fixed) => " !& ",
+                            (Pad::Padded, Break::Fixed) => " !+ ",
+                        },
+                        _ => unreachable!("matched a binary node"),
+                    };
+                    let left_binary =
+                        matches!(nodes[left], LayoutNode::Line(..) | LayoutNode::Comp(..));
+                    stack.push(Item::Node(right, false));
+                    stack.push(Item::Str(op));
+                    stack.push(Item::Node(left, left_binary));
+                }
+            }
+            if paren {
+                stack.push(Item::Str("("));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A DSL string literal: the DSL's escapes and every other character raw.
+fn write_text(f: &mut fmt::Formatter, text: &str) -> fmt::Result {
+    f.write_str("\"")?;
+    for c in text.chars() {
+        match c {
+            '\\' => f.write_str("\\\\")?,
+            '"' => f.write_str("\\\"")?,
+            '\n' => f.write_str("\\n")?,
+            '\r' => f.write_str("\\r")?,
+            '\t' => f.write_str("\\t")?,
+            '\0' => f.write_str("\\0")?,
+            c => write!(f, "{c}")?,
+        }
+    }
+    f.write_str("\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constructors::{comp, nest, text};
+    use crate::constructors::{comp, fix, grp, line, nest, null, text};
 
     /// Deeper than a native-stack recursion could survive.
     const DEEP: usize = 50_000;
@@ -188,6 +279,33 @@ mod tests {
             panic!("right is the nest");
         };
         assert!(matches!(nodes[c], LayoutNode::Text(s) if s.slice(&layout.text) == "b"));
+    }
+
+    #[test]
+    fn debug_is_the_dsl_and_round_trips() {
+        let layout = line(
+            comp(
+                fix(comp(text("a"), text("b"), Pad::Padded, Break::Fixed)),
+                nest(grp(comp(
+                    text("c"),
+                    text("d"),
+                    Pad::Unpadded,
+                    Break::Breakable,
+                ))),
+                Pad::Padded,
+                Break::Breakable,
+            ),
+            comp(null(), text("e\"f\n\u{1b}"), Pad::Padded, Break::Breakable),
+        );
+        let dsl = format!("{layout:?}");
+        assert_eq!(
+            dsl,
+            "(fix (\"a\" !+ \"b\") + nest (grp (\"c\" & \"d\"))) @ \"\" + \"e\\\"f\\n\u{1b}\""
+        );
+        assert_eq!(
+            format!("{:?}", crate::dsl::parse(&dsl).expect("parses")),
+            dsl
+        );
     }
 
     #[test]

@@ -59,8 +59,9 @@ Unary constructors push a node; `seq` pushes a `Broken` node instead of a
 Binary constructors append the smaller operand's arena onto the larger
 (shifting its ids and text ranges) and push the parent. Building `n` nodes
 is O(n) for left- or right-leaning chains and O(n log n) in the worst
-(balanced) case. `Clone`, `Drop` and `Debug` derive; cloning is two
-allocations.
+(balanced) case. `Clone` and `Drop` derive; cloning is two allocations.
+`Debug` prints the DSL form, by an explicit stack, and parses back to the
+same layout.
 
 ### Pipeline
 
