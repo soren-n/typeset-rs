@@ -56,8 +56,8 @@ Hooks are tracked in `.githooks/` and activated once per clone:
 ```
 
 The hook runs what CI runs: `cargo fmt --check`, `cargo clippy` with
-warnings denied, `cargo check`, `cargo doc`, `cargo test`, then the oracle
-harness. It fails if the OCaml toolchain is missing; `SKIP_OCAML=1` skips
+warnings denied (which type-checks every target), `cargo doc`, `cargo
+test`, then the oracle harness. It fails if the OCaml toolchain is missing; `SKIP_OCAML=1` skips
 the harness explicitly. The checks read the working tree, not the index, so
 a partially staged commit is validated against everything on disk; CI
 validates each pushed commit. `git commit --no-verify` bypasses the hook;
@@ -69,9 +69,9 @@ fixes.
 ## CI
 
 `.github/workflows/ci.yml` runs on every push and pull request:
-- `check`: fmt, clippy, `cargo check`, `cargo doc` and `cargo test` on
-  stable, and `cargo check` plus `cargo test` on the MSRV (1.96.0); lints
-  run on stable alone so new lints never break the MSRV job. The committed
+- `check`: fmt, clippy, `cargo doc` and `cargo test` on stable, and
+  `cargo check` plus `cargo test` on the MSRV (1.96.0); lints run on
+  stable alone so new lints never break the MSRV job. The committed
   `Cargo.lock` keeps the MSRV job deterministic.
 - `deny`: `cargo deny` (advisories, the license allow-list in `deny.toml`,
   duplicate versions, sources).

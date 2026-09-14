@@ -315,6 +315,7 @@ impl Doc {
     /// assert_eq!(doc.render(2, 5), "hello\nworld");
     /// assert_eq!(doc.render(2, 80), "hello world");
     /// ```
+    #[must_use]
     pub fn render(&self, tab: usize, width: usize) -> String {
         Renderer::new(self, Config { width, tab }).render()
     }

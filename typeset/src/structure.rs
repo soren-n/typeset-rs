@@ -1,4 +1,4 @@
-//! structure: FixedDoc → Doc (solve the grp/seq scopes per line, then emit)
+//! structure: `FixedDoc` → Doc (solve the grp/seq scopes per line, then emit)
 //!
 //! Scopes are ranges over a line's items, and items only exist once
 //! `serialize` has coalesced fixed compositions into runs, so a scope's

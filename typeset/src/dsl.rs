@@ -44,6 +44,7 @@ pub enum Unary {
 
 impl Unary {
     /// The keyword for `name`, if it is one.
+    #[must_use]
     pub fn from_keyword(name: &str) -> Option<Unary> {
         Some(match name {
             "fix" => Unary::Fix,
@@ -71,6 +72,7 @@ pub enum Binary {
 impl Binary {
     /// The operator spelled `op`, if any. Longest match is the caller's job:
     /// `!&` and `@@` must arrive whole.
+    #[must_use]
     pub fn from_symbol(op: &str) -> Option<Binary> {
         Some(match op {
             "@" => Binary::Line,

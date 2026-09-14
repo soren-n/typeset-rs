@@ -3,7 +3,9 @@
 //! allocator. Companion to `perf_probe`; used to attribute the
 //! allocator-bound compile profile.
 //!
-//! Usage: cargo bench -p typeset --bench alloc_probe -- WORKLOAD SIZE [d=DEPTH] [width=W]
+//! ```text
+//! cargo bench -p typeset --bench alloc_probe -- WORKLOAD SIZE [d=DEPTH] [width=W]
+//! ```
 
 // The counting allocator is the one place the workspace needs unsafe; it just
 // forwards to `System` around atomic counters.

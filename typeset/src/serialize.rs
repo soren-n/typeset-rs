@@ -1,4 +1,4 @@
-//! serialize: Layout → FixedDoc (lines of runs, scopes as deltas)
+//! serialize: Layout → `FixedDoc` (lines of runs, scopes as deltas)
 //!
 //! One left-to-right DFS over the layout arena emits the document as lines of
 //! runs with the breakable compositions between them:

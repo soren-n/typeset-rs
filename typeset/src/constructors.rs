@@ -27,6 +27,7 @@ use crate::layout::{Attr, Break, Layout, LayoutNode, Pad};
 /// let result = pad(null(), text("content"));
 /// assert_eq!(result.compile().render(2, 80), "content");
 /// ```
+#[must_use]
 pub fn null() -> Layout {
     text("")
 }
@@ -143,6 +144,7 @@ pub fn line(left: Layout, right: Layout) -> Layout {
 /// let padded = comp(text("function"), text("name()"), Pad::Padded, Break::Breakable);
 /// assert_eq!(padded.compile().render(2, 80), "function name()");
 /// ```
+#[must_use]
 pub fn comp(left: Layout, right: Layout, pad: Pad, brk: Break) -> Layout {
     Layout::binary(left, right, |l, r| {
         LayoutNode::Comp(l, r, Attr { pad, brk })
@@ -156,6 +158,7 @@ pub fn comp(left: Layout, right: Layout, pad: Pad, brk: Break) -> Layout {
 /// use typeset::*;
 /// assert_eq!(pad(text("Hello"), text("world")).compile().render(2, 80), "Hello world");
 /// ```
+#[must_use]
 pub fn pad(left: Layout, right: Layout) -> Layout {
     comp(left, right, Pad::Padded, Break::Breakable)
 }
@@ -167,6 +170,7 @@ pub fn pad(left: Layout, right: Layout) -> Layout {
 /// use typeset::*;
 /// assert_eq!(unpad(text("prefix"), text("suffix")).compile().render(2, 80), "prefixsuffix");
 /// ```
+#[must_use]
 pub fn unpad(left: Layout, right: Layout) -> Layout {
     comp(left, right, Pad::Unpadded, Break::Breakable)
 }
@@ -181,6 +185,7 @@ pub fn unpad(left: Layout, right: Layout) -> Layout {
 /// // Stays on one line even when narrower than its width.
 /// assert_eq!(fix_pad(text("!"), text("condition")).compile().render(2, 5), "! condition");
 /// ```
+#[must_use]
 pub fn fix_pad(left: Layout, right: Layout) -> Layout {
     comp(left, right, Pad::Padded, Break::Fixed)
 }
@@ -201,6 +206,7 @@ pub fn fix_pad(left: Layout, right: Layout) -> Layout {
 /// assert_eq!(doc.render(2, 80), "f(x y)");
 /// assert_eq!(doc.render(2, 3), "f(x\ny)");
 /// ```
+#[must_use]
 pub fn fix_unpad(left: Layout, right: Layout) -> Layout {
     comp(left, right, Pad::Unpadded, Break::Fixed)
 }

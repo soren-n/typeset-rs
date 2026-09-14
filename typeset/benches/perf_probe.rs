@@ -2,11 +2,11 @@
 //! harness, used to check the pipeline's asymptotics and to give CPU/memory
 //! profilers a long-running, representative target.
 //!
-//! Usage: cargo bench -p typeset --bench perf_probe -- WORKLOAD SIZE [key=val ...]
+//! Usage: cargo bench -p typeset --bench `perf_probe` -- WORKLOAD SIZE [key=val ...]
 //!   keys: d=DEPTH width=W iters=K phase=compile|render|all loop=1
 //!
 //! Prints one CSV line per run:
-//!   workload,n,d,width,build_ns,compile_ns,render_ns,output_bytes
+//!   `workload,n,d,width,build_ns,compile_ns,render_ns,output_bytes`
 
 use std::time::Instant;
 use typeset::*;

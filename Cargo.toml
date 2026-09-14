@@ -19,6 +19,9 @@ unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+# Pure functions whose result is the point; and doc prose that names code.
+must_use_candidate = "warn"
+doc_markdown = "warn"
 
 [workspace.dependencies]
 proc-macro2 = "1.0"
