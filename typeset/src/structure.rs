@@ -28,10 +28,10 @@
 //! O(1) pointer rewiring and building the graph allocates nothing per node
 //! or edge.
 
-use crate::arena::{Arena, Id, IdVec, Range};
+use crate::arena::{Arena, Id, IdVec};
 use crate::doc::{Doc, ObjId, ObjNode};
 use crate::layout::Pad;
-use crate::serialize::{FixedComp, FixedDoc, FixedLine, PathId, PathNode, Prop, Run, ScopeKind};
+use crate::serialize::{FixedComp, FixedDoc, FixedLine, PathId, Paths, Prop, Run, ScopeKind};
 
 pub(crate) fn structure(doc: &FixedDoc) -> Doc {
     let mut graph = Graph::build(doc);
@@ -346,40 +346,9 @@ impl Count {
     }
 }
 
-/// A lowered element: the nest/pack props still to be applied around it
-/// (outermost first, a range into the shared prop buffer) and its object.
-type Atom = (Range<Prop>, ObjId);
-
-/// The shared prop buffer terms' wrapper paths are materialized into,
-/// memoized per path id: sibling terms under the same wrappers share one
-/// materialization, so the buffer is O(path arena), not O(terms × depth).
-struct Props {
-    buf: Vec<Prop>,
-    memo: IdVec<PathNode, Option<Range<Prop>>>,
-}
-
-impl Props {
-    /// The props of `path`, outermost first.
-    fn of(&mut self, paths: &Arena<PathNode>, path: Option<PathId>) -> Range<Prop> {
-        let Some(path) = path else {
-            return Range::EMPTY;
-        };
-        if let Some(range) = self.memo[path] {
-            return range;
-        }
-        let start = self.buf.len();
-        let mut cur = Some(path);
-        while let Some(id) = cur {
-            self.buf.push(paths[id].prop);
-            cur = paths[id].parent;
-        }
-        // The path walk yields innermost-first; prop lists are outermost-first.
-        self.buf[start..].reverse();
-        let range = Range::new(start, self.buf.len());
-        self.memo[path] = Some(range);
-        range
-    }
-}
+/// A lowered element: the innermost nest/pack wrapper still to be applied
+/// around its object (a node of the path tree, `None` for none).
+type Atom = (Option<PathId>, ObjId);
 
 /// A spine on the counting walk's stack.
 struct Counting<'a> {
@@ -426,7 +395,6 @@ struct Emitter<'d, 'a> {
     fixed: &'d FixedDoc<'a>,
     g: &'d Graph<'a>,
     doc: Doc,
-    props: Props,
     /// Which seq edges survive, from the counting walk.
     kept: IdVec<Edge<'a>, bool>,
     // Scratch, reused across lines.
@@ -453,10 +421,6 @@ impl<'d, 'a> Emitter<'d, 'a> {
             // Every surviving item yields at least one object, so the item
             // total is a capacity floor for the object arena.
             doc: Doc::with_capacity(fixed.items.len()),
-            props: Props {
-                buf: Vec::new(),
-                memo: IdVec::filled(None, fixed.paths.len()),
-            },
             kept: IdVec::filled(false, g.edges.len()),
             counting: Vec::new(),
             spines: Vec::new(),
@@ -562,8 +526,8 @@ impl<'d, 'a> Emitter<'d, 'a> {
                         self.spines.is_empty() && top.wrap == Wrap::Line,
                         "every scope closes by the end of its line"
                     );
-                    return self.compose(top.start).map(|(props, obj)| {
-                        wrap_props(&mut self.doc, props.slice(&self.props.buf), obj)
+                    return self.compose(top.start).map(|(path, obj)| {
+                        wrap_path(&mut self.doc, &fixed.paths, path, None, obj)
                     });
                 }
             }
@@ -639,37 +603,37 @@ impl<'d, 'a> Emitter<'d, 'a> {
     }
 
     /// Composes the elements from `start` on as one right-nested spine,
-    /// factoring at each composition the nest/pack prefix its operands
-    /// share, and removes them. Returns the spine's remaining props and
-    /// object, or nothing for an empty spine.
+    /// factoring at each composition the nest/pack wrappers its operands
+    /// share — the chain of their paths' lowest common ancestor — and
+    /// removes them. Returns the spine's remaining path and object, or
+    /// nothing for an empty spine.
     fn compose(&mut self, start: usize) -> Option<Atom> {
+        let paths = &self.fixed.paths;
         let elements = &self.elements[start..];
-        let (mut res_props, mut result) = elements.last()?.1;
+        let (mut res_path, mut result) = elements.last()?.1;
         // Innermost first, so each composition sees its right operand's
-        // leftover props.
+        // leftover wrappers.
         for k in (1..elements.len()).rev() {
-            let (l_props, left) = elements[k - 1].1;
+            let (l_path, left) = elements[k - 1].1;
             let pad = elements[k].0;
-            let l = l_props.slice(&self.props.buf);
-            let r = res_props.slice(&self.props.buf);
-            let common = l.iter().zip(r.iter()).take_while(|(a, b)| a == b).count();
-            let left = wrap_props(&mut self.doc, &l[common..], left);
-            let right = wrap_props(&mut self.doc, &r[common..], result);
+            let shared = paths.lca(l_path, res_path);
+            let left = wrap_path(&mut self.doc, paths, l_path, shared, left);
+            let right = wrap_path(&mut self.doc, paths, res_path, shared, result);
             result = self.doc.push(ObjNode::Comp(left, right, pad));
-            res_props = Range::new(l_props.start(), l_props.start() + common);
+            res_path = shared;
         }
         self.elements.truncate(start);
-        Some((res_props, result))
+        Some((res_path, result))
     }
 
     /// Lowers a run: drops its empty terms, merges the pads between
     /// survivors (a dropped term's padding on either side folds into the one
-    /// composition that remains), and keeps the first surviving term's props
+    /// composition that remains), and keeps the first surviving term's path
     /// as the run's. `None` if nothing survived.
     fn emit_run(&mut self, run: Run<'a>) -> Option<Atom> {
         let terms = run.terms.slice(&self.fixed.terms);
         let seps = run.seps.slice(&self.fixed.run_seps);
-        let mut first_props: Option<Range<Prop>> = None;
+        let mut first: Option<Option<PathId>> = None;
         // The pad to put before the next survivor: `None` until the first
         // survivor (its leading pads are dropped), then the merge of every
         // pad since the previous survivor.
@@ -679,32 +643,32 @@ impl<'d, 'a> Emitter<'d, 'a> {
             if !term.text.is_empty() {
                 self.doc
                     .push_text(pending.unwrap_or(Pad::Unpadded), term.text);
-                if first_props.is_none() {
-                    first_props = Some(self.props.of(&self.fixed.paths, term.path));
-                }
+                first.get_or_insert(term.path);
                 pending = Some(Pad::Unpadded);
             }
             if let (Some(p), Some(sep)) = (pending.as_mut(), seps.get(k)) {
                 *p = p.merge(sep.pad);
             }
         }
-        let first_props = first_props?;
-        Some((first_props, self.doc.end_run(start)))
+        Some((first?, self.doc.end_run(start)))
     }
 }
 
-/// Wraps an object with its props (index 0 outermost), returning the id of the
-/// outermost wrapper.
-fn wrap_props(doc: &mut Doc, props: &[Prop], obj: ObjId) -> ObjId {
-    // Apply from the tail so the first prop ends up outermost.
-    let mut obj = obj;
-    for prop in props.iter().rev() {
-        obj = match prop {
+/// Wraps `obj` in the wrappers from `path` outward up to (not including)
+/// `upto`, innermost first, returning the outermost wrapper.
+fn wrap_path(
+    doc: &mut Doc,
+    paths: &Paths,
+    path: Option<PathId>,
+    upto: Option<PathId>,
+    obj: ObjId,
+) -> ObjId {
+    paths
+        .ancestors(path, upto)
+        .fold(obj, |obj, id| match paths[id].value {
             Prop::Nest => doc.push(ObjNode::Nest(obj)),
-            Prop::Pack(index) => doc.push(ObjNode::Pack(*index, obj)),
-        };
-    }
-    obj
+            Prop::Pack(index) => doc.push(ObjNode::Pack(index, obj)),
+        })
 }
 
 #[cfg(test)]

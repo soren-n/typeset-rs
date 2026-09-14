@@ -1,4 +1,5 @@
-//! Typed arena indices, arenas, side tables, and ranges shared by every IR.
+//! Typed arena indices, arenas, side tables, ranges and parent-linked trees
+//! shared by every IR.
 //!
 //! Every intermediate representation stores its nodes in flat `Vec`-backed
 //! arenas. An [`Id<T>`] is an index into an [`Arena<T>`] that can only be used
@@ -223,12 +224,6 @@ impl<T: ?Sized> Range<T> {
         }
     }
 
-    pub(crate) const EMPTY: Self = Range {
-        start: 0,
-        end: 0,
-        _marker: PhantomData,
-    };
-
     pub(crate) fn len(&self) -> usize {
         (self.end - self.start) as usize
     }
@@ -278,6 +273,92 @@ impl<T: ?Sized> Eq for Range<T> {}
 impl<T: ?Sized> fmt::Debug for Range<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}..{}", self.start, self.end)
+    }
+}
+
+/// One node of a [`Tree`]: its value and the node it hangs under.
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct Node<T> {
+    pub(crate) value: T,
+    /// The next-outer node; `None` at the root.
+    pub(crate) parent: Option<Id<Node<T>>>,
+    /// Chain length from the root (a root node has depth 1).
+    depth: u32,
+}
+
+/// A forest of parent-linked nodes in one arena. A chain from a node to the
+/// root is the sequence of wrappers on a path into the layout; two chains
+/// share their outer spine by id, so their lowest common ancestor — and the
+/// nodes each has beyond it — cost a walk of the difference, never of the
+/// depth.
+#[derive(Debug)]
+pub(crate) struct Tree<T> {
+    nodes: Arena<Node<T>>,
+}
+
+impl<T> Tree<T> {
+    pub(crate) fn new() -> Self {
+        Tree {
+            nodes: Arena::new(),
+        }
+    }
+
+    /// Adds a node with `value` under `parent`.
+    pub(crate) fn push(&mut self, value: T, parent: Option<Id<Node<T>>>) -> Id<Node<T>> {
+        let depth = self.depth(parent) + 1;
+        self.nodes.push(Node {
+            value,
+            parent,
+            depth,
+        })
+    }
+
+    fn depth(&self, id: Option<Id<Node<T>>>) -> u32 {
+        id.map_or(0, |id| self.nodes[id].depth)
+    }
+
+    /// The deepest node on both `a`'s and `b`'s chains; `None` when they
+    /// share nothing.
+    pub(crate) fn lca(
+        &self,
+        a: Option<Id<Node<T>>>,
+        b: Option<Id<Node<T>>>,
+    ) -> Option<Id<Node<T>>> {
+        let up =
+            |id: Option<Id<Node<T>>>| self.nodes[id.expect("a deeper chain is non-empty")].parent;
+        let (mut a, mut b) = (a, b);
+        let (mut da, mut db) = (self.depth(a), self.depth(b));
+        while da > db {
+            a = up(a);
+            da -= 1;
+        }
+        while db > da {
+            b = up(b);
+            db -= 1;
+        }
+        while a != b {
+            a = up(a);
+            b = up(b);
+        }
+        a
+    }
+
+    /// The nodes from `from` outward, innermost first, stopping before
+    /// `upto`, which must be on `from`'s chain (`None` for the whole chain).
+    pub(crate) fn ancestors(
+        &self,
+        from: Option<Id<Node<T>>>,
+        upto: Option<Id<Node<T>>>,
+    ) -> impl Iterator<Item = Id<Node<T>>> + '_ {
+        std::iter::successors(from, move |&id| self.nodes[id].parent)
+            .take_while(move |&id| Some(id) != upto)
+    }
+}
+
+impl<T> Index<Id<Node<T>>> for Tree<T> {
+    type Output = Node<T>;
+    fn index(&self, id: Id<Node<T>>) -> &Node<T> {
+        &self.nodes[id]
     }
 }
 

@@ -38,6 +38,10 @@ a node refers to its children by index. `arena.rs` gives that shape types:
 - `Range<T>` is a `[start, end)` pair of `u32` offsets into a shared buffer
   (`Range<str>` for text): how a representation refers to a sub-sequence
   without owning a `Vec`.
+- `Tree<T>` is a forest of parent-linked nodes with depths, so two chains
+  that share their outer spine by id give their lowest common ancestor,
+  and the nodes each has beyond it, in a walk of the difference. Both
+  wrapper chains in `serialize` are trees.
 
 Because everything is flat, every pass is a loop: a bottom-up fold runs
 forward over the arena, inherited context runs backward, and a walk that
@@ -66,9 +70,12 @@ allocations.
 | `structure` | `FixedDoc` → `Doc`    | build and solve the grp/seq scope graph per line, then read it back into the `Doc`: drop empty terms, decide the grp/seq identities, right-nest every spine, factor shared nest/pack prefixes, build the extent tables |
 
 **serialize.** One left-to-right DFS with an explicit stack. It threads:
-- the innermost nest/pack wrapper, as an id into a shared path arena (one
-  node per wrapper descended through, so sibling leaves share their spine);
-- the innermost grp/seq wrapper, as an id into a parent-linked chain arena.
+- the innermost nest/pack wrapper, as a node of the path tree. The tree is
+  a trie: a node has at most one `Nest` child and a `Pack` node is unique
+  to its index, so two terms under the same wrappers hold the same node,
+  and the wrappers two terms share are the chain of their lowest common
+  ancestor. Sibling leaves share their spine, so path storage is O(input);
+- the innermost grp/seq wrapper, as a node of the scope-chain tree.
   Scopes nest, so the scopes open at any point of a line form a stack: a
   composition records how many scopes close at it and which open (outermost
   first), by diffing its chain against the previous composition's along
@@ -122,7 +129,8 @@ part of the semantics, and the two walks reproduce it:
    into the one composition that remains; a spine's leading and trailing
    pads drop, which is the reference discarding a forwarded pad at every
    wrapper), decides the grps, composes each surviving spine right-nested
-   with the nest/pack prefix its operands share factored out, and splices a
+   with the nest/pack wrappers its operands share (the chain of their
+   paths' lowest common ancestor) factored out, and splices a
    dropped or absorbed scope's elements into the enclosing spine. A grp is
    absorbed when it is the first surviving element of a spine that is
    itself at the head of its group (a kept seq resets the head), and

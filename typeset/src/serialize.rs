@@ -10,11 +10,11 @@
 //! - Every item is a run: a maximal sequence of terms joined by fixed
 //!   compositions (including every composition under a `fix`). A lone term
 //!   is a run of one.
-//! - Each `nest`/`pack` descended through pushes one node onto the shared
-//!   path arena, so a term is just (path id, text) and sibling leaves share
-//!   their path spine.
+//! - Each `nest`/`pack` descended through is a node of the shared path tree
+//!   (a trie: one `Nest` child per node), so a term is just (path, text)
+//!   and sibling leaves share their path spine.
 //! - Each `grp`/`seq` descended through pushes one node onto a parent-linked
-//!   scope-chain arena. A composition records how the chain changed since the
+//!   scope-chain tree. A composition records how the chain changed since the
 //!   previous composition on its line — the scopes that *open* and how many
 //!   *close* at it — by diffing the two chains along their shared spine,
 //!   which is O(delta), so deeply nested scopes stay linear.
@@ -22,20 +22,8 @@
 //! Pack indices are DFS pre-order counters, dense so the renderer keys its
 //! marks by plain index.
 
-use crate::arena::{Arena, Id, Range, append_range};
+use crate::arena::{Arena, Id, IdVec, Node, Range, Tree, append_range};
 use crate::layout::{Attr, Break, LayId, LayoutNode, Pad};
-
-pub(crate) type PathId = Id<PathNode>;
-
-/// One nest/pack wrapper on the DFS path to a leaf. Sibling leaves under the
-/// same wrappers share their path spine, so total path storage is O(input
-/// tree), not O(leaves × depth).
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct PathNode {
-    pub(crate) prop: Prop,
-    /// The enclosing (next-outer) wrapper, `None` at the outermost.
-    pub(crate) parent: Option<PathId>,
-}
 
 /// A nest/pack wrapper on a term. Pack indices are dense DFS counters.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -44,9 +32,69 @@ pub(crate) enum Prop {
     Pack(u32),
 }
 
-/// A layout leaf: its innermost nest/pack wrapper (a path into the shared
-/// path arena, `None` for no wrappers) over its text. The empty layout is the
-/// empty text; both vanish in `structure`.
+/// A node of the path tree: one nest/pack wrapper on the DFS path to a
+/// leaf, under the next-outer wrapper.
+pub(crate) type PathId = Id<Node<Prop>>;
+
+/// The nest/pack wrappers on the paths to the leaves, as a trie: a node has
+/// at most one `Nest` child, and a `Pack` node is unique to its index, so two
+/// paths with the same wrappers outermost-in are the same node, and the
+/// wrappers two terms share are exactly the chain of their lowest common
+/// ancestor. Sibling leaves under the same wrappers share their spine, so
+/// total path storage is O(input tree), not O(leaves × depth).
+pub(crate) struct Paths {
+    tree: Tree<Prop>,
+    /// The `Nest` child of each node, once made.
+    nest_child: IdVec<Node<Prop>, Option<PathId>>,
+    /// The `Nest` child of the root.
+    root_nest: Option<PathId>,
+}
+
+impl Paths {
+    fn new() -> Self {
+        Paths {
+            tree: Tree::new(),
+            nest_child: IdVec::with_capacity(0),
+            root_nest: None,
+        }
+    }
+
+    /// The `Nest` node under `parent`, made on first use.
+    fn nest(&mut self, parent: Option<PathId>) -> PathId {
+        let slot = match parent {
+            None => &mut self.root_nest,
+            Some(parent) => &mut self.nest_child[parent],
+        };
+        if let Some(id) = *slot {
+            return id;
+        }
+        let id = self.tree.push(Prop::Nest, parent);
+        self.nest_child.push(None);
+        match parent {
+            None => self.root_nest = Some(id),
+            Some(parent) => self.nest_child[parent] = Some(id),
+        }
+        id
+    }
+
+    /// A fresh `Pack` node under `parent`.
+    fn pack(&mut self, parent: Option<PathId>, index: u32) -> PathId {
+        let id = self.tree.push(Prop::Pack(index), parent);
+        self.nest_child.push(None);
+        id
+    }
+}
+
+impl std::ops::Deref for Paths {
+    type Target = Tree<Prop>;
+    fn deref(&self) -> &Tree<Prop> {
+        &self.tree
+    }
+}
+
+/// A layout leaf: its innermost nest/pack wrapper (a node of the path tree,
+/// `None` for no wrappers) over its text. The empty layout is the empty
+/// text; both vanish in `structure`.
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Term<'a> {
     pub(crate) path: Option<PathId>,
@@ -101,36 +149,23 @@ pub(crate) struct FixedLine<'a> {
 /// element buffers are shared across all lines (items and their separators)
 /// and all runs (run terms and their separators), so building the document
 /// appends instead of allocating per line or per run. The document also owns
-/// the path arena its terms point into and the scope buffer its compositions'
+/// the path tree its terms point into and the scope buffer its compositions'
 /// deltas range into; it borrows only the layout's text.
-#[derive(Debug)]
 pub(crate) struct FixedDoc<'a> {
     pub(crate) lines: Vec<FixedLine<'a>>,
     pub(crate) items: Vec<Run<'a>>,
     pub(crate) item_seps: Vec<FixedComp>,
     pub(crate) terms: Vec<Term<'a>>,
     pub(crate) run_seps: Vec<FixedComp>,
-    /// The shared nest/pack path arena every [`Term`]'s `path` points into.
-    pub(crate) paths: Arena<PathNode>,
+    /// The shared path tree every [`Term`]'s `path` points into.
+    pub(crate) paths: Paths,
     /// The shared scope buffer every composition's `opens` ranges into.
     pub(crate) scopes: Vec<ScopeKind>,
 }
 
-/// A scope-chain accumulator: the innermost enclosing grp/seq wrapper, `None`
-/// at the root.
-type ChainId = Option<Id<ChainNode>>;
-
-/// One grp/seq wrapper in the shared scope-chain arena. `parent` links to the
-/// next-outer wrapper and `depth` is the chain length (root = 0), so two
-/// chains — which share their outer spine by id — can be diffed by an
-/// O(delta) walk: advance the deeper to equal depth, then step in lockstep to
-/// the shared id.
-#[derive(Copy, Clone)]
-struct ChainNode {
-    kind: ScopeKind,
-    parent: ChainId,
-    depth: u32,
-}
+/// The innermost enclosing grp/seq wrapper, a node of the scope-chain tree;
+/// `None` at the root.
+type ChainId = Option<Id<Node<ScopeKind>>>;
 
 /// How a leaf's term attaches to what follows it.
 #[derive(Copy, Clone)]
@@ -204,7 +239,7 @@ impl<'a> LineAccum<'a> {
 /// buffer; the output borrows only `text`.
 pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDoc<'a> {
     let mut pack_count: u32 = 0;
-    let mut chains: Arena<ChainNode> = Arena::new();
+    let mut chains: Tree<ScopeKind> = Tree::new();
     let mut acc = LineAccum {
         doc: FixedDoc {
             lines: Vec::new(),
@@ -212,7 +247,7 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
             item_seps: Vec::new(),
             terms: Vec::new(),
             run_seps: Vec::new(),
-            paths: Arena::new(),
+            paths: Paths::new(),
             scopes: Vec::new(),
         },
         line_items_start: 0,
@@ -300,12 +335,7 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
                     LayoutNode::Grp(_) => ScopeKind::Grp,
                     _ => ScopeKind::Seq,
                 };
-                let depth = chain.map_or(0, |id| chains[id].depth) + 1;
-                let id = chains.push(ChainNode {
-                    kind,
-                    parent: chain,
-                    depth,
-                });
+                let id = chains.push(kind, chain);
                 stack.push(Work {
                     node: *child,
                     path,
@@ -316,15 +346,14 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
                 });
             }
             wrapper @ (LayoutNode::Nest(child) | LayoutNode::Pack(child)) => {
-                let prop = match wrapper {
-                    LayoutNode::Nest(_) => Prop::Nest,
+                let id = match wrapper {
+                    LayoutNode::Nest(_) => acc.doc.paths.nest(path),
                     _ => {
                         let index = pack_count;
                         pack_count += 1;
-                        Prop::Pack(index)
+                        acc.doc.paths.pack(path, index)
                     }
                 };
-                let id = acc.doc.paths.push(PathNode { prop, parent: path });
                 stack.push(Work {
                     node: *child,
                     path: Some(id),
@@ -389,43 +418,19 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
     acc.doc
 }
 
-/// Diffs two scope chains (innermost-first, sharing an outer spine by id):
-/// the scopes that *open* (in `cur`, not `prev`) are appended innermost-first
-/// to the caller's scratch, and the number that *close* (in `prev`, not
-/// `cur`) is returned.
+/// Diffs two scope chains: the scopes that *open* (in `cur`, not `prev`)
+/// are appended innermost-first to the caller's scratch, and the number that
+/// *close* (in `prev`, not `cur`) is returned. Both are the chains beyond
+/// the shared spine, so the diff costs O(delta).
 fn diff_chains(
-    chains: &Arena<ChainNode>,
+    chains: &Tree<ScopeKind>,
     prev: ChainId,
     cur: ChainId,
     opens: &mut Vec<ScopeKind>,
 ) -> u32 {
-    let depth = |id: ChainId| id.map_or(0, |id| chains[id].depth);
-    let mut a = prev; // contributes closes
-    let mut b = cur; // contributes opens
-    let (mut da, mut db) = (depth(a), depth(b));
-    let mut closes = 0;
-    // Drop the deeper chain's excess head down to the shallower chain's depth.
-    while da > db {
-        closes += 1;
-        a = chains[a.expect("deeper chain is non-empty")].parent;
-        da -= 1;
-    }
-    while db > da {
-        let node = chains[b.expect("deeper chain is non-empty")];
-        opens.push(node.kind);
-        b = node.parent;
-        db -= 1;
-    }
-    // Equal depth: step in lockstep until the shared spine — the first id both
-    // chains agree on (or both `None`) — everything above it differs.
-    while a != b {
-        let nb = chains[b.expect("chains of equal depth")];
-        closes += 1;
-        opens.push(nb.kind);
-        a = chains[a.expect("chains of equal depth")].parent;
-        b = nb.parent;
-    }
-    closes
+    let shared = chains.lca(prev, cur);
+    opens.extend(chains.ancestors(cur, shared).map(|id| chains[id].value));
+    u32::try_from(chains.ancestors(prev, shared).count()).expect("closes fit u32")
 }
 
 #[cfg(test)]
@@ -608,10 +613,40 @@ mod tests {
             .collect();
         assert_eq!(paths[0], paths[1]);
         let inner = doc.paths[paths[0].expect("wrapped")];
-        assert_eq!(inner.prop, Prop::Nest);
+        assert_eq!(inner.value, Prop::Nest);
         let outer = doc.paths[inner.parent.expect("pack outside nest")];
-        assert_eq!(outer.prop, Prop::Pack(0));
+        assert_eq!(outer.value, Prop::Pack(0));
         assert!(outer.parent.is_none());
+    }
+
+    #[test]
+    fn paths_are_a_trie_with_one_nest_per_parent() {
+        // nest(a) + nest(b): the two nests under the root are one node;
+        // pack(c) + pack(d): every pack is its own node.
+        let layout = comp(
+            comp(
+                nest(text("a")),
+                nest(text("b")),
+                Pad::Padded,
+                Break::Breakable,
+            ),
+            comp(
+                pack(text("c")),
+                pack(text("d")),
+                Pad::Padded,
+                Break::Breakable,
+            ),
+            Pad::Padded,
+            Break::Breakable,
+        );
+        let doc = run(&layout);
+        let (items, _) = one_line(&doc);
+        let paths: Vec<Option<PathId>> = items
+            .iter()
+            .map(|run| run.terms.slice(&doc.terms)[0].path)
+            .collect();
+        assert_eq!(paths[0], paths[1]);
+        assert_ne!(paths[2], paths[3]);
     }
 
     #[test]
