@@ -81,7 +81,11 @@ pub fn grp(layout: Layout) -> Layout {
 /// assert_eq!(words.compile().render(2, 9), "one\ntwo\nthree");
 /// ```
 pub fn seq(layout: Layout) -> Layout {
-    layout.unary(LayoutNode::Seq)
+    if layout.has_line {
+        layout.unary(LayoutNode::Broken)
+    } else {
+        layout.unary(LayoutNode::Seq)
+    }
 }
 
 /// Wraps a layout so that lines it breaks onto are indented by a fixed width
@@ -122,7 +126,9 @@ pub fn pack(layout: Layout) -> Layout {
 /// assert_eq!(line(text("a"), line(null(), text("b"))).compile().render(2, 80), "a\n\nb");
 /// ```
 pub fn line(left: Layout, right: Layout) -> Layout {
-    Layout::binary(left, right, LayoutNode::Line)
+    let mut layout = Layout::binary(left, right, LayoutNode::Line);
+    layout.has_line = true;
+    layout
 }
 
 /// The general composition of two layouts. [`Pad`] chooses whether a space

@@ -4,9 +4,9 @@
 //! runs with the breakable compositions between them:
 //!
 //! - A hard line break ends a line. So does every breakable composition
-//!   inside a *broken* sequence — a `seq` whose subtree contains a hard line
-//!   is unconditionally broken, so its wrapper is dropped and its breakable
-//!   compositions become lines. `fix` and `grp` reset that context.
+//!   inside a *broken* sequence — a `seq` with a hard line beneath it, which
+//!   the constructors mark as such — so its wrapper is dropped and its
+//!   breakable compositions become lines. `fix` and `grp` reset that context.
 //! - Every item is a run: a maximal sequence of terms joined by fixed
 //!   compositions (including every composition under a `fix`). A lone term
 //!   is a run of one.
@@ -22,7 +22,7 @@
 //! Pack indices are DFS pre-order counters, dense so the renderer keys its
 //! marks by plain index.
 
-use crate::arena::{Arena, Id, IdVec, Range, append_range};
+use crate::arena::{Arena, Id, Range, append_range};
 use crate::layout::{Attr, Break, LayId, LayoutNode, Pad};
 
 pub(crate) type PathId = Id<PathNode>;
@@ -46,7 +46,7 @@ pub(crate) enum Prop {
 
 /// A layout leaf: its innermost nest/pack wrapper (a path into the shared
 /// path arena, `None` for no wrappers) over its text. The empty layout is the
-/// empty text; both vanish in `lower`.
+/// empty text; both vanish in `structure`.
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Term<'a> {
     pub(crate) path: Option<PathId>,
@@ -65,7 +65,7 @@ pub(crate) enum ScopeKind {
 /// scopes changed since the previous composition on the line. Scopes nest, so
 /// the open scopes at any point form a stack: `closes` scopes pop off it and
 /// `opens` (outermost first, a range into the document's shared scope buffer)
-/// push onto it. `resolve_scopes` replays these deltas to build the scope
+/// push onto it. `structure` replays these deltas to build the scope
 /// graph.
 ///
 /// Carrying deltas (total size O(number of scopes)) rather than each
@@ -203,23 +203,6 @@ impl<'a> LineAccum<'a> {
 /// `nodes` is a layout's postorder arena (root last) and `text` its text
 /// buffer; the output borrows only `text`.
 pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDoc<'a> {
-    // Whether each subtree contains a hard line break: a bottom-up fold, so a
-    // `seq` can be classified as broken when the DFS reaches it.
-    let mut has_line: IdVec<LayoutNode, bool> = IdVec::with_capacity(nodes.len());
-    for (_, node) in nodes.iter() {
-        let flag = match *node {
-            LayoutNode::Text(_) => false,
-            LayoutNode::Fix(c)
-            | LayoutNode::Grp(c)
-            | LayoutNode::Seq(c)
-            | LayoutNode::Nest(c)
-            | LayoutNode::Pack(c) => has_line[c],
-            LayoutNode::Line(..) => true,
-            LayoutNode::Comp(l, r, _) => has_line[l] || has_line[r],
-        };
-        has_line.push(flag);
-    }
-
     let mut pack_count: u32 = 0;
     let mut chains: Arena<ChainNode> = Arena::new();
     let mut acc = LineAccum {
@@ -304,7 +287,7 @@ pub(crate) fn serialize<'a>(nodes: &Arena<LayoutNode>, text: &'a str) -> FixedDo
                 broken: false,
             }),
             // A broken seq is dropped: its content is unconditionally broken.
-            LayoutNode::Seq(child) if has_line[*child] => stack.push(Work {
+            LayoutNode::Broken(child) => stack.push(Work {
                 node: *child,
                 path,
                 chain,

@@ -52,7 +52,7 @@ impl Layout {
     pub fn compile(self) -> Doc {
         // The layout's text buffer is borrowed all the way down the pipeline;
         // its node arena is dead once serialized.
-        let Layout { nodes, text } = self;
+        let Layout { nodes, text, .. } = self;
         let fixed = serialize::serialize(&nodes, &text);
         drop(nodes);
         structure::structure(&fixed)

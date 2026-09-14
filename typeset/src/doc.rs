@@ -1,12 +1,11 @@
 //! The public output type: a [`Doc`] stored as a flat arena.
 //!
 //! The object graph (the `Comp`/`Grp`/`Nest`/… nodes) is one flat arena with
-//! children referenced by arena id; runs of unbreakable text are ranges into
-//! one shared run buffer, and all text is concatenated in one `String` that
-//! runs range into. The spine is one optional root object per line in
-//! document order (`None` for an empty line), and two side tables hold each
-//! object's precomputed mid-line extents for the renderer's O(1) break
-//! decisions.
+//! children referenced by arena id; a run of unbreakable text is a range into
+//! the one `String` all text is concatenated in. The spine is one optional
+//! root object per line in document order (`None` for an empty line), and
+//! two side tables hold each object's precomputed mid-line extents for the
+//! renderer's O(1) break decisions.
 //!
 //! Being flat, dropping, cloning, or debug-printing a `Doc` touches a few
 //! `Vec`s of shallow records and one `String`, so `Clone`, `Drop`, and `Debug`
@@ -17,21 +16,14 @@ use crate::layout::Pad;
 
 pub(crate) type ObjId = Id<ObjNode>;
 
-/// One text of a run, with the padding that precedes it within the run. The
-/// first text of a run is never padded, so a run's width is the plain sum.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct RunText {
-    pub(crate) pad: Pad,
-    pub(crate) text: Range<str>,
-}
-
 /// A node in the object arena. Children are arena ids, a run is a range into
-/// the shared run buffer, so a node is a shallow record and the whole arena
+/// the text buffer, so a node is a shallow record and the whole arena
 /// drops/clones without recursion.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum ObjNode {
-    /// One or more texts that never break apart.
-    Run(Range<RunText>),
+    /// Text that never breaks: one or more literals, with the space of a
+    /// padded fixed composition between them, already joined.
+    Run(Range<str>),
     Grp(ObjId),
     Seq(ObjId),
     Nest(ObjId),
@@ -60,8 +52,6 @@ pub struct Doc {
     /// unless the document ends in an empty line.
     pub(crate) lines: Vec<Option<ObjId>>,
     pub(crate) objs: Arena<ObjNode>,
-    /// All runs' texts, concatenated; `ObjNode::Run` holds a range into it.
-    pub(crate) runs: Vec<RunText>,
     /// All text, concatenated; runs hold ranges into it.
     pub(crate) text: String,
     /// Per-object flat extent: how many columns the object advances when laid
@@ -85,7 +75,6 @@ pub struct Doc {
 /// [`finish`](DocBuilder::finish).
 pub(crate) struct DocBuilder {
     objs: Arena<ObjNode>,
-    runs: Vec<RunText>,
     text: String,
 }
 
@@ -95,30 +84,28 @@ impl DocBuilder {
     pub(crate) fn with_capacity(objs: usize) -> Self {
         DocBuilder {
             objs: Arena::with_capacity(objs),
-            runs: Vec::new(),
             text: String::new(),
         }
     }
 
     /// Opens a run: the offset [`end_run`](Self::end_run) closes it at.
     pub(crate) fn start_run(&self) -> usize {
-        self.runs.len()
+        self.text.len()
     }
 
-    /// Appends a text, with the pad that precedes it, to the open run.
+    /// Appends a text to the open run, after the space of the pad that
+    /// precedes it.
     pub(crate) fn push_text(&mut self, pad: Pad, data: &str) {
-        let start = self.text.len();
+        if pad == Pad::Padded {
+            self.text.push(' ');
+        }
         self.text.push_str(data);
-        self.runs.push(RunText {
-            pad,
-            text: Range::new(start, self.text.len()),
-        });
     }
 
     /// Closes the run opened at `start` and returns its object.
     pub(crate) fn end_run(&mut self, start: usize) -> ObjId {
         self.objs
-            .push(ObjNode::Run(Range::new(start, self.runs.len())))
+            .push(ObjNode::Run(Range::new(start, self.text.len())))
     }
 
     /// Append an object node and return its id.
@@ -133,9 +120,7 @@ impl DocBuilder {
     /// position (their offsets only apply at the head of a line), so an
     /// object's extent — and its distance to the first composition boundary —
     /// is a plain sum over the arena. The arena is postorder (children precede
-    /// parents), so one forward loop suffices. Sums saturate: a saturated
-    /// extent is already wider than any target width, which is all the
-    /// comparisons ask.
+    /// parents), so one forward loop suffices.
     pub(crate) fn finish(self, lines: Vec<Option<ObjId>>) -> Doc {
         let mut packs: usize = 0;
         let mut extents: IdVec<ObjNode, usize> = IdVec::with_capacity(self.objs.len());
@@ -147,10 +132,7 @@ impl DocBuilder {
             let (extent, next_comp) = match node {
                 // A run never contains a composition boundary.
                 ObjNode::Run(range) => {
-                    let width = range.slice(&self.runs).iter().fold(0usize, |acc, run| {
-                        acc.saturating_add(run.pad.width())
-                            .saturating_add(text_width(run.text.slice(&self.text)))
-                    });
+                    let width = text_width(range.slice(&self.text));
                     (width, width)
                 }
                 // A mid-line group is laid out as one opaque block, so the
@@ -163,9 +145,7 @@ impl DocBuilder {
                     (extents[*child], next_comps[*child])
                 }
                 ObjNode::Comp(left, right, pad) => (
-                    extents[*left]
-                        .saturating_add(pad.width())
-                        .saturating_add(extents[*right]),
+                    extents[*left] + pad.width() + extents[*right],
                     next_comps[*left],
                 ),
             };
@@ -176,7 +156,6 @@ impl DocBuilder {
         Doc {
             lines,
             objs: self.objs,
-            runs: self.runs,
             text: self.text,
             extents,
             next_comps,

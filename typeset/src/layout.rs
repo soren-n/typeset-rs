@@ -59,7 +59,12 @@ pub(crate) enum LayoutNode {
     Text(Range<str>),
     Fix(LayId),
     Grp(LayId),
+    /// A sequence with no hard line beneath it.
     Seq(LayId),
+    /// A sequence with a hard line beneath it: unconditionally broken, so
+    /// every breakable composition inside it is a line. Decided when the
+    /// sequence is built, from [`Layout::has_line`].
+    Broken(LayId),
     Nest(LayId),
     Pack(LayId),
     Line(LayId, LayId),
@@ -76,6 +81,7 @@ impl LayoutNode {
             LayoutNode::Fix(c) => LayoutNode::Fix(id(c)),
             LayoutNode::Grp(c) => LayoutNode::Grp(id(c)),
             LayoutNode::Seq(c) => LayoutNode::Seq(id(c)),
+            LayoutNode::Broken(c) => LayoutNode::Broken(id(c)),
             LayoutNode::Nest(c) => LayoutNode::Nest(id(c)),
             LayoutNode::Pack(c) => LayoutNode::Pack(id(c)),
             LayoutNode::Line(l, r) => LayoutNode::Line(id(l), id(r)),
@@ -98,6 +104,9 @@ impl LayoutNode {
 pub struct Layout {
     pub(crate) nodes: Arena<LayoutNode>,
     pub(crate) text: String,
+    /// Whether a hard line break is anywhere in the layout, which is what
+    /// decides whether a sequence wrapped around it is broken.
+    pub(crate) has_line: bool,
 }
 
 impl Layout {
@@ -105,7 +114,11 @@ impl Layout {
     pub(crate) fn text(text: String) -> Layout {
         let mut nodes = Arena::with_capacity(1);
         nodes.push(LayoutNode::Text(Range::new(0, text.len())));
-        Layout { nodes, text }
+        Layout {
+            nodes,
+            text,
+            has_line: false,
+        }
     }
 
     /// The root node's id: always the last node.
@@ -128,6 +141,7 @@ impl Layout {
         right: Layout,
         make: impl FnOnce(LayId, LayId) -> LayoutNode,
     ) -> Layout {
+        let has_line = left.has_line || right.has_line;
         let left_is_base = left.nodes.len() >= right.nodes.len();
         let (mut base, other) = if left_is_base {
             (left, right)
@@ -147,6 +161,7 @@ impl Layout {
             (other_root, base_root)
         };
         base.nodes.push(make(l, r));
+        base.has_line = has_line;
         base
     }
 }

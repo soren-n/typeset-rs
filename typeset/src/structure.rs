@@ -719,7 +719,7 @@ mod tests {
     use crate::serialize::serialize;
 
     /// The document of a one-line layout, printed as nested constructor
-    /// names over the texts; a run of several terms prints as `Fix(a b c)`.
+    /// names over the runs' texts.
     fn shape(layout: &Layout) -> String {
         let fixed = serialize(&layout.nodes, &layout.text);
         let doc = structure(&fixed);
@@ -728,17 +728,7 @@ mod tests {
         };
         fn obj(doc: &Doc, id: ObjId) -> String {
             match doc.objs[id] {
-                ObjNode::Run(range) => {
-                    let texts: Vec<&str> = range
-                        .slice(&doc.runs)
-                        .iter()
-                        .map(|run| run.text.slice(&doc.text))
-                        .collect();
-                    match texts[..] {
-                        [one] => one.to_string(),
-                        _ => format!("Fix({})", texts.join(" ")),
-                    }
-                }
+                ObjNode::Run(range) => range.slice(&doc.text).to_string(),
                 ObjNode::Grp(c) => format!("Grp({})", obj(doc, c)),
                 ObjNode::Seq(c) => format!("Seq({})", obj(doc, c)),
                 ObjNode::Nest(c) => format!("Nest({})", obj(doc, c)),
@@ -785,7 +775,7 @@ mod tests {
         // into one run, so the grp cannot end between them; it widens to
         // include c.
         let layout = pad(text("x"), fixed(grp(pad(text("a"), text("b"))), text("c")));
-        assert_eq!(shape(&layout), "Comp(x, Grp(Comp(a, Fix(b c))))");
+        assert_eq!(shape(&layout), "Comp(x, Grp(Comp(a, b c)))");
     }
 
     #[test]
@@ -797,16 +787,13 @@ mod tests {
             seq(pad(text("a"), pad(text("b"), text("c")))),
             grp(pad(text("d"), text("e"))),
         );
-        assert_eq!(
-            shape(&layout),
-            "Seq(Comp(a, Comp(b, Grp(Comp(Fix(c d), e)))))"
-        );
+        assert_eq!(shape(&layout), "Seq(Comp(a, Comp(b, Grp(Comp(c d, e)))))");
     }
 
     #[test]
     fn a_fix_is_one_run() {
         let layout = fix(pad(pad(text("a"), text("b")), text("c")));
-        assert_eq!(shape(&layout), "Fix(a b c)");
+        assert_eq!(shape(&layout), "a b c");
     }
 
     #[test]

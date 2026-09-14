@@ -179,7 +179,7 @@ impl<'a> Renderer<'a> {
                 }
             };
         }
-        pos.saturating_add(extents[obj])
+        pos + extents[obj]
     }
 
     /// Whether `obj` fits within the width if laid out from `cur`.
@@ -187,7 +187,7 @@ impl<'a> Renderer<'a> {
         let end = if cur.head {
             self.head_end(obj, cur)
         } else {
-            cur.pos.saturating_add(self.doc.extents[obj])
+            cur.pos + self.doc.extents[obj]
         };
         end <= self.cfg.width
     }
@@ -196,7 +196,7 @@ impl<'a> Renderer<'a> {
     /// width. Break decisions are made mid-line, where the precomputed
     /// boundary distance is exact.
     fn should_break(&self, obj: ObjId, cur: Cursor) -> bool {
-        cur.broken || self.cfg.width < cur.pos.saturating_add(self.doc.next_comps[obj])
+        cur.broken || self.cfg.width < cur.pos + self.doc.next_comps[obj]
     }
 
     /// Renders one document object, threading the cursor. Marks recorded
@@ -204,7 +204,6 @@ impl<'a> Renderer<'a> {
     fn render_obj(&mut self, obj: ObjId, cur: &mut Cursor) {
         let Doc {
             objs,
-            runs,
             text,
             extents,
             ..
@@ -216,10 +215,7 @@ impl<'a> Renderer<'a> {
             match frame {
                 Frame::Obj(o) => match &objs[o] {
                     ObjNode::Run(range) => {
-                        for run in range.slice(runs) {
-                            self.push_spaces(run.pad.width());
-                            self.out.push_str(run.text.slice(text));
-                        }
+                        self.out.push_str(range.slice(text));
                         cur.advance(extents[o]);
                     }
                     ObjNode::Grp(child) => {
