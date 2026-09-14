@@ -3,8 +3,8 @@
 //! One grammar, two front ends: [`Layout`]'s `FromStr` reads it from a
 //! string at run time, and the `typeset-parser` crate's `layout!` macro
 //! reads it from Rust tokens at compile time by feeding the same token
-//! parser (the hidden items of this module, a contract between the two
-//! crates). `Layout`'s `Display` prints it.
+//! parser (the hidden `grammar` module, a contract between the two crates).
+//! `Layout`'s `Display` prints it.
 //!
 //! ```text
 //! expr    := atom (binop expr)?          binops share one level, right-assoc
@@ -29,237 +29,31 @@
 //!
 //! The parser is iterative: parenthesis depth costs heap, never native stack.
 
+#[doc(hidden)]
+pub mod grammar;
+
+use self::grammar::{Binary, Build, Token, Unary};
 use crate::constructors::{comp, fix, grp, line, nest, null, pack, seq, text};
 use crate::layout::{Break, Layout, Pad};
 use std::fmt;
 
-/// A prefix operator.
-#[doc(hidden)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Unary {
-    Fix,
-    Grp,
-    Seq,
-    Nest,
-    Pack,
-}
-
-impl Unary {
-    /// The keyword.
-    #[must_use]
-    pub fn keyword(self) -> &'static str {
-        match self {
-            Unary::Fix => "fix",
-            Unary::Grp => "grp",
-            Unary::Seq => "seq",
-            Unary::Nest => "nest",
-            Unary::Pack => "pack",
-        }
-    }
-
-    /// The keyword for `name`, if it is one.
-    #[must_use]
-    pub fn from_keyword(name: &str) -> Option<Unary> {
-        Some(match name {
-            "fix" => Unary::Fix,
-            "grp" => Unary::Grp,
-            "seq" => Unary::Seq,
-            "nest" => Unary::Nest,
-            "pack" => Unary::Pack,
-            _ => return None,
-        })
-    }
-}
-
-/// An infix operator.
-#[doc(hidden)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Binary {
-    /// `@`
-    Line,
-    /// `@@`
-    BlankLine,
-    /// `&`, `+`, `!&`, `!+`
-    Comp(Pad, Break),
-}
-
-impl Binary {
-    /// The operator's spelling.
-    #[must_use]
-    pub fn symbol(self) -> &'static str {
-        match self {
-            Binary::Line => "@",
-            Binary::BlankLine => "@@",
-            Binary::Comp(Pad::Unpadded, Break::Breakable) => "&",
-            Binary::Comp(Pad::Padded, Break::Breakable) => "+",
-            Binary::Comp(Pad::Unpadded, Break::Fixed) => "!&",
-            Binary::Comp(Pad::Padded, Break::Fixed) => "!+",
-        }
-    }
-
-    /// The operator spelled `op`, if any. Longest match is the caller's job:
-    /// `!&` and `@@` must arrive whole.
-    #[must_use]
-    pub fn from_symbol(op: &str) -> Option<Binary> {
-        Some(match op {
-            "@" => Binary::Line,
-            "@@" => Binary::BlankLine,
-            "&" => Binary::Comp(Pad::Unpadded, Break::Breakable),
-            "+" => Binary::Comp(Pad::Padded, Break::Breakable),
-            "!&" => Binary::Comp(Pad::Unpadded, Break::Fixed),
-            "!+" => Binary::Comp(Pad::Padded, Break::Fixed),
-            _ => return None,
-        })
-    }
-}
-
-/// A token of the DSL. `V` is the front end's variable payload (a Rust
-/// identifier in the macro; uninhabited at run time).
-#[doc(hidden)]
+/// Why a DSL text failed to parse (`message`), and where: the position of
+/// the offending token, or the end of the input when it ends inside an
+/// expression. At run time the position is the byte offset into the
+/// source; the `layout!` macro reports a span.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Token<V> {
-    Open,
-    Close,
-    Null,
-    Unary(Unary),
-    Text(String),
-    Var(V),
-    Binary(Binary),
-}
-
-/// What a front end builds the parsed layout into: a [`Layout`] at run time,
-/// constructor calls in the macro.
-#[doc(hidden)]
-pub trait Build {
-    /// The variable payload of the front end's [`Token::Var`].
-    type Var;
-    type Out;
-    fn null(&mut self) -> Self::Out;
-    fn text(&mut self, data: String) -> Self::Out;
-    fn var(&mut self, var: Self::Var) -> Self::Out;
-    fn unary(&mut self, op: Unary, layout: Self::Out) -> Self::Out;
-    fn binary(&mut self, op: Binary, left: Self::Out, right: Self::Out) -> Self::Out;
-}
-
-/// Why a token sequence failed to parse, and where: the position of the
-/// offending token, or `end` for a sequence that ends too soon.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseErrorAt<P> {
+pub struct ParseError<P = usize> {
     pub at: P,
     pub message: &'static str,
 }
 
-/// Parses `tokens` (each with its position) with `builder`. `end` is the
-/// position reported for input that ends inside an expression.
-#[doc(hidden)]
-pub fn parse_tokens<P, B: Build>(
-    tokens: impl IntoIterator<Item = (P, Token<B::Var>)>,
-    end: P,
-    builder: &mut B,
-) -> Result<B::Out, ParseErrorAt<P>> {
-    let mut frames = vec![Frame::new()];
-    // Whether the next token must be an operand (else an operator or `)`).
-    let mut want_operand = true;
-    let err = |at, message| ParseErrorAt { at, message };
-    for (at, token) in tokens {
-        let frame = frames.last_mut().expect("the root frame is never popped");
-        if want_operand {
-            match token {
-                Token::Null => {
-                    let out = builder.null();
-                    frame.push_operand(builder, out);
-                }
-                Token::Text(data) => {
-                    let out = builder.text(data);
-                    frame.push_operand(builder, out);
-                }
-                Token::Var(var) => {
-                    let out = builder.var(var);
-                    frame.push_operand(builder, out);
-                }
-                Token::Unary(unary) => {
-                    if frame.unary.is_some() {
-                        return Err(err(at, "expected a primary expression"));
-                    }
-                    frame.unary = Some(unary);
-                    continue;
-                }
-                Token::Open => {
-                    frames.push(Frame::new());
-                    continue;
-                }
-                Token::Close | Token::Binary(_) => {
-                    return Err(err(at, "expected a primary expression"));
-                }
-            }
-            want_operand = false;
-        } else {
-            match token {
-                Token::Binary(op) => {
-                    frame.ops.push(op);
-                    want_operand = true;
-                }
-                Token::Close => {
-                    if frames.len() == 1 {
-                        return Err(err(at, "unexpected )"));
-                    }
-                    let inner = frames.pop().expect("nested frame").finish(builder);
-                    frames
-                        .last_mut()
-                        .expect("root frame")
-                        .push_operand(builder, inner);
-                }
-                _ => return Err(err(at, "expected an operator")),
-            }
-        }
-    }
-    if want_operand {
-        return Err(err(end, "expected a primary expression"));
-    }
-    if frames.len() != 1 {
-        return Err(err(end, "expected )"));
-    }
-    Ok(frames.pop().expect("root frame").finish(builder))
-}
-
-/// One parenthesized level: the operand chain built so far, the operators
-/// between the operands, and a unary operator waiting for its operand.
-struct Frame<O> {
-    operands: Vec<O>,
-    ops: Vec<Binary>,
-    unary: Option<Unary>,
-}
-
-impl<O> Frame<O> {
-    fn new() -> Self {
-        Frame {
-            operands: Vec::new(),
-            ops: Vec::new(),
-            unary: None,
-        }
-    }
-
-    fn push_operand<B: Build<Out = O>>(&mut self, builder: &mut B, operand: O) {
-        let operand = match self.unary.take() {
-            Some(unary) => builder.unary(unary, operand),
-            None => operand,
-        };
-        self.operands.push(operand);
-    }
-
-    /// Folds the chain right-associatively: `a op1 b op2 c` is
-    /// `a op1 (b op2 c)`.
-    fn finish<B: Build<Out = O>>(mut self, builder: &mut B) -> O {
-        let mut result = self
-            .operands
-            .pop()
-            .expect("a finished frame has an operand");
-        while let (Some(op), Some(left)) = (self.ops.pop(), self.operands.pop()) {
-            result = builder.binary(op, left, result);
-        }
-        result
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} at byte {}", self.message, self.at)
     }
 }
+
+impl std::error::Error for ParseError {}
 
 // --- Printing ---------------------------------------------------------------
 
@@ -343,22 +137,9 @@ fn write_text(f: &mut fmt::Formatter, text: &str) -> fmt::Result {
 
 // --- The run-time front end ------------------------------------------------
 
-/// Why a DSL string failed to parse (`message`), and the byte offset into
-/// the source where it was detected (`at`).
-pub type ParseError = ParseErrorAt<usize>;
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} at byte {}", self.message, self.at)
-    }
-}
-
-impl std::error::Error for ParseError {}
-
 /// The run-time front end has no variables.
-#[doc(hidden)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NoVar {}
+#[derive(Debug, Clone, Copy)]
+enum NoVar {}
 
 struct Constructors;
 
@@ -383,12 +164,11 @@ impl Build for Constructors {
             Unary::Pack => pack(layout),
         }
     }
-    fn binary(&mut self, op: Binary, left: Layout, right: Layout) -> Layout {
-        match op {
-            Binary::Line => line(left, right),
-            Binary::BlankLine => line(left, line(null(), right)),
-            Binary::Comp(pad, brk) => comp(left, right, pad, brk),
-        }
+    fn line(&mut self, left: Layout, right: Layout) -> Layout {
+        line(left, right)
+    }
+    fn comp(&mut self, left: Layout, right: Layout, pad: Pad, brk: Break) -> Layout {
+        comp(left, right, pad, brk)
     }
 }
 
@@ -396,7 +176,7 @@ impl Build for Constructors {
 impl std::str::FromStr for Layout {
     type Err = ParseError;
     fn from_str(src: &str) -> Result<Layout, ParseError> {
-        parse_tokens(tokenize(src)?, src.len(), &mut Constructors)
+        grammar::parse_tokens(tokenize(src)?, src.len(), &mut Constructors)
     }
 }
 
@@ -406,7 +186,7 @@ fn tokenize(src: &str) -> Result<Vec<(usize, Token<NoVar>)>, ParseError> {
     let mut i = 0;
     while i < bytes.len() {
         let start = i;
-        let err = |message| ParseErrorAt { at: start, message };
+        let err = |message| ParseError { at: start, message };
         let token = match bytes[i] {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 i += 1;
@@ -455,27 +235,11 @@ fn tokenize(src: &str) -> Result<Vec<(usize, Token<NoVar>)>, ParseError> {
     Ok(tokens)
 }
 
-/// Reads one string literal, quotes included, into its text. This is the
-/// DSL's string syntax: the `layout!` macro feeds it the source text of its
-/// Rust string literals, so both front ends accept exactly the same
-/// literals (and raw strings or Rust-only escapes are rejected).
-#[doc(hidden)]
-pub fn parse_text(literal: &str) -> Result<String, ParseError> {
-    let (text, end) = scan_text(literal, 0)?;
-    if end != literal.len() {
-        return Err(ParseErrorAt {
-            at: end,
-            message: "expected the end of the literal",
-        });
-    }
-    Ok(text)
-}
-
 /// Scans the string literal starting at `start` in `src`, returning its
 /// text and the offset just past its closing quote.
 fn scan_text(src: &str, start: usize) -> Result<(String, usize), ParseError> {
     let bytes = src.as_bytes();
-    let err = |message| ParseErrorAt { at: start, message };
+    let err = |message| ParseError { at: start, message };
     if bytes.get(start) != Some(&b'"') {
         return Err(err("expected a string literal"));
     }
@@ -585,6 +349,7 @@ mod tests {
 
     #[test]
     fn text_literals_are_read_whole() {
+        use grammar::parse_text;
         assert_eq!(parse_text(r#""a\"b""#).unwrap(), "a\"b");
         let e = parse_text(r#"r"a""#).unwrap_err();
         assert_eq!((e.at, e.message), (0, "expected a string literal"));

@@ -1,7 +1,8 @@
 //! The public input type: a [`Layout`] tree stored as a flat arena.
 
 use crate::arena::{Arena, Id, Range};
-use crate::dsl::{self, Binary, Shape, Unary};
+use crate::dsl::grammar::{Binary, Unary};
+use crate::dsl::{self, Shape};
 use std::fmt;
 
 /// Whether a composition puts a space between its two operands when they share

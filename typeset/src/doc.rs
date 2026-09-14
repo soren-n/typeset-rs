@@ -13,7 +13,8 @@
 //! with an explicit stack.
 
 use crate::arena::{Arena, Id, Range};
-use crate::dsl::{self, Binary, Shape, Unary};
+use crate::dsl::grammar::{Binary, Unary};
+use crate::dsl::{self, Shape};
 use crate::layout::{Break, Pad};
 use std::fmt;
 
