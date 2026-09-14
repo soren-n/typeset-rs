@@ -1,53 +1,96 @@
-//! structure: `FixedDoc` → Doc (solve the grp/seq scopes per line, then emit)
+//! structure: lines of terms → Doc (solve the grp/seq scopes per line, then
+//! emit)
 //!
-//! Scopes are ranges over a line's items, and items only exist once
-//! `serialize` has coalesced fixed compositions into runs, so a scope's
-//! extent is not readable off the layout tree. Per line, every item is a
-//! node and every scope an edge from the node it opened at to the node it
-//! closed at: the graph is the direct representation of those ranges, and
-//! the reference implementation defines the widening rules over it.
+//! Scopes are ranges over a line's items, and items only exist once the
+//! fixed compositions have been read as runs, so a scope's extent is not
+//! readable off the layout tree. Per line, every item is a node and every
+//! scope an edge from the node it opened at to the node it closed at: the
+//! graph is the direct representation of those ranges, and the reference
+//! implementation defines the widening rules over it.
 //!
-//! 1. [`Graph::build`] replays each composition's scope deltas (the stack
-//!    pushes and pops `serialize` recorded) into edges, in the order the
-//!    scopes opened, which is document pre-order — the order `solve` and
-//!    the emitter depend on.
+//! 1. [`Graph::build`] reads the items off the line's glue and replays each
+//!    composition's scope deltas (the stack pushes and pops `serialize`
+//!    recorded) into edges, in the order the scopes opened, which is
+//!    document pre-order — the order `solve` and the emitter depend on.
 //! 2. [`Graph::solve`] resolves nodes that both close and open scopes (a
 //!    run that straddles a scope boundary, as in `grp(a + b) !& c`) by
 //!    widening: leading seq edges out of the node are re-sourced onto the
 //!    incoming side, and the incoming edges are handed forward past the
 //!    first grp edge out.
-//! 3. [`Emitter`] reads each line back into the [`Doc`], applying on the
+//! 3. The emitter reads the line back into the [`Doc`], applying on the
 //!    way the rules the reference runs as five tree rewrites afterwards:
 //!    empty terms vanish, trivial grp/seq wrappers are dropped, every spine
-//!    is right-nested, and shared nest/pack prefixes are factored out.
+//!    is right-nested, and shared nest/pack wrappers are factored out.
 //!
-//! The graph is a side table over the `FixedDoc`'s item buffer (a node *is*
-//! its item's id) plus one edge arena. A node's incident edges are intrusive
-//! linked lists threaded through the edge arena, so `solve`'s surgery (pop a
-//! list head, insert before a known edge, splice one list into another) is
-//! O(1) pointer rewiring and building the graph allocates nothing per node
-//! or edge.
+//! Nothing crosses a hard line, so [`Structure`] consumes one line at a
+//! time and every per-line structure — the graph, its edges, the spine
+//! stacks — is scratch reused across lines. The graph's nodes are the
+//! line's items (each a range of its terms) plus one edge arena; a node's
+//! incident edges are intrusive linked lists threaded through the edge
+//! arena, so `solve`'s surgery (pop a list head, insert before a known
+//! edge, splice one list into another) is O(1) pointer rewiring and
+//! building the graph allocates nothing per node or edge.
 
-use crate::arena::{Arena, Id, IdVec};
+use crate::arena::{Arena, Id, IdVec, Range};
 use crate::doc::{Doc, ObjId, ObjNode};
-use crate::layout::Pad;
-use crate::serialize::{FixedComp, FixedDoc, FixedLine, PathId, Paths, Prop, Run, ScopeKind};
+use crate::layout::{Break, Pad};
+use crate::serialize::{Comp, Glue, Line, PathId, Paths, Prop, ScopeKind, Term};
 
-pub(crate) fn structure(doc: &FixedDoc) -> Doc {
-    let mut graph = Graph::build(doc);
-    graph.solve();
-    Emitter::new(doc, &graph).emit()
+/// The pass: consumes a serializer's lines one at a time into a [`Doc`].
+pub(crate) struct Structure<'a> {
+    graph: Graph<'a>,
+    /// Which seq edges survive, from the counting walk.
+    kept: IdVec<Edge<'a>, bool>,
+    // Scratch, reused across lines.
+    counting: Vec<Counting<'a>>,
+    spines: Vec<Spine>,
+    /// The elements of every open spine, each with the pad before it (the
+    /// first element of a spine ignores its pad).
+    elements: Vec<(Pad, Atom)>,
+    doc: Doc,
+}
+
+impl<'a> Structure<'a> {
+    /// `capacity` is a hint for the object arena: the layout's node count
+    /// is about right.
+    pub(crate) fn new(capacity: usize) -> Self {
+        Structure {
+            graph: Graph::new(),
+            kept: IdVec::with_capacity(0),
+            counting: Vec::new(),
+            spines: Vec::new(),
+            elements: Vec::new(),
+            doc: Doc::with_capacity(capacity),
+        }
+    }
+
+    /// Appends `line` to the document.
+    pub(crate) fn push_line(&mut self, line: &Line<'_, 'a>) {
+        self.graph.build(line);
+        self.graph.solve();
+        self.kept.reset(false, self.graph.edges.len());
+        self.count_line(line);
+        let root = self.emit_line(line);
+        self.doc.lines.push(root);
+    }
+
+    pub(crate) fn finish(self) -> Doc {
+        self.doc
+    }
 }
 
 // --- The scope graph -------------------------------------------------------
 
-/// A node is its item: nodes are the items of the `FixedDoc`, by id.
-type NodeId<'a> = Id<Run<'a>>;
+/// A node is an item of the line: a run of terms joined by fixed
+/// compositions, which never breaks.
+type NodeId<'a> = Id<Node<'a>>;
 type EdgeId<'a> = Id<Edge<'a>>;
 
-/// A node's ends of its intrusive edge lists.
+/// An item and the ends of its intrusive edge lists.
 #[derive(Debug, Copy, Clone)]
 struct Node<'a> {
+    /// The item's terms, a range of the line.
+    terms: Range<Term<'a>>,
     /// Edges targeting this node, in list order (solve depends on the order).
     ins_head: Option<EdgeId<'a>>,
     ins_tail: Option<EdgeId<'a>>,
@@ -59,14 +102,18 @@ struct Node<'a> {
     outs_tail: Option<EdgeId<'a>>,
 }
 
-impl Node<'_> {
-    const EMPTY: Self = Node {
-        ins_head: None,
-        ins_tail: None,
-        ins_len: 0,
-        outs_head: None,
-        outs_tail: None,
-    };
+impl<'a> Node<'a> {
+    /// A node with no edges over `terms`.
+    fn over(terms: Range<Term<'a>>) -> Self {
+        Node {
+            terms,
+            ins_head: None,
+            ins_tail: None,
+            ins_len: 0,
+            outs_head: None,
+            outs_tail: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -84,13 +131,6 @@ struct Edge<'a> {
     next_in: Option<EdgeId<'a>>,
 }
 
-struct Graph<'a> {
-    /// One node per item of the `FixedDoc`, index-aligned with its items.
-    nodes: IdVec<Run<'a>, Node<'a>>,
-    /// The shared edge arena the intrusive lists thread through.
-    edges: Arena<Edge<'a>>,
-}
-
 /// A scope while its line is being built: where it opened, and where it
 /// closed once it has.
 #[derive(Copy, Clone)]
@@ -100,65 +140,88 @@ struct Slot<'a> {
     to: Option<NodeId<'a>>,
 }
 
+/// The scope graph of one line; every buffer is reused across lines.
+struct Graph<'a> {
+    /// One node per item of the line, in order.
+    nodes: Arena<Node<'a>>,
+    /// The shared edge arena the intrusive lists thread through.
+    edges: Arena<Edge<'a>>,
+    // Build scratch: the scopes of the line in opening order, and the
+    // indices of those still open.
+    slots: Vec<Slot<'a>>,
+    open: Vec<usize>,
+}
+
 impl<'a> Graph<'a> {
-    /// Assigns a node per item and replays each composition's scope deltas
-    /// at that node. A run's internal comps and its trailing separator all
-    /// share the run's node, exactly as document order threads them.
+    fn new() -> Self {
+        Graph {
+            nodes: Arena::new(),
+            edges: Arena::new(),
+            slots: Vec::new(),
+            open: Vec::new(),
+        }
+    }
+
+    /// Reads the line's items off its glue — a breakable composition ends
+    /// an item — and replays each composition's scope deltas at the node of
+    /// the item before it. A run's internal comps and its trailing
+    /// separator all share the run's node, exactly as document order
+    /// threads them.
     ///
     /// The open scopes form a stack (a composition's closes pop from it, its
     /// opens push onto it), and scopes open in document pre-order, so
     /// materializing edges in opening order gives every node's ins and outs
     /// lists in pre-order.
-    fn build(doc: &FixedDoc<'a>) -> Graph<'a> {
-        let mut g = Graph {
-            nodes: IdVec::filled(Node::EMPTY, doc.items.len()),
-            edges: Arena::new(),
-        };
-        // Per-line scratch, reused across lines: the scopes of the line in
-        // opening order, and the indices of those still open.
-        let mut slots: Vec<Slot<'a>> = Vec::new();
-        let mut open: Vec<usize> = Vec::new();
-        for line in &doc.lines {
-            slots.clear();
-            open.clear();
-            let mut apply = |node: NodeId<'a>, comp: &FixedComp| {
-                for _ in 0..comp.closes {
-                    let slot = open.pop().expect("a closed scope was opened");
-                    slots[slot].to = Some(node);
+    fn build(&mut self, line: &Line<'_, 'a>) {
+        self.nodes.clear();
+        self.edges.clear();
+        self.slots.clear();
+        self.open.clear();
+        let mut start = 0;
+        let mut node = self.nodes.push(Node::over(Range::new(0, 0)));
+        for (i, term) in line.terms.iter().enumerate() {
+            match term.next {
+                Glue::Comp(comp) => {
+                    self.delta(node, &comp, line.scopes);
+                    if comp.brk == Break::Breakable {
+                        self.nodes[node].terms = Range::new(start, i + 1);
+                        start = i + 1;
+                        node = self.nodes.push(Node::over(Range::new(start, start)));
+                    }
                 }
-                for &kind in comp.opens.slice(&doc.scopes) {
-                    open.push(slots.len());
-                    slots.push(Slot {
-                        kind,
-                        from: node,
-                        to: None,
-                    });
-                }
-            };
-            let items = line.items.slice(&doc.items);
-            let seps = line.seps.slice(&doc.item_seps);
-            for (i, run) in items.iter().enumerate() {
-                let node = line.items.id_at(i);
-                for sep in run.seps.slice(&doc.run_seps) {
-                    apply(node, sep);
-                }
-                if let Some(sep) = seps.get(i) {
-                    apply(node, sep);
-                }
-            }
-            // Every scope still open closes at the line's last node.
-            let last = line.items.id_at(items.len() - 1);
-            for &slot in &open {
-                slots[slot].to = Some(last);
-            }
-            for slot in &slots {
-                let to = slot.to.expect("every scope closes by the end of its line");
-                if slot.from != to {
-                    g.add_edge(slot.kind, slot.from, to);
+                Glue::Line => {
+                    debug_assert_eq!(i + 1, line.terms.len(), "a line ends at its last term");
+                    self.nodes[node].terms = Range::new(start, i + 1);
                 }
             }
         }
-        g
+        // Every scope still open closes at the line's last node.
+        for &slot in &self.open {
+            self.slots[slot].to = Some(node);
+        }
+        for i in 0..self.slots.len() {
+            let slot = self.slots[i];
+            let to = slot.to.expect("every scope closes by the end of its line");
+            if slot.from != to {
+                self.add_edge(slot.kind, slot.from, to);
+            }
+        }
+    }
+
+    /// Replays one composition's scope delta at `node`.
+    fn delta(&mut self, node: NodeId<'a>, comp: &Comp, scopes: &[ScopeKind]) {
+        for _ in 0..comp.closes {
+            let slot = self.open.pop().expect("a closed scope was opened");
+            self.slots[slot].to = Some(node);
+        }
+        for &kind in comp.opens.slice(scopes) {
+            self.open.push(self.slots.len());
+            self.slots.push(Slot {
+                kind,
+                from: node,
+                to: None,
+            });
+        }
     }
 
     /// Appends an edge to its source's outs list and its target's ins list.
@@ -296,8 +359,8 @@ impl<'a> Graph<'a> {
 // opens them, never both, and the scopes open at any item form a stack. So
 // a line reads back as a tree of *spines* — the line's own, and one per
 // scope — each a left-to-right sequence of elements (an item, or a nested
-// scope) with a pad between neighbours. The emitter walks each line twice
-// with a stack of open spines:
+// scope) with a pad between neighbours. The line is walked twice with a
+// stack of open spines:
 //
 // - A counting walk decides which seqs survive. Empty items vanish; a scope
 //   with no surviving element vanishes with them. A seq is kept when it
@@ -391,56 +454,10 @@ struct Spine {
     inner: Count,
 }
 
-struct Emitter<'d, 'a> {
-    fixed: &'d FixedDoc<'a>,
-    g: &'d Graph<'a>,
-    doc: Doc,
-    /// Which seq edges survive, from the counting walk.
-    kept: IdVec<Edge<'a>, bool>,
-    // Scratch, reused across lines.
-    counting: Vec<Counting<'a>>,
-    spines: Vec<Spine>,
-    /// The elements of every open spine, each with the pad before it (the
-    /// first element of a spine ignores its pad).
-    elements: Vec<(Pad, Atom)>,
-}
-
-/// Whether a run has any non-empty term.
-fn alive<'a>(fixed: &FixedDoc<'a>, run: Run<'a>) -> bool {
-    run.terms
-        .slice(&fixed.terms)
-        .iter()
-        .any(|term| !term.text.is_empty())
-}
-
-impl<'d, 'a> Emitter<'d, 'a> {
-    fn new(fixed: &'d FixedDoc<'a>, g: &'d Graph<'a>) -> Self {
-        Emitter {
-            fixed,
-            g,
-            // Every surviving item yields at least one object, so the item
-            // total is a capacity floor for the object arena.
-            doc: Doc::with_capacity(fixed.items.len()),
-            kept: IdVec::filled(false, g.edges.len()),
-            counting: Vec::new(),
-            spines: Vec::new(),
-            elements: Vec::new(),
-        }
-    }
-
-    fn emit(mut self) -> Doc {
-        for line in &self.fixed.lines {
-            self.count_line(line);
-            let root = self.emit_line(line);
-            self.doc.lines.push(root);
-        }
-        self.doc
-    }
-
+impl<'a> Structure<'a> {
     /// The counting walk: decides `kept` for every seq of the line.
-    fn count_line(&mut self, line: &FixedLine<'a>) {
-        let (fixed, g) = (self.fixed, self.g);
-        let items = line.items.slice(&fixed.items);
+    fn count_line(&mut self, line: &Line<'_, 'a>) {
+        let g = &self.graph;
         self.counting.clear();
         self.counting.push(Counting {
             edge: None,
@@ -448,8 +465,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
             elements: 0,
             inner: Count::Zero,
         });
-        for (i, run) in items.iter().enumerate() {
-            let node = &g.nodes[line.items.id_at(i)];
+        for (_, node) in g.nodes.iter() {
             // The item is the first element of every scope opening here.
             let mut e = node.outs_head;
             while let Some(edge) = e {
@@ -464,7 +480,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
             // ... and the last element of every scope closing here,
             // innermost first; each closed scope is then an element of the
             // next.
-            let mut survives = alive(fixed, *run);
+            let mut survives = alive(line, node.terms);
             for _ in 0..node.ins_len {
                 let mut top = self.counting.pop().expect("a closing scope is open");
                 top.elements += usize::from(survives);
@@ -484,11 +500,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
 
     /// The emitting walk: the line's root object, `None` if nothing
     /// survives.
-    fn emit_line(&mut self, line: &FixedLine<'a>) -> Option<ObjId> {
-        let (fixed, g) = (self.fixed, self.g);
-        let items = line.items.slice(&fixed.items);
-        // `seps[i].pad` is the pad between item `i` and `i + 1`.
-        let seps = line.seps.slice(&fixed.item_seps);
+    fn emit_line(&mut self, line: &Line<'_, 'a>) -> Option<ObjId> {
         self.spines.clear();
         self.elements.clear();
         self.spines.push(Spine {
@@ -498,8 +510,8 @@ impl<'d, 'a> Emitter<'d, 'a> {
             pending: None,
             inner: Count::Zero,
         });
-        for (i, run) in items.iter().enumerate() {
-            let node = &g.nodes[line.items.id_at(i)];
+        for id in self.graph.nodes.ids() {
+            let node = self.graph.nodes[id];
             assert!(
                 node.ins_len == 0 || node.outs_head.is_none(),
                 "solve leaves no node both closing and opening scopes"
@@ -507,32 +519,27 @@ impl<'d, 'a> Emitter<'d, 'a> {
             let mut e = node.outs_head;
             while let Some(edge) = e {
                 self.open(edge);
-                e = g.edges[edge].next_out;
+                e = self.graph.edges[edge].next_out;
             }
-            let mut element = self.emit_run(*run);
+            let mut element = self.emit_run(line, node.terms);
             for _ in 0..node.ins_len {
                 self.push(element);
-                element = self.close();
+                element = self.close(line.paths);
             }
             self.push(element);
-            match seps.get(i) {
-                Some(sep) => {
-                    let top = self.spines.last_mut().expect("the line is never popped");
-                    top.pending = top.pending.map(|pad| pad.merge(sep.pad));
-                }
-                None => {
-                    let top = self.spines.pop().expect("the line spine");
-                    assert!(
-                        self.spines.is_empty() && top.wrap == Wrap::Line,
-                        "every scope closes by the end of its line"
-                    );
-                    return self.compose(top.start).map(|(path, obj)| {
-                        wrap_path(&mut self.doc, &fixed.paths, path, None, obj)
-                    });
-                }
+            // The pad between this item and the next.
+            if let Glue::Comp(sep) = line.terms[node.terms.end() - 1].next {
+                let top = self.spines.last_mut().expect("the line is never popped");
+                top.pending = top.pending.map(|pad| pad.merge(sep.pad));
             }
         }
-        unreachable!("every line has at least one item")
+        let top = self.spines.pop().expect("the line spine");
+        assert!(
+            self.spines.is_empty() && top.wrap == Wrap::Line,
+            "every scope closes by the end of its line"
+        );
+        self.compose(line.paths, top.start)
+            .map(|(path, obj)| wrap_path(&mut self.doc, line.paths, path, None, obj))
     }
 
     /// Opens the scope of `edge`: pushes its spine.
@@ -541,7 +548,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
         // The scope is at the head of its enclosing group when it is the
         // first surviving element of a spine that is itself at the head.
         let head = parent.head && parent.pending.is_none();
-        let (wrap, head) = match self.g.edges[edge].kind {
+        let (wrap, head) = match self.graph.edges[edge].kind {
             ScopeKind::Grp if head => (Wrap::Splice, true),
             ScopeKind::Grp => (Wrap::Grp, false),
             ScopeKind::Seq if self.kept[edge] => (Wrap::Seq, false),
@@ -571,7 +578,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
     /// Closes the innermost scope, returning it as one element of the
     /// enclosing spine — or nothing, when it vanished or its elements were
     /// spliced into the enclosing spine instead.
-    fn close(&mut self) -> Option<Atom> {
+    fn close(&mut self, paths: &Paths) -> Option<Atom> {
         let top = self.spines.pop().expect("a closing scope is open");
         let parent = self.spines.last_mut().expect("the line is never popped");
         let count = Count::between(self.elements.len() - top.start).add(top.inner);
@@ -592,12 +599,12 @@ impl<'d, 'a> Emitter<'d, 'a> {
                 if wrap == Wrap::Seq {
                     parent.inner = parent.inner.add(count);
                 }
-                let (props, obj) = self.compose(top.start)?;
+                let (path, obj) = self.compose(paths, top.start)?;
                 let obj = self.doc.push(match wrap {
                     Wrap::Grp => ObjNode::Grp(obj),
                     _ => ObjNode::Seq(obj),
                 });
-                Some((props, obj))
+                Some((path, obj))
             }
         }
     }
@@ -607,8 +614,7 @@ impl<'d, 'a> Emitter<'d, 'a> {
     /// share — the chain of their paths' lowest common ancestor — and
     /// removes them. Returns the spine's remaining path and object, or
     /// nothing for an empty spine.
-    fn compose(&mut self, start: usize) -> Option<Atom> {
-        let paths = &self.fixed.paths;
+    fn compose(&mut self, paths: &Paths, start: usize) -> Option<Atom> {
         let elements = &self.elements[start..];
         let (mut res_path, mut result) = elements.last()?.1;
         // Innermost first, so each composition sees its right operand's
@@ -630,15 +636,15 @@ impl<'d, 'a> Emitter<'d, 'a> {
     /// survivors (a dropped term's padding on either side folds into the one
     /// composition that remains), and keeps the first surviving term's path
     /// as the run's. `None` if nothing survived.
-    fn emit_run(&mut self, run: Run<'a>) -> Option<Atom> {
-        let terms = run.terms.slice(&self.fixed.terms);
-        let seps = run.seps.slice(&self.fixed.run_seps);
+    fn emit_run(&mut self, line: &Line<'_, 'a>, terms: Range<Term<'a>>) -> Option<Atom> {
+        let terms = terms.slice(line.terms);
         let mut first: Option<Option<PathId>> = None;
         // The pad to put before the next survivor: `None` until the first
         // survivor (its leading pads are dropped), then the merge of every
         // pad since the previous survivor.
         let mut pending: Option<Pad> = None;
         let start = self.doc.start_run();
+        let last = terms.len() - 1;
         for (k, term) in terms.iter().enumerate() {
             if !term.text.is_empty() {
                 self.doc
@@ -646,12 +652,21 @@ impl<'d, 'a> Emitter<'d, 'a> {
                 first.get_or_insert(term.path);
                 pending = Some(Pad::Unpadded);
             }
-            if let (Some(p), Some(sep)) = (pending.as_mut(), seps.get(k)) {
+            // The glue after the last term is the item's, not the run's.
+            if let (Some(p), true, Glue::Comp(sep)) = (pending.as_mut(), k < last, term.next) {
                 *p = p.merge(sep.pad);
             }
         }
         Some((first?, self.doc.end_run(start)))
     }
+}
+
+/// Whether a run has any non-empty term.
+fn alive<'a>(line: &Line<'_, 'a>, terms: Range<Term<'a>>) -> bool {
+    terms
+        .slice(line.terms)
+        .iter()
+        .any(|term| !term.text.is_empty())
 }
 
 /// Wraps `obj` in the wrappers from `path` outward up to (not including)
@@ -676,13 +691,11 @@ mod tests {
     use super::*;
     use crate::constructors::{comp, fix, grp, nest, null, pack, seq, text};
     use crate::layout::{Break, Layout};
-    use crate::serialize::serialize;
 
     /// The document of a one-line layout, printed as nested constructor
     /// names over the runs' texts.
-    fn shape(layout: &Layout) -> String {
-        let fixed = serialize(&layout.nodes, &layout.text);
-        let doc = structure(&fixed);
+    fn shape(layout: Layout) -> String {
+        let doc = layout.compile();
         let [root] = doc.lines[..] else {
             panic!("expected one line")
         };
@@ -710,12 +723,12 @@ mod tests {
     #[test]
     fn nested_scopes_become_wrappers() {
         let layout = pad(text("x"), pad(grp(pad(text("a"), text("b"))), text("c")));
-        assert_eq!(shape(&layout), "Comp(x, Comp(Grp(Comp(a, b)), c))");
+        assert_eq!(shape(layout), "Comp(x, Comp(Grp(Comp(a, b)), c))");
         let layout = seq(pad(
             text("a"),
             pad(text("b"), grp(pad(text("c"), text("d")))),
         ));
-        assert_eq!(shape(&layout), "Seq(Comp(a, Comp(b, Grp(Comp(c, d)))))");
+        assert_eq!(shape(layout), "Seq(Comp(a, Comp(b, Grp(Comp(c, d)))))");
     }
 
     #[test]
@@ -726,7 +739,7 @@ mod tests {
             text("x"),
             grp(seq(pad(text("a"), pad(text("b"), text("c"))))),
         );
-        assert_eq!(shape(&layout), "Comp(x, Grp(Seq(Comp(a, Comp(b, c)))))");
+        assert_eq!(shape(layout), "Comp(x, Grp(Seq(Comp(a, Comp(b, c)))))");
     }
 
     #[test]
@@ -735,7 +748,7 @@ mod tests {
         // into one run, so the grp cannot end between them; it widens to
         // include c.
         let layout = pad(text("x"), fixed(grp(pad(text("a"), text("b"))), text("c")));
-        assert_eq!(shape(&layout), "Comp(x, Grp(Comp(a, b c)))");
+        assert_eq!(shape(layout), "Comp(x, Grp(Comp(a, b c)))");
     }
 
     #[test]
@@ -747,13 +760,13 @@ mod tests {
             seq(pad(text("a"), pad(text("b"), text("c")))),
             grp(pad(text("d"), text("e"))),
         );
-        assert_eq!(shape(&layout), "Seq(Comp(a, Comp(b, Grp(Comp(c d, e)))))");
+        assert_eq!(shape(layout), "Seq(Comp(a, Comp(b, Grp(Comp(c d, e)))))");
     }
 
     #[test]
     fn a_fix_is_one_run() {
         let layout = fix(pad(pad(text("a"), text("b")), text("c")));
-        assert_eq!(shape(&layout), "a b c");
+        assert_eq!(shape(layout), "a b c");
     }
 
     #[test]
@@ -761,18 +774,18 @@ mod tests {
         // (a + b) + grp(c) + d: the grp groups nothing and is dropped; the
         // whole line is one right-nested spine.
         let layout = pad(pad(text("a"), text("b")), pad(grp(text("c")), text("d")));
-        assert_eq!(shape(&layout), "Comp(a, Comp(b, Comp(c, d)))");
+        assert_eq!(shape(layout), "Comp(a, Comp(b, Comp(c, d)))");
     }
 
     #[test]
     fn a_grp_at_the_head_of_its_group_is_absorbed() {
         assert_eq!(
-            shape(&pad(grp(pad(text("a"), text("b"))), text("c"))),
+            shape(pad(grp(pad(text("a"), text("b"))), text("c"))),
             "Comp(a, Comp(b, c))"
         );
         // Inside a kept seq the head resets, so the grp survives.
         assert_eq!(
-            shape(&seq(pad(
+            shape(seq(pad(
                 grp(pad(text("a"), text("b"))),
                 pad(text("c"), text("d"))
             ))),
@@ -782,14 +795,14 @@ mod tests {
 
     #[test]
     fn a_seq_needs_two_compositions_and_no_seq_above_it() {
-        assert_eq!(shape(&seq(pad(text("a"), text("b")))), "Comp(a, b)");
+        assert_eq!(shape(seq(pad(text("a"), text("b")))), "Comp(a, b)");
         assert_eq!(
-            shape(&seq(pad(text("a"), seq(pad(text("b"), text("c")))))),
+            shape(seq(pad(text("a"), seq(pad(text("b"), text("c")))))),
             "Seq(Comp(a, Comp(b, c)))"
         );
         // A grp beneath a seq is opaque to its count.
         assert_eq!(
-            shape(&pad(
+            shape(pad(
                 text("x"),
                 seq(grp(pad(text("a"), pad(text("b"), text("c")))))
             )),
@@ -799,8 +812,8 @@ mod tests {
 
     #[test]
     fn empty_texts_vanish_and_their_pads_merge() {
-        assert_eq!(shape(&null()), "Empty");
-        assert_eq!(shape(&pad(nest(null()), text("a"))), "a");
+        assert_eq!(shape(null()), "Empty");
+        assert_eq!(shape(pad(nest(null()), text("a"))), "a");
         // The pads around a vanished middle element merge; a vanished
         // leading element's pad is dropped even across a wrapper.
         let layout = comp(
@@ -809,8 +822,7 @@ mod tests {
             Pad::Unpadded,
             Break::Breakable,
         );
-        let fixed = serialize(&layout.nodes, &layout.text);
-        let doc = structure(&fixed);
+        let doc = layout.compile();
         let root = doc.lines[0].expect("a survives");
         assert!(matches!(doc.objs[root], ObjNode::Comp(_, _, Pad::Padded)));
         let layout = comp(
@@ -819,8 +831,7 @@ mod tests {
             Pad::Unpadded,
             Break::Breakable,
         );
-        let fixed = serialize(&layout.nodes, &layout.text);
-        let doc = structure(&fixed);
+        let doc = layout.compile();
         let root = doc.lines[0].expect("a survives");
         assert!(matches!(doc.objs[root], ObjNode::Comp(_, _, Pad::Unpadded)));
     }
@@ -828,10 +839,10 @@ mod tests {
     #[test]
     fn shared_wrapper_prefixes_are_factored_out() {
         let layout = pack(nest(pad(text("a"), text("b"))));
-        assert_eq!(shape(&layout), "Pack(Nest(Comp(a, b)))");
+        assert_eq!(shape(layout), "Pack(Nest(Comp(a, b)))");
         let layout = pad(nest(text("a")), nest(text("b")));
-        assert_eq!(shape(&layout), "Nest(Comp(a, b))");
+        assert_eq!(shape(layout), "Nest(Comp(a, b))");
         let layout = pad(nest(text("a")), text("b"));
-        assert_eq!(shape(&layout), "Comp(Nest(a), b)");
+        assert_eq!(shape(layout), "Comp(Nest(a), b)");
     }
 }

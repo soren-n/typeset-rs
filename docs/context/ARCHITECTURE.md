@@ -18,8 +18,8 @@ A Rust workspace of three crates:
 - `layout.rs`: `Layout`, the public input type
 - `dsl.rs`: the DSL grammar, parser and run-time front end
 - `arena.rs`: the arena primitives every representation is built from
-- `serialize.rs`, `structure.rs`: the two passes, each owning the
-  representation it produces
+- `serialize.rs`, `structure.rs`: the two passes; `serialize` owns the
+  line representation it lends, `structure` the graph it solves
 - `doc.rs`: `Doc`, the public output type, and its builder
 - `render.rs`: `Doc::render`
 
@@ -64,12 +64,18 @@ allocations.
 
 ### Pipeline
 
-| Pass        | Lowers                | Does |
-|-------------|-----------------------|------|
-| `serialize` | `Layout` → `FixedDoc` | split into lines at hard breaks and inside broken sequences; coalesce runs of fixed compositions; record scope deltas |
-| `structure` | `FixedDoc` → `Doc`    | build and solve the grp/seq scope graph per line, then read it back into the `Doc`: drop empty terms, decide the grp/seq identities, right-nest every spine, factor shared nest/pack prefixes, build the extent tables |
+| Pass        | Lowers                       | Does |
+|-------------|------------------------------|------|
+| `serialize` | `Layout` → lines of terms    | split into lines at hard breaks and inside broken sequences; mark each composition fixed or breakable; record scope deltas |
+| `structure` | lines of terms → `Doc`       | per line: read the items off the glue, build and solve the grp/seq scope graph, then read it back into the `Doc`: drop empty terms, decide the grp/seq identities, right-nest every spine, factor shared nest/pack wrappers, measure every object |
 
-**serialize.** One left-to-right DFS with an explicit stack. It threads:
+Nothing crosses a hard line, so the passes are a pipeline of lines: the
+`Serializer` runs its DFS up to the next hard line and lends that line, and
+`Structure` consumes it with scratch reused across lines. The intermediate
+is one line, whatever the document's size.
+
+**serialize.** One left-to-right DFS with an explicit stack, paused between
+lines. It threads:
 - the innermost nest/pack wrapper, as a node of the path tree. The tree is
   a trie: a node has at most one `Nest` child and a `Pack` node is unique
   to its index, so two terms under the same wrappers hold the same node,
@@ -86,15 +92,17 @@ allocations.
   compositions become lines; `fix` and `grp` reset it). The line decision
   uses the composition's own attribute, before the fix override.
 
-Every item of a line is a run: one or more terms joined by fixed
-compositions, which never breaks. Lines, runs, terms and separators are
-ranges into shared buffers, so nothing is allocated per line or per run.
+A line is its terms in order, each carrying the *glue* to the next: a
+composition (pad, fixed or breakable, scope delta) or, on the last term,
+the hard line. An item of a line is a run: one or more terms joined by
+fixed compositions, which never breaks; `structure` reads the items off
+the glue.
 
 **structure: the graph.** Scopes are ranges over a line's items, and items
-only exist once fixed compositions have coalesced into runs, so a scope's
-extent cannot be read off the tree. Per line, every item is a graph node
-and every scope an edge from the node it opened at to the node it closed
-at, built by replaying the stack deltas in opening order, which is document
+only exist once fixed compositions have been read as runs, so a scope's
+extent cannot be read off the tree. Every item is a graph node and every
+scope an edge from the node it opened at to the node it closed at, built
+by replaying the stack deltas in opening order, which is document
 pre-order. A node has both incoming and outgoing edges only when a run
 straddles a scope boundary (`grp(a + b) !& c`: the run `[b c]` both closes
 the grp and follows it). `solve` resolves those by widening: leading seq
@@ -102,9 +110,9 @@ out-edges are re-sourced onto the incoming side, and the incoming list is
 handed forward past the first grp out-edge, with tie-breaks that depend on
 edge-list order.
 
-The graph is a side table over the item buffer (a node is its item's id)
-plus one edge arena; a node's incident edges are intrusive linked lists
-through that arena, so every list move is O(1). This is the reference
+The graph's nodes are the line's items (each a range of its terms) plus one
+edge arena; a node's incident edges are intrusive linked lists through
+that arena, so every list move is O(1). This is the reference
 implementation's formulation and its widening rules are defined over it; a
 tree rewrite would re-encode the same item ranges less directly.
 
@@ -112,8 +120,8 @@ tree rewrite would re-encode the same item ranges less directly.
 either closes scopes or opens them, and the scopes open at any item form a
 stack. So a line reads back as a tree of *spines*: the line's own and one
 per scope, each a left-to-right sequence of elements (an item or a nested
-scope) with a pad between neighbours. The emitter walks each line twice
-with a stack of open spines, applying the rules the reference runs as five
+scope) with a pad between neighbours. The line is walked twice with a
+stack of open spines, applying the rules the reference runs as five
 tree rewrites afterwards (null removal, seq identities, grp identities,
 reassociation, rescoping). The rules are not confluent, so their order is
 part of the semantics, and the two walks reproduce it:

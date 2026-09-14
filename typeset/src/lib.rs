@@ -19,17 +19,16 @@ pub use self::constructors::{
 pub use self::doc::Doc;
 pub use self::layout::{Break, Layout, Pad};
 
-// The pipeline: `serialize` (Layout -> FixedDoc) then `structure`
-// (FixedDoc -> Doc); each module documents its pass, and
-// docs/context/ARCHITECTURE.md the whole. Every representation, the input
-// [`Layout`] included, is a flat structure — postorder index arenas or plain
-// vectors — so every pass is a loop (or an explicit work-stack walk) and the
-// whole pipeline runs in constant native stack: no layout is too deep to
-// compile, and depth shows up as O(depth) heap instead. The layout's text
-// buffer is borrowed by the intermediate representation, and the layout's
-// node arena drops as soon as it is serialized. The output [`Doc`] is a flat
-// arena whose `Clone`/`Drop`/`Debug` are derived and non-recursive by
-// construction.
+// The pipeline: `serialize` (Layout -> lines of terms) feeding `structure`
+// (lines -> Doc) one line at a time, since nothing crosses a hard line;
+// each module documents its pass, and docs/context/ARCHITECTURE.md the
+// whole. Every representation, the input [`Layout`] included, is a flat
+// structure — postorder index arenas or plain vectors — so every pass is a
+// loop (or an explicit work-stack walk) and the whole pipeline runs in
+// constant native stack: no layout is too deep to compile, and depth shows
+// up as O(depth) heap instead. The intermediate is one line, borrowing the
+// layout's text. The output [`Doc`] is a flat arena whose
+// `Clone`/`Drop`/`Debug` are derived and non-recursive by construction.
 
 impl Layout {
     /// Compiles this layout into a [`Doc`].
@@ -44,11 +43,11 @@ impl Layout {
     /// assert_eq!(text("Hello, world!").compile().render(2, 80), "Hello, world!");
     /// ```
     pub fn compile(self) -> Doc {
-        // The layout's text buffer is borrowed all the way down the pipeline;
-        // its node arena is dead once serialized.
-        let Layout { nodes, text, .. } = self;
-        let fixed = serialize::serialize(&nodes, &text);
-        drop(nodes);
-        structure::structure(&fixed)
+        let mut lines = serialize::Serializer::new(&self.nodes, &self.text);
+        let mut structure = structure::Structure::new(self.nodes.len());
+        while let Some(line) = lines.next_line() {
+            structure.push_line(&line);
+        }
+        structure.finish()
     }
 }

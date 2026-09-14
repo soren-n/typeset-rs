@@ -98,6 +98,15 @@ impl<T> Arena<T> {
         self.items.len()
     }
 
+    pub(crate) fn clear(&mut self) {
+        self.items.clear();
+    }
+
+    /// Every id in order. The iterator does not borrow the arena.
+    pub(crate) fn ids(&self) -> impl ExactSizeIterator<Item = Id<T>> + use<T> {
+        (0..self.items.len()).map(Id::from_index)
+    }
+
     /// The elements in id order, paired with their ids.
     pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
         self.items
@@ -147,7 +156,7 @@ impl<T: fmt::Debug> fmt::Debug for Arena<T> {
 
 /// A side table with one `V` per element of an `Arena<K>`, indexed by
 /// [`Id<K>`]. Built by pushing in id order (so it stays aligned with the
-/// arena by construction) or pre-filled to the arena's length.
+/// arena by construction) or reset to the arena's length.
 #[derive(Clone)]
 pub(crate) struct IdVec<K, V> {
     items: Vec<V>,
@@ -162,25 +171,18 @@ impl<K, V> IdVec<K, V> {
         }
     }
 
-    /// A table of `len` copies of `value`.
-    pub(crate) fn filled(value: V, len: usize) -> Self
+    /// Makes the table `len` copies of `value`.
+    pub(crate) fn reset(&mut self, value: V, len: usize)
     where
         V: Clone,
     {
-        IdVec {
-            items: vec![value; len],
-            _marker: PhantomData,
-        }
+        self.items.clear();
+        self.items.resize(len, value);
     }
 
     /// Appends the value for the next id in order.
     pub(crate) fn push(&mut self, value: V) {
         self.items.push(value);
-    }
-
-    /// Every id in order. The iterator does not borrow the table.
-    pub(crate) fn ids(&self) -> impl ExactSizeIterator<Item = Id<K>> + use<K, V> {
-        (0..self.items.len()).map(Id::from_index)
     }
 }
 
@@ -224,10 +226,6 @@ impl<T: ?Sized> Range<T> {
         }
     }
 
-    pub(crate) fn len(&self) -> usize {
-        (self.end - self.start) as usize
-    }
-
     pub(crate) fn start(&self) -> usize {
         self.start as usize
     }
@@ -241,13 +239,6 @@ impl<T> Range<T> {
     /// The elements this range selects from `buf`.
     pub(crate) fn slice<'a>(&self, buf: &'a [T]) -> &'a [T] {
         &buf[self.start()..self.end()]
-    }
-
-    /// The id of the `i`-th element of the range, when the range addresses an
-    /// arena.
-    pub(crate) fn id_at(&self, i: usize) -> Id<T> {
-        debug_assert!(i < self.len());
-        Id::from_index(self.start() + i)
     }
 }
 
