@@ -25,8 +25,11 @@ The reference is pinned at `typeset.0.4`; the tester is a QCheck property: for a
 reference's rendering equals the Rust driver's. The generator is biased
 toward stacked grp/seq wrappers and narrow widths, which is where breaking
 decisions diverge (a uniform generator missed a `grp(seq(x))` ordering bug
-for fifteen runs). QCheck shrinks a failing case; the DSL it prints feeds
-the tester's single-case mode directly. The driver is one process for the
+for fifteen runs). Its texts are ASCII with the quote, backslash, space,
+newline and tab, and may be empty, so the string escapes and the empty
+text are exercised through the oracle too; non-ASCII stays out, since
+width is the one divergence. QCheck shrinks a failing case; the DSL it
+prints feeds the tester's single-case mode directly. The driver is one process for the
 whole run, answering one request per line, so a run takes seconds.
 
 `typeset/tests/oracle.txt` pins exact outputs: each case is a layout in

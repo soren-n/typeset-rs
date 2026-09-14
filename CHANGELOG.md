@@ -25,39 +25,44 @@ git history.
   the composition attribute type are no longer public; build layouts
   through the constructors. The joins take any `IntoIterator<Item = Layout>`.
   `Layout` no longer implements `Default`.
-* **`typeset-macro` depends on `typeset`** (it feeds the shared parser) and
-  reads its string literals with the DSL's own string syntax: the escapes
+* **The macro crate is `typeset-macro`.** It was `typeset-parser` and held
+  no parser: the parser is `typeset::dsl`, and the crate is the `layout!`
+  macro over it. It depends on `typeset` (it feeds the shared parser
+  through the hidden `typeset::dsl::grammar` module) and reads its string
+  literals with the DSL's own string syntax: the escapes
   `\n \r \t \0 \\ \" \'` are accepted, and raw strings, byte strings and
   other Rust escapes are compile errors. The crate depends on `proc-macro2`
   and `quote` alone.
-* `typeset::dsl::ParseError` is a plain struct with public `at` (byte
-  offset) and `message` fields; the accessor methods are gone.
-* `Layout`'s `Debug` prints the layout in the DSL (which parses back to
-  the same layout) instead of the derived arena dump. `Layout` and `Doc`
-  are `#[must_use]` types.
+* **`Layout` prints as the DSL with `Display` and parses it with
+  `FromStr`**; `Debug` is `Display`. `Doc`'s `Debug` prints the document
+  in the DSL too (the document is a normal form: that DSL compiles to the
+  same document). `Layout` and `Doc` are `#[must_use]` types.
+* `typeset::dsl::ParseError` is a plain struct with public `at` and
+  `message` fields, generic over its position: a byte offset at run time,
+  a span in the macro. The accessor methods are gone.
 * MSRV raised from 1.89.0 to 1.96.0.
 
 ### Added
 
-* `typeset::dsl`: the DSL grammar with one implementation. `parse` reads a
-  string at run time (dependency-free, iterative, byte-offset errors); the
-  `layout!` macro feeds the same token parser, so the two front ends cannot
-  disagree.
+* `typeset::dsl`: the DSL grammar with one implementation. `Layout`'s
+  `FromStr` reads a string at run time (dependency-free, iterative,
+  byte-offset errors); the `layout!` macro feeds the same token parser, so
+  the two front ends cannot disagree.
 * Both crates' READMEs are their crate documentation, so every example in
   them is a doctest.
 
 ### Changed
 
-* The compiler is two passes over flat arenas, pipelined one line at a
-  time: `serialize` (a DFS paused at each hard line, lending the line as
-  its terms with the glue between them: a composition with its pad, its
-  fixedness and its scope delta, or the hard line; a sequence with a hard
-  line beneath it is marked broken when it is built) and `structure` (per
-  line: the items read off the glue, the scope graph built and solved in
-  place, then read back straight into the `Doc` with two walks over a
-  stack of open spines that drop empty terms, decide the grp/seq
-  identities, right-nest every spine and factor shared nest/pack
-  wrappers). The intermediate is one line whatever the document's size.
+* The compiler is a pipeline of lines over flat arenas: `lines` (a DFS
+  paused at each hard line, lending the line as a stream of events: a
+  text, a scope opening or closing, a composition with its pad and its
+  fixedness; a sequence with a hard line beneath it is marked broken when
+  it is built), `graph` (per line: the items read off the events, the
+  grp/seq scope graph built and solved in place) and `emit` (the solved
+  line read back straight into the `Doc` with two walks over a stack of
+  open spines that drop empty texts, decide the grp/seq identities,
+  right-nest every spine and factor shared nest/pack wrappers). The
+  intermediate is one line whatever the document's size.
   Every item is a run of one or more fixed-joined terms; a `Doc` run is
   one contiguous string, and a `Doc` object is measured as it is pushed.
   The fix tree, the term leaf enum, the `Null` node, the rebuilt
@@ -78,8 +83,9 @@ git history.
   documents.
 * Output is byte-identical to the OCaml reference (pinned at
   `typeset.0.4`) on the QCheck identity suite, whose generator is biased
-  toward stacked grp/seq and which now keeps one driver process for the
-  run: 20000 cases in about a second. The harness lives in `oracle/`; the
+  toward stacked grp/seq, whose texts exercise the string escapes (quote,
+  backslash, newline, tab, and the empty text), and which now keeps one
+  driver process for the run: 20000 cases in about a second. The harness lives in `oracle/`; the
   pre-commit hook no longer skips it silently. The exact-output cases are
   a data file whose expected blocks `oracle/pin.sh` writes from the
   reference, and the hook and CI fail when a block is stale. The profiling

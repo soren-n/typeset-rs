@@ -16,7 +16,9 @@ A Rust workspace of three crates:
   `Doc`, `Pad`, `Break`, the constructors) and `Layout::compile`
 - `constructors.rs`: the functions users build layouts with
 - `layout.rs`: `Layout`, the public input type
-- `dsl.rs`: the DSL grammar, parser and run-time front end
+- `dsl.rs`, `dsl/grammar.rs`: the DSL: the string syntax, the printer
+  behind `Layout`'s and `Doc`'s DSL output, the run-time front end
+  (`Layout`'s `FromStr`), and the hidden grammar module the macro feeds
 - `arena.rs`: the arena primitives every representation is built from
 - `lines.rs`, `graph.rs`, `emit.rs`: the compiler; `lines` owns the line
   it lends, `graph` the scope graph it solves, `emit` the `Doc` it fills
