@@ -36,6 +36,9 @@ All commits must pass: formatting, linting, type checking, doc build, Rust tests
 
 For comprehensive information, see context documents in `/docs/context/`:
 
-- **[ARCHITECTURE.md](docs/context/ARCHITECTURE.md)**: the arenas, the three passes, the renderer, the semantics worth knowing, the reference
+- **[ARCHITECTURE.md](docs/context/ARCHITECTURE.md)**: the arenas, the two passes, the renderer, the semantics worth knowing, the reference
 - **[DEVELOPMENT.md](docs/context/DEVELOPMENT.md)**: building, the oracle harness, code standards, the pre-commit hook, CI, releasing, benchmarking and profiling
-- **[DSL_SYNTAX.md](docs/context/DSL_SYNTAX.md)**: the DSL grammar, operators, and the shared parser
+
+The DSL grammar is documented where it is implemented: the `typeset::dsl`
+module doc (`typeset/src/dsl.rs`) and the `typeset-parser` README, which is
+that crate's documentation.

@@ -54,7 +54,7 @@ fn tokenize(input: TokenStream) -> Result<Vec<(Span, Token<Ident>)>, Error> {
                 Err(e) => {
                     return Err(Error {
                         span,
-                        message: e.message(),
+                        message: e.message,
                     });
                 }
             },

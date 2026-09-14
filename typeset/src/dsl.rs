@@ -2,7 +2,8 @@
 //!
 //! One grammar, two front ends: [`parse`] reads it from a string at run
 //! time, and the `typeset-parser` crate's `layout!` macro reads it from Rust
-//! tokens at compile time by feeding [`parse_tokens`] its own [`Token`]s.
+//! tokens at compile time by feeding the same token parser (the hidden
+//! items of this module, a contract between the two crates).
 //!
 //! ```text
 //! expr    := atom (binop expr)?          binops share one level, right-assoc
@@ -31,6 +32,7 @@ use crate::layout::{Break, Layout, Pad};
 use std::fmt;
 
 /// A prefix operator.
+#[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Unary {
     Fix,
@@ -55,6 +57,7 @@ impl Unary {
 }
 
 /// An infix operator.
+#[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Binary {
     /// `@`
@@ -83,6 +86,7 @@ impl Binary {
 
 /// A token of the DSL. `V` is the front end's variable payload (a Rust
 /// identifier in the macro; uninhabited at run time).
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token<V> {
     Open,
@@ -96,6 +100,7 @@ pub enum Token<V> {
 
 /// What a front end builds the parsed layout into: a [`Layout`] at run time,
 /// constructor calls in the macro.
+#[doc(hidden)]
 pub trait Build {
     /// The variable payload of the front end's [`Token::Var`].
     type Var;
@@ -117,6 +122,7 @@ pub struct ParseErrorAt<P> {
 
 /// Parses `tokens` (each with its position) with `builder`. `end` is the
 /// position reported for input that ends inside an expression.
+#[doc(hidden)]
 pub fn parse_tokens<P, B: Build>(
     tokens: impl IntoIterator<Item = (P, Token<B::Var>)>,
     end: P,
@@ -228,20 +234,9 @@ impl<O> Frame<O> {
 
 // --- The run-time front end ------------------------------------------------
 
-/// Why a DSL string failed to parse, and where.
+/// Why a DSL string failed to parse (`message`), and the byte offset into
+/// the source where it was detected (`at`).
 pub type ParseError = ParseErrorAt<usize>;
-
-impl ParseError {
-    /// Byte offset into the source where the error was detected.
-    pub fn offset(&self) -> usize {
-        self.at
-    }
-
-    /// What was wrong.
-    pub fn message(&self) -> &'static str {
-        self.message
-    }
-}
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -252,6 +247,7 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 /// The run-time front end has no variables.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoVar {}
 
@@ -351,6 +347,7 @@ fn tokenize(src: &str) -> Result<Vec<(usize, Token<NoVar>)>, ParseError> {
 /// DSL's string syntax: the `layout!` macro feeds it the source text of its
 /// Rust string literals, so both front ends accept exactly the same
 /// literals (and raw strings or Rust-only escapes are rejected).
+#[doc(hidden)]
 pub fn parse_text(literal: &str) -> Result<String, ParseError> {
     let (text, end) = scan_text(literal, 0)?;
     if end != literal.len() {
@@ -449,29 +446,23 @@ mod tests {
     #[test]
     fn errors_carry_offsets() {
         let e = parse(r#""a" + "#).unwrap_err();
-        assert_eq!(
-            (e.offset(), e.message()),
-            (6, "expected a primary expression")
-        );
+        assert_eq!((e.at, e.message), (6, "expected a primary expression"));
         let e = parse(r#"("a""#).unwrap_err();
-        assert_eq!((e.offset(), e.message()), (4, "expected )"));
+        assert_eq!((e.at, e.message), (4, "expected )"));
         let e = parse(r#""a")"#).unwrap_err();
-        assert_eq!((e.offset(), e.message()), (3, "unexpected )"));
+        assert_eq!((e.at, e.message), (3, "unexpected )"));
         let e = parse(r#""a" "b""#).unwrap_err();
-        assert_eq!((e.offset(), e.message()), (4, "expected an operator"));
+        assert_eq!((e.at, e.message), (4, "expected an operator"));
         let e = parse(r#"grp grp ("a")"#).unwrap_err();
-        assert_eq!(
-            (e.offset(), e.message()),
-            (4, "expected a primary expression")
-        );
+        assert_eq!((e.at, e.message), (4, "expected a primary expression"));
         let e = parse(r#""abc"#).unwrap_err();
-        assert_eq!((e.offset(), e.message()), (0, "unterminated string"));
+        assert_eq!((e.at, e.message), (0, "unterminated string"));
         let e = parse("foo").unwrap_err();
-        assert_eq!((e.offset(), e.message()), (0, "unknown keyword"));
+        assert_eq!((e.at, e.message), (0, "unknown keyword"));
         let e = parse("\"a\" ! \"b\"").unwrap_err();
-        assert_eq!((e.offset(), e.message()), (4, "unexpected character"));
+        assert_eq!((e.at, e.message), (4, "unexpected character"));
         assert_eq!(
-            parse("").unwrap_err().message(),
+            parse("").unwrap_err().message,
             "expected a primary expression"
         );
     }
@@ -480,14 +471,11 @@ mod tests {
     fn text_literals_are_read_whole() {
         assert_eq!(parse_text(r#""a\"b""#).unwrap(), "a\"b");
         let e = parse_text(r#"r"a""#).unwrap_err();
-        assert_eq!((e.offset(), e.message()), (0, "expected a string literal"));
+        assert_eq!((e.at, e.message), (0, "expected a string literal"));
         let e = parse_text(r#""a"b"#).unwrap_err();
-        assert_eq!(
-            (e.offset(), e.message()),
-            (3, "expected the end of the literal")
-        );
+        assert_eq!((e.at, e.message), (3, "expected the end of the literal"));
         let e = parse_text(r#""\u{e9}""#).unwrap_err();
-        assert_eq!((e.offset(), e.message()), (0, "unknown escape"));
+        assert_eq!((e.at, e.message), (0, "unknown escape"));
     }
 
     #[test]
