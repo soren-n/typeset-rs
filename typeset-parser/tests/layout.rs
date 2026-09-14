@@ -1,16 +1,12 @@
 //! The macro expands to the same layouts the run-time parser builds:
-//! `Layout`'s `Debug` is the DSL, so the two print identically.
+//! `Layout`'s `Display` is the DSL, so the two print identically.
 
-use typeset::dsl;
+use typeset::Layout;
 use typeset_parser::layout;
 
-fn same(macro_layout: typeset::Layout, src: &str) {
-    let expected = dsl::parse(src).expect("parses");
-    assert_eq!(
-        format!("{macro_layout:?}"),
-        format!("{expected:?}"),
-        "{src}"
-    );
+fn same(macro_layout: Layout, src: &str) {
+    let expected: Layout = src.parse().expect("parses");
+    assert_eq!(macro_layout.to_string(), expected.to_string(), "{src}");
 }
 
 #[test]

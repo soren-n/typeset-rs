@@ -61,8 +61,8 @@ Binary constructors append the smaller operand's arena onto the larger
 (shifting its ids and text ranges) and push the parent. Building `n` nodes
 is O(n) for left- or right-leaning chains and O(n log n) in the worst
 (balanced) case. `Clone` and `Drop` derive; cloning is two allocations.
-`Debug` prints the DSL form, by an explicit stack, and parses back to the
-same layout.
+`Display` prints the DSL form, by an explicit stack, and `FromStr` parses
+it back to the same layout; `Debug` is `Display`.
 
 ### Pipeline
 
@@ -130,7 +130,7 @@ source sits at `~/.opam/default/lib/typeset/Typeset.ml`.
 `typeset::dsl` tokens (spans as positions), reads each string literal's
 source text with the DSL's own string syntax, hands the tokens to the
 shared token parser, and builds constructor calls through its builder
-trait, so the macro and `typeset::dsl::parse` share one grammar
+trait, so the macro and `Layout`'s `FromStr` share one grammar
 implementation and accept the same literals. A bare identifier is a
 variable: a `Layout` in scope, cloned. Errors are spanned `compile_error!`
 invocations. The crate depends on `proc-macro2` and `quote` alone; the

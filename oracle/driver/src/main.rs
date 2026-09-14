@@ -33,6 +33,8 @@ fn render(request: &str) -> Result<String, String> {
     let tab = number("a tab")?;
     let width = number("a width")?;
     let src = fields.next().ok_or("expected a layout")?;
-    let layout = typeset::dsl::parse(src).map_err(|e| e.to_string())?;
+    let layout: typeset::Layout = src
+        .parse()
+        .map_err(|e: typeset::dsl::ParseError| e.to_string())?;
     Ok(layout.compile().render(tab, width))
 }

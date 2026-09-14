@@ -62,7 +62,7 @@ cargo run --example full -p typeset-parser
 ## Documentation
 
 - [API reference and tutorial (docs.rs)](https://docs.rs/typeset)
-- [DSL reference (docs.rs)](https://docs.rs/typeset-parser): the `layout!` macro; the same language at run time is `typeset::dsl::parse`
+- [DSL reference (docs.rs)](https://docs.rs/typeset-parser): the `layout!` macro; the same language at run time is `Layout`'s `FromStr`
 - [Architecture](docs/context/ARCHITECTURE.md) and [development guide](docs/context/DEVELOPMENT.md)
 - [Contributing](.github/CONTRIBUTING.md)
 

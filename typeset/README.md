@@ -198,9 +198,9 @@ assert_eq!(doc.render(2, 5), "This\nis a\ntest");
 
 ## The DSL
 
-The same language as a string, parsed at run time by `typeset::dsl::parse`,
-or as a compile-time macro from the `typeset-parser` crate, where a bare
-identifier names a `Layout` in scope:
+The same language as a string, which `Layout` parses (`FromStr`) and
+prints (`Display`) at run time, or as a compile-time macro from the
+`typeset-parser` crate, where a bare identifier names a `Layout` in scope:
 
 ```text
 null      the empty layout
@@ -213,7 +213,8 @@ All binary operators share one precedence level and associate to the
 right; parenthesize for any other grouping.
 
 ```rust
-let layout = typeset::dsl::parse(r#"nest ("function" + "name()") @ "{ body }""#)?;
+let layout: typeset::Layout = r#"nest ("function" + "name()") @ "{ body }""#.parse()?;
+assert_eq!(layout.to_string(), r#"nest ("function" + "name()") @ "{ body }""#);
 assert_eq!(layout.compile().render(2, 40), "  function name()\n{ body }");
 # Ok::<(), typeset::dsl::ParseError>(())
 ```

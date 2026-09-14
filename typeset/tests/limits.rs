@@ -59,7 +59,7 @@ fn deep_fixed_chain_renders() {
 fn deep_parentheses_parse_without_recursion() {
     let depth = 100_000;
     let src = format!("{}\"x\"{}", "(".repeat(depth), ")".repeat(depth));
-    let layout = dsl::parse(&src).expect("parses");
+    let layout: Layout = src.parse().expect("parses");
     assert_eq!(layout.compile().render(2, 80), "x");
 }
 

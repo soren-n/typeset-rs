@@ -1,9 +1,10 @@
 //! The layout DSL.
 //!
-//! One grammar, two front ends: [`parse`] reads it from a string at run
-//! time, and the `typeset-parser` crate's `layout!` macro reads it from Rust
-//! tokens at compile time by feeding the same token parser (the hidden
-//! items of this module, a contract between the two crates).
+//! One grammar, two front ends: [`Layout`]'s `FromStr` reads it from a
+//! string at run time, and the `typeset-parser` crate's `layout!` macro
+//! reads it from Rust tokens at compile time by feeding the same token
+//! parser (the hidden items of this module, a contract between the two
+//! crates). `Layout`'s `Display` prints it.
 //!
 //! ```text
 //! expr    := atom (binop expr)?          binops share one level, right-assoc
@@ -18,11 +19,12 @@
 //! for a layout in scope) exist only in the macro.
 //!
 //! ```rust
-//! use typeset::dsl;
+//! use typeset::Layout;
 //!
-//! let layout = dsl::parse(r#"grp ("a" + "b") @ nest ("c" & "d")"#)?;
+//! let layout: Layout = r#"grp ("a" + "b") @ nest ("c" & "d")"#.parse()?;
+//! assert_eq!(layout.to_string(), r#"grp ("a" + "b") @ nest ("c" & "d")"#);
 //! assert_eq!(layout.compile().render(2, 80), "a b\n  cd");
-//! # Ok::<(), dsl::ParseError>(())
+//! # Ok::<(), typeset::dsl::ParseError>(())
 //! ```
 //!
 //! The parser is iterative: parenthesis depth costs heap, never native stack.
@@ -391,8 +393,11 @@ impl Build for Constructors {
 }
 
 /// Parses a layout from its DSL form.
-pub fn parse(src: &str) -> Result<Layout, ParseError> {
-    parse_tokens(tokenize(src)?, src.len(), &mut Constructors)
+impl std::str::FromStr for Layout {
+    type Err = ParseError;
+    fn from_str(src: &str) -> Result<Layout, ParseError> {
+        parse_tokens(tokenize(src)?, src.len(), &mut Constructors)
+    }
 }
 
 fn tokenize(src: &str) -> Result<Vec<(usize, Token<NoVar>)>, ParseError> {
@@ -512,6 +517,10 @@ fn scan_text(src: &str, start: usize) -> Result<(String, usize), ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse(src: &str) -> Result<Layout, ParseError> {
+        src.parse()
+    }
 
     fn fmt(src: &str, tab: usize, width: usize) -> String {
         parse(src).expect("parses").compile().render(tab, width)

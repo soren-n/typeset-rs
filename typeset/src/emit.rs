@@ -400,7 +400,7 @@ mod tests {
     /// compiling that DSL gives the same document.
     fn shape(layout: Layout) -> String {
         let dsl = format!("{:?}", layout.compile());
-        let again = crate::dsl::parse(&dsl).expect("the document prints as the DSL");
+        let again: Layout = dsl.parse().expect("the document prints as the DSL");
         assert_eq!(format!("{:?}", again.compile()), dsl, "not a normal form");
         dsl
     }

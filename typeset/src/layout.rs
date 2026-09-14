@@ -96,8 +96,8 @@ impl LayoutNode {
 /// left- or right-leaning chains. Being flat, a layout of any depth clones,
 /// drops, and prints without recursion.
 ///
-/// `Debug` prints the layout in the DSL of [`dsl`](crate::dsl), which
-/// parses back to the same layout.
+/// `Display` prints the layout in the DSL of [`dsl`](crate::dsl), and
+/// `FromStr` parses it back to the same layout; `Debug` is `Display`.
 #[derive(Clone)]
 #[must_use = "a layout does nothing until it is compiled"]
 pub struct Layout {
@@ -165,8 +165,14 @@ impl Layout {
     }
 }
 
-/// The DSL form of the layout.
 impl fmt::Debug for Layout {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+/// The DSL form of the layout.
+impl fmt::Display for Layout {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         dsl::write_dsl(f, self.root(), |id| match self.nodes[id] {
             LayoutNode::Text(range) => Shape::Text(range.slice(&self.text)),
@@ -207,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn debug_is_the_dsl_and_round_trips() {
+    fn display_is_the_dsl_and_round_trips() {
         let layout = line(
             comp(
                 fix(comp(text("a"), text("b"), Pad::Padded, Break::Fixed)),
@@ -222,15 +228,13 @@ mod tests {
             ),
             comp(null(), text("e\"f\n\u{1b}"), Pad::Padded, Break::Breakable),
         );
-        let dsl = format!("{layout:?}");
+        let dsl = layout.to_string();
         assert_eq!(
             dsl,
             "(fix (\"a\" !+ \"b\") + nest (grp (\"c\" & \"d\"))) @ \"\" + \"e\\\"f\\n\u{1b}\""
         );
-        assert_eq!(
-            format!("{:?}", crate::dsl::parse(&dsl).expect("parses")),
-            dsl
-        );
+        assert_eq!(dsl.parse::<Layout>().expect("parses").to_string(), dsl);
+        assert_eq!(format!("{layout:?}"), dsl);
     }
 
     #[test]

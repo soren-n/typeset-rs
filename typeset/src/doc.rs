@@ -191,7 +191,7 @@ impl Doc {
 #[cfg(test)]
 mod tests {
     use crate::constructors::{grp, line, null, pad, text, unpad};
-    use crate::dsl;
+    use crate::layout::Layout;
 
     #[test]
     fn debug_is_the_dsl_and_is_a_normal_form() {
@@ -203,7 +203,7 @@ mod tests {
         let printed = format!("{doc:?}");
         assert_eq!(printed, r#"("a" + "b") @ "" @ "x" + grp ("c" & "d\n")"#);
         assert_eq!(
-            format!("{:?}", dsl::parse(&printed).expect("parses").compile()),
+            format!("{:?}", printed.parse::<Layout>().expect("parses").compile()),
             printed
         );
         assert_eq!(format!("{:?}", null().compile()), r#""""#);

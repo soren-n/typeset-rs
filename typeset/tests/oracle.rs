@@ -5,7 +5,7 @@
 //! reference on hand-picked constructs; the oracle harness covers generated
 //! ones.
 
-use typeset::dsl;
+use typeset::Layout;
 
 const CASES: &str = include_str!("oracle.txt");
 
@@ -30,7 +30,8 @@ fn every_pinned_case_renders_as_the_reference_did() {
             lines.next();
         }
         let expected = expected.join("\n");
-        let actual = dsl::parse(layout)
+        let actual = layout
+            .parse::<Layout>()
             .unwrap_or_else(|e| panic!("{layout}: {e}"))
             .compile()
             .render(tab, width);

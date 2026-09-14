@@ -17,7 +17,7 @@ assert_eq!(layout.compile().render(2, 40), "Hello Alice\n  Indented content");
 ```
 
 The grammar has one implementation, `typeset::dsl`, which also parses the
-same language from a string at run time (`typeset::dsl::parse`, minus
+same language from a string at run time (`Layout`'s `FromStr`, minus
 variables). The macro feeds it Rust tokens, so the two cannot disagree.
 
 ## Syntax
