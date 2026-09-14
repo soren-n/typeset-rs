@@ -32,6 +32,9 @@ git history.
   and `quote` alone.
 * `typeset::dsl::ParseError` is a plain struct with public `at` (byte
   offset) and `message` fields; the accessor methods are gone.
+* `Layout`'s `Debug` prints the layout in the DSL (which parses back to
+  the same layout) instead of the derived arena dump. `Layout` and `Doc`
+  are `#[must_use]` types.
 * MSRV raised from 1.89.0 to 1.96.0.
 
 ### Added
@@ -45,32 +48,46 @@ git history.
 
 ### Changed
 
-* The compiler is two passes over flat arenas: `serialize` (lines of runs,
-  scope deltas as stack pushes and pops; a sequence with a hard line
-  beneath it is marked broken when it is built) and `structure` (the scope
-  graph as a side table over the item buffer, solved in place, then read
-  back straight into the `Doc` with two walks over a stack of open spines
-  that drop empty terms, decide the grp/seq identities, right-nest every
-  spine and factor shared nest/pack prefixes). Every item is a run of one
-  or more fixed-joined terms; a `Doc` run is one contiguous string. The
-  fix tree, the term leaf enum, the `Null` node, the rebuilt intermediate
-  and the lowering pass are gone (`null()` is `text("")`, which the
-  reference treats identically). Typed arena ids and `Option` links replace
-  sentinels throughout.
+* The compiler is two passes over flat arenas, pipelined one line at a
+  time: `serialize` (a DFS paused at each hard line, lending the line as
+  its terms with the glue between them: a composition with its pad, its
+  fixedness and its scope delta, or the hard line; a sequence with a hard
+  line beneath it is marked broken when it is built) and `structure` (per
+  line: the items read off the glue, the scope graph built and solved in
+  place, then read back straight into the `Doc` with two walks over a
+  stack of open spines that drop empty terms, decide the grp/seq
+  identities, right-nest every spine and factor shared nest/pack
+  wrappers). The intermediate is one line whatever the document's size.
+  Every item is a run of one or more fixed-joined terms; a `Doc` run is
+  one contiguous string, and a `Doc` object is measured as it is pushed.
+  The fix tree, the term leaf enum, the `Null` node, the rebuilt
+  intermediate and the lowering pass are gone (`null()` is `text("")`,
+  which the reference treats identically). Typed arena ids and `Option`
+  links replace sentinels throughout.
+* The nest/pack wrappers on the paths to the leaves and the grp/seq scope
+  chains are both parent-linked trees of one type; the path tree is a trie
+  (one `Nest` child per node), so the wrappers two terms share are the
+  chain of their lowest common ancestor. Factoring them out was
+  O(leaves × depth): a 1000-word chain under 4096 nests compiled in
+  2.45 ms and now compiles in 0.08 ms, flat in depth.
 * The renderer's head-of-line fit measure is a left-spine walk plus the
   precomputed extent; the measuring frame stack is gone.
 * `Layout` clones and drops in constant allocations regardless of size and
   compile stays constant-allocation; `json 8 d=5` compiles about twice as
   fast as 4.1.0 and renders 15-20% faster on pack- and scope-heavy
   documents.
-* Output is byte-identical to the OCaml reference on the QCheck identity
-  suite, whose generator is biased toward stacked grp/seq and which now
-  keeps one driver process for the run: 20000 cases in about a second. The
-  harness lives in `oracle/`; the pre-commit hook no longer skips it
-  silently. The profiling probes are harness-less bench targets sharing one
-  workload module with the scaling bench.
+* Output is byte-identical to the OCaml reference (pinned at
+  `typeset.0.4`) on the QCheck identity suite, whose generator is biased
+  toward stacked grp/seq and which now keeps one driver process for the
+  run: 20000 cases in about a second. The harness lives in `oracle/`; the
+  pre-commit hook no longer skips it silently. The exact-output cases are
+  a data file whose expected blocks `oracle/pin.sh` writes from the
+  reference, and the hook and CI fail when a block is stale. The profiling
+  probes are harness-less bench targets sharing one workload module with
+  the scaling bench.
 * Releases publish with `cargo publish --workspace`; `Cargo.lock` is
-  committed; the context docs are two files.
+  committed; the context docs are two files; `cargo deny` runs on every
+  change and weekly in place of the separate audit workflow.
 
 ## [4.1.0](https://github.com/soren-n/typeset-rs/compare/v4.0.0...v4.1.0) (2026-07-23)
 
