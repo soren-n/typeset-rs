@@ -9,7 +9,6 @@
 //! an id and replaces sentinel values.
 
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::ops::{Index, IndexMut};
@@ -57,11 +56,6 @@ impl<T> PartialOrd for Id<T> {
 impl<T> Ord for Id<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.raw.cmp(&other.raw)
-    }
-}
-impl<T> Hash for Id<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.raw.hash(state);
     }
 }
 impl<T> fmt::Debug for Id<T> {
@@ -192,8 +186,8 @@ impl<K, V: fmt::Debug> fmt::Debug for IdVec<K, V> {
 /// how every IR refers to a sub-sequence of a shared buffer without owning
 /// a `Vec` of its own.
 pub(crate) struct Range<T: ?Sized> {
-    pub(crate) start: u32,
-    pub(crate) end: u32,
+    start: u32,
+    end: u32,
     _marker: PhantomData<fn(&T)>,
 }
 
